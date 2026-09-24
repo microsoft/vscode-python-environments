@@ -5,7 +5,8 @@ import { PythonEnvironment, PythonProject, PythonProjectCreator, PythonProjectCr
 import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
 import { traceError } from '../../common/logging';
 import { showInputBoxWithButtons } from '../../common/window.apis';
-import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../envManagers';
+import type { PythonProjectManager } from '../projectManager';
 import {
     isCopilotInstalled,
     manageCopilotInstructionsFile,

@@ -9,7 +9,7 @@ import {
     ProjectItem,
     PythonEnvTreeItem,
 } from '../../../features/views/treeViewItems';
-import { InternalEnvironmentManager } from '../../../internal.api';
+import type { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
 
 suite('Copy Path To Clipboard', () => {
     let clipboardWriteTextStub: sinon.SinonStub;

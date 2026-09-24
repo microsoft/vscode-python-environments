@@ -1,16 +1,98 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { Uri } from 'vscode';
-import { PythonEnvironment, PythonProject } from '../../api';
+import { Memento, Terminal, Uri } from 'vscode';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
+import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
+import * as persistentState from '../../common/persistentState';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
-import { createAnyEnvironmentCommand, revealEnvInManagerView } from '../../features/envCommands';
+import * as windowApis from '../../common/window.apis';
+import {
+    clearEnvironmentCachesCommand,
+    clearScriptEnvironmentCacheCommand,
+    createAnyEnvironmentCommand,
+    removeEnvironmentCommand,
+    removePythonProject,
+    revealEnvInManagerView,
+    runInDedicatedTerminalCommand,
+    runInTerminalCommand,
+} from '../../features/envCommands';
+import * as settingHelpers from '../../features/settings/settingHelpers';
+import * as terminalRunner from '../../features/terminal/runInTerminal';
+import * as shellProviders from '../../features/terminal/shells/providers';
+import { ShellStartupScriptProvider } from '../../features/terminal/shells/startupProvider';
+import { TerminalManager } from '../../features/terminal/terminalManager';
 import { EnvManagerView } from '../../features/views/envManagersView';
 import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
-import { EnvironmentManagers, InternalEnvironmentManager, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../../features/envManagers';
+import type { PythonProjectManager } from '../../features/projectManager';
+import { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { setupNonThenable } from '../mocks/helper';
+import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
+
+suite('Environment removal command ownership', () => {
+    for (const managerId of [INLINE_SCRIPT_MANAGER_ID, 'ms-python.python:venv']) {
+        test(`routes a ${managerId} project environment without changing ordinary removal`, async () => {
+            const project: PythonProject = {
+                name: 'script',
+                uri: Uri.file(path.join(process.cwd(), 'removal-script.py')),
+            };
+            const environment = createMockPythonEnvironment({
+                managerId,
+                envPath: path.join(process.cwd(), 'removal-env'),
+            });
+            const remove = sinon.stub().resolves();
+            const owner = new InternalEnvironmentManager(managerId, {
+                name: 'test',
+                preferredPackageManagerId: 'ms-python.python:pip',
+                get: async () => environment,
+                set: async () => undefined,
+                getEnvironments: async () => [environment],
+                refresh: async () => undefined,
+                resolve: async () => environment,
+                remove,
+            });
+            const expectedContext = managerId === INLINE_SCRIPT_MANAGER_ID ? environment : project.uri;
+            const getEnvironmentManager = sinon.stub().callsFake((context) =>
+                context === expectedContext ? owner : undefined,
+            );
+            const managers: Partial<EnvironmentManagers> = { getEnvironmentManager };
+
+            await removeEnvironmentCommand(
+                new ProjectEnvironment(new ProjectItem(project), environment),
+                managers as EnvironmentManagers,
+            );
+
+            assert.ok(getEnvironmentManager.calledOnceWithExactly(expectedContext));
+            assert.ok(remove.calledOnceWithExactly(environment, undefined));
+        });
+    }
+
+    test('reports an unavailable inline owner instead of removing through a fallback manager', async () => {
+        const project: PythonProject = {
+            name: 'script',
+            uri: Uri.file(path.join(process.cwd(), 'removal-script.py')),
+        };
+        const environment = createMockPythonEnvironment({
+            managerId: INLINE_SCRIPT_MANAGER_ID,
+            envPath: path.join(process.cwd(), 'removal-env'),
+        });
+        const getEnvironmentManager = sinon.stub().returns(undefined);
+        const managers: Partial<EnvironmentManagers> = { getEnvironmentManager };
+
+        await assert.rejects(
+            removeEnvironmentCommand(
+                new ProjectEnvironment(new ProjectItem(project), environment),
+                managers as EnvironmentManagers,
+            ),
+            /not available to delete/,
+        );
+        assert.ok(getEnvironmentManager.calledOnceWithExactly(environment));
+    });
+});
 
 suite('Create Any Environment Command Tests', () => {
     let em: typeMoq.IMock<EnvironmentManagers>;
@@ -179,6 +261,206 @@ suite('Create Any Environment Command Tests', () => {
     });
 });
 
+suite('Remove Python Project Command Tests', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('clears the active environment before removing the project', async () => {
+        const calls: string[] = [];
+        const project: PythonProject = {
+            uri: Uri.file('/some/test/workspace/project'),
+            name: 'project',
+        };
+        const item = new ProjectItem(project);
+        const envManagers = {
+            setEnvironment: sinon.stub().callsFake(async () => {
+                calls.push('clearEnvironment');
+            }),
+        } as unknown as EnvironmentManagers;
+        const projectManager = {
+            remove: sinon.stub().callsFake(() => {
+                calls.push('removeProject');
+            }),
+        } as unknown as PythonProjectManager;
+        sinon.stub(settingHelpers, 'removePythonProjectSetting').callsFake(async () => {
+            calls.push('removeSetting');
+        });
+
+        await removePythonProject(item, projectManager, envManagers);
+
+        assert.deepStrictEqual(calls, ['clearEnvironment', 'removeSetting', 'removeProject']);
+        assert.ok(
+            (envManagers.setEnvironment as sinon.SinonStub).calledOnceWithExactly(project.uri, undefined),
+            'Should clear the project environment through the central manager',
+        );
+    });
+});
+
+suite('Clear Script Environment Cache Command Tests', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('cancels without clearing the cache or touching project settings', async () => {
+        const clearInlineScriptCache = sinon.stub().resolves();
+        const envManagers = {
+            getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
+                supportsClearCache: () => true,
+            }),
+            clearInlineScriptCache,
+        } as unknown as EnvironmentManagers;
+        sinon.stub(windowApis, 'showWarningMessage').resolves(undefined);
+
+        await clearScriptEnvironmentCacheCommand(envManagers);
+
+        sinon.assert.notCalled(clearInlineScriptCache);
+    });
+
+    test('delegates coordinated inline cache and project cleanup', async () => {
+        const clearInlineScriptCache = sinon.stub().resolves();
+        const envManagers = {
+            getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
+                supportsClearCache: () => true,
+            }),
+            clearInlineScriptCache,
+        } as unknown as EnvironmentManagers;
+        sinon.stub(windowApis, 'showWarningMessage').resolves('Clear Cache' as never);
+
+        await clearScriptEnvironmentCacheCommand(envManagers);
+
+        sinon.assert.calledOnce(clearInlineScriptCache);
+    });
+
+    test('propagates coordinated cleanup failures', async () => {
+        const clearInlineScriptCache = sinon.stub().rejects(new Error('one cache entry could not be deleted'));
+        const envManagers = {
+            getEnvironmentManager: sinon.stub().withArgs(INLINE_SCRIPT_MANAGER_ID).returns({
+                supportsClearCache: () => true,
+            }),
+            clearInlineScriptCache,
+        } as unknown as EnvironmentManagers;
+        sinon.stub(windowApis, 'showWarningMessage').resolves('Clear Cache' as never);
+
+        await assert.rejects(clearScriptEnvironmentCacheCommand(envManagers), /could not be deleted/);
+
+        sinon.assert.calledOnce(clearInlineScriptCache);
+    });
+});
+
+suite('Clear Environment Caches Command Tests', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    function makeWorkspaceMemento(store: Map<string, unknown>): Memento {
+        return {
+            get: <T>(key: string) => store.get(key) as T | undefined,
+            update: async (key: string, value: unknown) => {
+                if (value === undefined) {
+                    store.delete(key);
+                } else {
+                    store.set(key, value);
+                }
+            },
+            keys: () => [...store.keys()],
+        } as unknown as Memento;
+    }
+
+    test('generic clear preserves the inline association key while clearing other workspace/global state and managers', async () => {
+        const inlineAssociations = { 'C:\\workspace\\script.py': 'C:\\cache\\python.exe' };
+        const store = new Map<string, unknown>([
+            [INLINE_SCRIPT_ENVS_KEY, inlineAssociations],
+            ['other-workspace-state', { stale: true }],
+        ]);
+        const workspaceState = makeWorkspaceMemento(store);
+
+        const calls: string[] = [];
+        let clearedWorkspaceKeys: readonly string[] | undefined;
+        let globalCleared = false;
+        const workspacePersistent = {
+            clear: sinon.stub().callsFake(async (keys?: string[]) => {
+                calls.push('workspace');
+                clearedWorkspaceKeys = keys;
+                for (const key of keys ?? [...store.keys()]) {
+                    store.delete(key);
+                }
+            }),
+        } as unknown as persistentState.PersistentState;
+        const globalPersistent = {
+            clear: sinon.stub().callsFake(async () => {
+                calls.push('global');
+                globalCleared = true;
+            }),
+        } as unknown as persistentState.PersistentState;
+        sinon.stub(persistentState, 'getWorkspacePersistentState').resolves(workspacePersistent);
+        sinon.stub(persistentState, 'getGlobalPersistentState').resolves(globalPersistent);
+
+        const envManagers = {
+            clearCache: sinon.stub().callsFake(async () => {
+                calls.push('managers');
+                // The inline association key must still be present when non-inline managers run.
+                assert.deepStrictEqual(store.get(INLINE_SCRIPT_ENVS_KEY), inlineAssociations);
+            }),
+        } as unknown as EnvironmentManagers;
+        const startupProvider = {
+            clearCache: sinon.stub().callsFake(async () => {
+                calls.push('shells');
+            }),
+        } as unknown as ShellStartupScriptProvider;
+        sinon.stub(shellProviders, 'clearShellProfileCache').callsFake(async (providers) => {
+            await Promise.all(providers.map((provider) => provider.clearCache()));
+        });
+
+        await clearEnvironmentCachesCommand(envManagers, [startupProvider], workspaceState);
+
+        // Only the inline key is excluded from the explicit workspace key list handed to clear().
+        assert.deepStrictEqual(clearedWorkspaceKeys, ['other-workspace-state']);
+        assert.strictEqual(globalCleared, true);
+        // Persistent state (workspace + global) is cleared before managers, which run before shells.
+        assert.ok(calls.indexOf('managers') > calls.indexOf('workspace'), 'managers run after workspace clear');
+        assert.ok(calls.indexOf('managers') > calls.indexOf('global'), 'managers run after global clear');
+        assert.ok(calls.indexOf('shells') > calls.indexOf('managers'), 'shells run after managers');
+        assert.strictEqual(calls[calls.length - 1], 'shells');
+        // Inline association key preserved; other workspace key cleared.
+        assert.deepStrictEqual(store.get(INLINE_SCRIPT_ENVS_KEY), inlineAssociations);
+        assert.strictEqual(store.has('other-workspace-state'), false);
+        sinon.assert.calledOnceWithExactly(envManagers.clearCache as sinon.SinonStub, undefined);
+    });
+
+    test('generic clear preserves a dormant inline association key when the inline manager is not registered', async () => {
+        const inlineAssociations = { 'C:\\workspace\\script.py': 'C:\\cache\\python.exe' };
+        const store = new Map<string, unknown>([[INLINE_SCRIPT_ENVS_KEY, inlineAssociations]]);
+        const workspaceState = makeWorkspaceMemento(store);
+
+        let clearedWorkspaceKeys: readonly string[] | undefined;
+        const workspacePersistent = {
+            clear: sinon.stub().callsFake(async (keys?: string[]) => {
+                clearedWorkspaceKeys = keys;
+                for (const key of keys ?? [...store.keys()]) {
+                    store.delete(key);
+                }
+            }),
+        } as unknown as persistentState.PersistentState;
+        const globalPersistent = {
+            clear: sinon.stub().resolves(),
+        } as unknown as persistentState.PersistentState;
+        sinon.stub(persistentState, 'getWorkspacePersistentState').resolves(workspacePersistent);
+        sinon.stub(persistentState, 'getGlobalPersistentState').resolves(globalPersistent);
+
+        const envManagers = {
+            clearCache: sinon.stub().resolves(),
+        } as unknown as EnvironmentManagers;
+        sinon.stub(shellProviders, 'clearShellProfileCache').resolves();
+
+        await clearEnvironmentCachesCommand(envManagers, [], workspaceState);
+
+        // The only workspace key is the inline key, so the explicit list is empty and it is preserved.
+        assert.deepStrictEqual(clearedWorkspaceKeys, []);
+        assert.deepStrictEqual(store.get(INLINE_SCRIPT_ENVS_KEY), inlineAssociations);
+    });
+});
+
 suite('Reveal Env In Manager View Command Tests', () => {
     let managerView: typeMoq.IMock<EnvManagerView>;
     let executeCommandStub: sinon.SinonStub;
@@ -222,5 +504,139 @@ suite('Reveal Env In Manager View Command Tests', () => {
         // Assert
         assert.ok(executeCommandStub.calledOnceWith('env-managers.focus'), 'Should focus the env-managers view');
         managerView.verify((m) => m.reveal(environment), typeMoq.Times.once());
+    });
+});
+
+suite('Run In Terminal Command Tests', () => {
+    const scriptUri = Uri.file('/some/test/workspace/folder/script.py');
+    const project: PythonProject = {
+        uri: Uri.file('/some/test/workspace/folder'),
+        name: 'test-folder',
+    };
+
+    let environment: PythonEnvironment;
+    let resolvedEnvironment: PythonEnvironment;
+    let terminal: Terminal;
+    let api: PythonEnvironmentApi;
+    let terminalManager: TerminalManager;
+    let getPythonProject: sinon.SinonStub;
+    let getEnvironment: sinon.SinonStub;
+    let resolveEnvironment: sinon.SinonStub;
+    let getProjectTerminal: sinon.SinonStub;
+    let getDedicatedTerminal: sinon.SinonStub;
+    let runInTerminalStub: sinon.SinonStub;
+
+    setup(() => {
+        environment = createMockPythonEnvironment({
+            envPath: '/some/test/env/python',
+            id: 'discovered-environment',
+        });
+        resolvedEnvironment = createMockPythonEnvironment({
+            envPath: '/some/test/resolved-env/python',
+            id: 'resolved-environment',
+        });
+        terminal = {} as Terminal;
+
+        getPythonProject = sinon.stub().returns(project);
+        getEnvironment = sinon.stub().resolves(environment);
+        resolveEnvironment = sinon.stub().resolves(resolvedEnvironment);
+        api = {
+            getPythonProject,
+            getEnvironment,
+            resolveEnvironment,
+        } as unknown as PythonEnvironmentApi;
+
+        getProjectTerminal = sinon.stub().resolves(terminal);
+        getDedicatedTerminal = sinon.stub().resolves(terminal);
+        terminalManager = {
+            getProjectTerminal,
+            getDedicatedTerminal,
+        } as unknown as TerminalManager;
+
+        runInTerminalStub = sinon.stub(terminalRunner, 'runInTerminal').resolves();
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('successful normal terminal dispatch resolves and uses the resolved environment', async () => {
+        const result = await runInTerminalCommand(scriptUri, api, terminalManager);
+
+        assert.strictEqual(result, undefined);
+        sinon.assert.calledOnceWithExactly(resolveEnvironment, environment.environmentPath);
+        sinon.assert.calledOnceWithExactly(getProjectTerminal, project, resolvedEnvironment);
+        sinon.assert.calledOnce(runInTerminalStub);
+        const [receivedEnvironment, receivedTerminal, receivedOptions] = runInTerminalStub.firstCall.args;
+        assert.strictEqual(receivedEnvironment, resolvedEnvironment);
+        assert.strictEqual(receivedTerminal, terminal);
+        assert.deepStrictEqual(receivedOptions, {
+            cwd: project.uri,
+            args: [scriptUri.fsPath],
+            show: true,
+        });
+    });
+
+    test('successful dedicated terminal dispatch resolves and falls back to the discovered environment', async () => {
+        resolveEnvironment.resolves(undefined);
+
+        const result = await runInDedicatedTerminalCommand(scriptUri, api, terminalManager);
+
+        assert.strictEqual(result, undefined);
+        sinon.assert.calledOnceWithExactly(resolveEnvironment, environment.environmentPath);
+        sinon.assert.calledOnceWithExactly(getDedicatedTerminal, scriptUri, project, environment);
+        sinon.assert.calledOnce(runInTerminalStub);
+        const [receivedEnvironment, receivedTerminal, receivedOptions] = runInTerminalStub.firstCall.args;
+        assert.strictEqual(receivedEnvironment, environment);
+        assert.strictEqual(receivedTerminal, terminal);
+        assert.deepStrictEqual(receivedOptions, {
+            cwd: project.uri,
+            args: [scriptUri.fsPath],
+            show: true,
+        });
+    });
+
+    test('normal terminal dispatch rejects non-URI and missing project/environment contexts', async () => {
+        await assert.rejects(
+            runInTerminalCommand('not-a-uri', api, terminalManager),
+            /Invalid context for run-in-terminal/,
+        );
+        sinon.assert.notCalled(getPythonProject);
+        sinon.assert.notCalled(getEnvironment);
+
+        getPythonProject.returns(undefined);
+        await assert.rejects(runInTerminalCommand(scriptUri, api, terminalManager), /Invalid context for run-in-terminal/);
+
+        getPythonProject.returns(project);
+        getEnvironment.resolves(undefined);
+        await assert.rejects(runInTerminalCommand(scriptUri, api, terminalManager), /Invalid context for run-in-terminal/);
+
+        sinon.assert.notCalled(getProjectTerminal);
+        sinon.assert.notCalled(runInTerminalStub);
+    });
+
+    test('dedicated terminal dispatch rejects non-URI and missing project/environment contexts', async () => {
+        await assert.rejects(
+            runInDedicatedTerminalCommand('not-a-uri', api, terminalManager),
+            /Invalid context for run-in-terminal/,
+        );
+        sinon.assert.notCalled(getPythonProject);
+        sinon.assert.notCalled(getEnvironment);
+
+        getPythonProject.returns(undefined);
+        await assert.rejects(
+            runInDedicatedTerminalCommand(scriptUri, api, terminalManager),
+            /Invalid context for run-in-terminal/,
+        );
+
+        getPythonProject.returns(project);
+        getEnvironment.resolves(undefined);
+        await assert.rejects(
+            runInDedicatedTerminalCommand(scriptUri, api, terminalManager),
+            /Invalid context for run-in-terminal/,
+        );
+
+        sinon.assert.notCalled(getDedicatedTerminal);
+        sinon.assert.notCalled(runInTerminalStub);
     });
 });

@@ -2,7 +2,7 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
-    "version": "1.37.0",
+    "version": "1.38.0",
     "publisher": "ms-python",
     "engines": {
         "vscode": "^1.110.0-20260204"
@@ -246,6 +246,18 @@
                 "icon": "$(trash)"
             },
             {
+                "command": "python-envs.clearScriptEnvCache",
+                "title": "%python-envs.clearScriptEnvCache.title%",
+                "category": "Python Envs",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "python-envs.setupInlineScriptEnvs",
+                "title": "%python-envs.setupInlineScriptEnvs.title%",
+                "category": "Python Envs",
+                "icon": "$(tools)"
+            },
+            {
                 "command": "python-envs.runInTerminal",
                 "title": "%python-envs.runInTerminal.title%",
                 "category": "Python Envs",
@@ -415,6 +427,14 @@
                     "when": "config.python.useEnvironmentsExtension != false"
                 },
                 {
+                    "command": "python-envs.clearScriptEnvCache",
+                    "when": "pythonEnvsInlineScriptsEnabled"
+                },
+                {
+                    "command": "python-envs.setupInlineScriptEnvs",
+                    "when": "pythonEnvsInlineScriptsEnabled"
+                },
+                {
                     "command": "python-envs.terminal.activate",
                     "when": "pythonTerminalActivation"
                 },
@@ -503,7 +523,7 @@
                 {
                     "command": "python-envs.packages",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                    "when": "view == env-managers && viewItem =~ /;managePackages;/"
                 },
                 {
                     "command": "python-envs.copyEnvPath",

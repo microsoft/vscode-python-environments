@@ -28,7 +28,7 @@ export abstract class PackageManagerCommand {
     protected pythonExecutable: string;
     protected cwd?: string;
     protected log?: LogOutputChannel;
-    protected timeout: number = 300000;
+    protected timeout: number | undefined;
     protected config?: WorkspaceConfiguration;
 
     constructor(options: CommandConstructorOptions) {

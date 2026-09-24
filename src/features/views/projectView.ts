@@ -13,7 +13,8 @@ import { PythonEnvironment } from '../../api';
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidChangeConfiguration } from '../../common/workspace.apis';
-import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../envManagers';
+import type { PythonProjectManager } from '../projectManager';
 import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     GlobalProjectItem,
@@ -244,7 +245,8 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
                 return [new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackageManager)];
             }
 
-            let packages = await pkgManager.refresh(environment);
+            await pkgManager.refresh(environment);
+            const packages = await pkgManager.getPackages(environment);
             if (!packages) {
                 return [new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackages)];
             }

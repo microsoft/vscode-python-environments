@@ -1,14 +1,48 @@
 import * as path from 'path';
 import { ConfigurationScope, ConfigurationTarget, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonProject } from '../../api';
-import { DEFAULT_ENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
+import {
+    DEFAULT_ENV_MANAGER_ID,
+    DEFAULT_PACKAGE_MANAGER_ID,
+    INLINE_SCRIPT_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+} from '../../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import * as workspaceApis from '../../common/workspace.apis';
-import { PythonProjectManager, PythonProjectSettings } from '../../internal.api';
+import type {
+    InlineScriptProjectRegistrationKind,
+    InlineScriptProjectRegistrationMarker,
+    PythonProjectManager,
+    PythonProjectSettings,
+} from '../projectManager';
+
+let inlineScriptProjectSettingsQueue: Promise<void> = Promise.resolve();
+
+function enqueueInlineScriptProjectSettingsMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const run = inlineScriptProjectSettingsQueue.then(operation);
+    inlineScriptProjectSettingsQueue = run.then(
+        () => undefined,
+        () => undefined,
+    );
+    return run;
+}
+
+function resolveProjectSettingUri(
+    setting: PythonProjectSettings,
+    workspaceFolder: WorkspaceFolder,
+    allWorkspaceFolders: readonly WorkspaceFolder[] = workspaceApis.getWorkspaceFolders() ?? [workspaceFolder],
+): Uri | undefined {
+    const resolvedWorkspaceFolder = setting.workspace
+        ? allWorkspaceFolders.find((candidate) => candidate.name === setting.workspace)
+        : workspaceFolder;
+    return resolvedWorkspaceFolder
+        ? Uri.file(path.resolve(resolvedWorkspaceFolder.uri.fsPath, setting.path))
+        : undefined;
+}
 
 function getSettings(
     wm: PythonProjectManager,
@@ -22,10 +56,34 @@ function getSettings(
         const w = workspaceApis.getWorkspaceFolder(scope);
         if (pw && w) {
             const pwPath = normalizePath(pw.uri.fsPath);
-            return overrides.find((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
+            return overrides.find(
+                (s) =>
+                    (!s.workspace || s.workspace === w.name) &&
+                    normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath,
+            );
         }
     }
     return undefined;
+}
+
+export function getExactPythonProjectSetting(
+    wm: PythonProjectManager,
+    scope: Uri,
+): PythonProjectSettings | undefined {
+    const project = wm.get(scope);
+    if (!project || normalizePath(project.uri.fsPath) !== normalizePath(scope.fsPath)) {
+        return undefined;
+    }
+    const config = workspaceApis.getConfiguration('python-envs', scope);
+    return config && typeof config.get === 'function' ? getSettings(wm, config, scope) : undefined;
+}
+
+export function getProjectEnvironmentManagerSetting(
+    wm: PythonProjectManager,
+    scope: Uri,
+): string | undefined {
+    const setting = getExactPythonProjectSetting(wm, scope)?.envManager;
+    return setting ? setting : undefined;
 }
 
 let DEFAULT_ENV_MANAGER_BROKEN = false;
@@ -109,7 +167,20 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
     const workspaces = new Map<WorkspaceFolder, EditAllManagerSettingsInternal[]>();
     const projectEdits = edits.filter((e): e is EditAllManagerSettingsInternal => !!e.project);
     traceIgnoredGlobalManagerEdits('setAllManagerSettings', edits.length - projectEdits.length);
-    projectEdits.forEach((e) => {
+    const handledManagedEdits = await Promise.all(
+        projectEdits.map((edit) =>
+            edit.envManager === INLINE_SCRIPT_MANAGER_ID
+                ? Promise.resolve(false)
+                : updateManagedInlineScriptProjectSetting(edit.project, {
+                      envManager: edit.envManager,
+                      packageManager: edit.packageManager,
+                  }),
+        ),
+    );
+    projectEdits.forEach((e, index) => {
+        if (handledManagedEdits[index]) {
+            return;
+        }
         const w = workspaceApis.getWorkspaceFolder(e.project.uri);
         if (w) {
             workspaces.set(w, [
@@ -143,7 +214,11 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
         es.forEach((e) => {
             const pwPath = normalizePath(e.project.uri.fsPath);
             const isRoot = normalizePath(w.uri.fsPath) === pwPath;
-            const index = overrides.findIndex((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
+            const index = overrides.findIndex(
+                (s) =>
+                    (!s.workspace || s.workspace === w.name) &&
+                    normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath,
+            );
 
             // For workspace root in single-folder workspaces (no workspaceFile),
             // use default settings instead of pythonProjects entries
@@ -163,6 +238,9 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
             } else if (index >= 0) {
                 overrides[index].envManager = e.envManager;
                 overrides[index].packageManager = e.packageManager;
+                if (e.envManager !== INLINE_SCRIPT_MANAGER_ID) {
+                    delete overrides[index]._inlineScriptRegistration;
+                }
                 // Fix empty path to "." for workspace root (migration from buggy entries)
                 if (overrides[index].path === '') {
                     overrides[index].path = '.';
@@ -225,7 +303,19 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
     const workspaces = new Map<WorkspaceFolder, EditEnvManagerSettingsInternal[]>();
     const projectEdits = edits.filter((e): e is EditEnvManagerSettingsInternal => !!e.project);
     traceIgnoredGlobalManagerEdits('setEnvironmentManager', edits.length - projectEdits.length);
-    projectEdits.forEach((e) => {
+    const handledManagedEdits = await Promise.all(
+        projectEdits.map((edit) =>
+            edit.envManager === INLINE_SCRIPT_MANAGER_ID
+                ? Promise.resolve(false)
+                : updateManagedInlineScriptProjectSetting(edit.project, {
+                      envManager: edit.envManager,
+                  }),
+        ),
+    );
+    projectEdits.forEach((e, index) => {
+        if (handledManagedEdits[index]) {
+            return;
+        }
         const w = workspaceApis.getWorkspaceFolder(e.project.uri);
         if (w) {
             workspaces.set(w, [...(workspaces.get(w) || []), { project: e.project, envManager: e.envManager }]);
@@ -252,9 +342,16 @@ export async function setEnvironmentManager(edits: EditEnvManagerSettings[]): Pr
 
         es.forEach((e) => {
             const pwPath = normalizePath(e.project.uri.fsPath);
-            const index = overrides.findIndex((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
+            const index = overrides.findIndex(
+                (s) =>
+                    (!s.workspace || s.workspace === w.name) &&
+                    normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath,
+            );
             if (index >= 0) {
                 overrides[index].envManager = e.envManager;
+                if (e.envManager !== INLINE_SCRIPT_MANAGER_ID) {
+                    delete overrides[index]._inlineScriptRegistration;
+                }
                 projectsModified = true;
             } else if (config.get('defaultEnvManager') !== e.envManager) {
                 promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
@@ -338,6 +435,333 @@ export interface EditProjectSettings {
     envManager?: string;
     packageManager?: string;
     workspace?: string;
+}
+
+function matchesProjectSettingEdit(
+    setting: PythonProjectSettings,
+    edit: EditProjectSettings,
+    workspaceFolder: WorkspaceFolder,
+): boolean {
+    const projectPath = normalizePath(edit.project.uri.fsPath);
+    const settingUri = resolveProjectSettingUri(setting, workspaceFolder);
+    if (!settingUri || normalizePath(settingUri.fsPath) !== projectPath) {
+        return false;
+    }
+    if (edit.workspace !== undefined && setting.workspace !== edit.workspace) {
+        return false;
+    }
+    if (edit.envManager !== undefined && setting.envManager !== edit.envManager) {
+        return false;
+    }
+    if (edit.packageManager !== undefined && setting.packageManager !== edit.packageManager) {
+        return false;
+    }
+    return true;
+}
+
+function cloneProjectSettings(
+    settings: readonly PythonProjectSettings[] | undefined,
+): PythonProjectSettings[] | undefined {
+    return settings?.map((setting) => ({ ...setting }));
+}
+
+type InlineScriptProjectSettingsTarget =
+    | ConfigurationTarget.Global
+    | ConfigurationTarget.Workspace
+    | ConfigurationTarget.WorkspaceFolder;
+
+export interface InlineScriptPythonProjectRegistration {
+    readonly kind: InlineScriptProjectRegistrationKind;
+    readonly changed: boolean;
+    readonly workspaceFolder: WorkspaceFolder;
+    readonly target: InlineScriptProjectSettingsTarget;
+}
+
+export function getManagedInlineScriptProjectRegistration(
+    setting: PythonProjectSettings | undefined,
+): InlineScriptProjectRegistrationMarker | undefined {
+    const marker = setting?._inlineScriptRegistration;
+    return marker?.kind === 'created' || marker?.kind === 'adopted' ? marker : undefined;
+}
+
+function getInlineScriptProjectSettingsTarget(config: WorkspaceConfiguration): InlineScriptProjectSettingsTarget {
+    const inspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
+    if (inspect?.workspaceFolderValue !== undefined) {
+        return ConfigurationTarget.WorkspaceFolder;
+    }
+    if (inspect?.workspaceValue !== undefined) {
+        return ConfigurationTarget.Workspace;
+    }
+    if (inspect?.globalValue !== undefined) {
+        return ConfigurationTarget.Global;
+    }
+    return workspaceApis.getWorkspaceFile()
+        ? ConfigurationTarget.WorkspaceFolder
+        : ConfigurationTarget.Workspace;
+}
+
+function getExplicitProjectSettings(
+    config: WorkspaceConfiguration,
+    target: InlineScriptProjectSettingsTarget,
+): PythonProjectSettings[] | undefined {
+    const inspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
+    if (!inspect) {
+        return target === ConfigurationTarget.Workspace
+            ? cloneProjectSettings(config.get<PythonProjectSettings[]>('pythonProjects', []))
+            : undefined;
+    }
+    if (target === ConfigurationTarget.Global) {
+        return cloneProjectSettings(inspect.globalValue);
+    }
+    if (target === ConfigurationTarget.Workspace) {
+        return cloneProjectSettings(inspect.workspaceValue);
+    }
+    return cloneProjectSettings(inspect.workspaceFolderValue);
+}
+
+function getDefinedProjectSettingsTargets(config: WorkspaceConfiguration): InlineScriptProjectSettingsTarget[] {
+    const inspect = config.inspect<PythonProjectSettings[]>('pythonProjects');
+    if (!inspect) {
+        return [ConfigurationTarget.Workspace];
+    }
+    return [
+        inspect.workspaceFolderValue !== undefined ? ConfigurationTarget.WorkspaceFolder : undefined,
+        inspect.workspaceValue !== undefined ? ConfigurationTarget.Workspace : undefined,
+        inspect.globalValue !== undefined ? ConfigurationTarget.Global : undefined,
+    ].filter((target): target is InlineScriptProjectSettingsTarget => target !== undefined);
+}
+
+function getInlineScriptProjectSettingPath(
+    project: PythonProject,
+    workspaceFolder: WorkspaceFolder,
+    target: InlineScriptProjectSettingsTarget,
+): string {
+    return target === ConfigurationTarget.Global
+        ? project.uri.fsPath
+        : path.relative(workspaceFolder.uri.fsPath, project.uri.fsPath).replace(/\\/g, '/') || '.';
+}
+
+async function writeProjectSettings(
+    config: WorkspaceConfiguration,
+    target: InlineScriptProjectSettingsTarget,
+    settings: readonly PythonProjectSettings[],
+): Promise<void> {
+    await config.update('pythonProjects', settings.length > 0 ? settings : undefined, target);
+}
+
+function updateManagedInlineScriptProjectSetting(
+    project: PythonProject,
+    updates: Partial<Pick<PythonProjectSettings, 'envManager' | 'packageManager'>>,
+): Promise<boolean> {
+    return enqueueInlineScriptProjectSettingsMutation(async () => {
+        const workspaceFolder = workspaceApis.getWorkspaceFolder(project.uri);
+        if (!workspaceFolder) {
+            return false;
+        }
+        const config = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri);
+        for (const target of getDefinedProjectSettingsTargets(config)) {
+            const settings = getExplicitProjectSettings(config, target);
+            if (!settings) {
+                continue;
+            }
+            const index = settings.findIndex((setting) =>
+                matchesProjectSettingEdit(setting, { project }, workspaceFolder),
+            );
+            if (index < 0 || !getManagedInlineScriptProjectRegistration(settings[index])) {
+                continue;
+            }
+            settings[index] = { ...settings[index], ...updates };
+            delete settings[index]._inlineScriptRegistration;
+            await writeProjectSettings(config, target, settings);
+            return true;
+        }
+        return false;
+    });
+}
+
+export function registerInlineScriptPythonProjectSetting(
+    wm: PythonProjectManager,
+    project: PythonProject,
+): Promise<InlineScriptPythonProjectRegistration | undefined> {
+    return enqueueInlineScriptProjectSettingsMutation(async () => {
+        const workspaceFolder = workspaceApis.getWorkspaceFolder(project.uri);
+        if (!workspaceFolder) {
+            traceInfo(
+                `Unable to register inline-script project ${project.uri.fsPath} because it is outside an open workspace.`,
+            );
+            return undefined;
+        }
+
+        const config = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri);
+        const target = getInlineScriptProjectSettingsTarget(config);
+        const settings = getExplicitProjectSettings(config, target) ?? [];
+        const index = settings.findIndex((setting) =>
+            matchesProjectSettingEdit(setting, { project }, workspaceFolder),
+        );
+        if (index >= 0) {
+            const marker = getManagedInlineScriptProjectRegistration(settings[index]);
+            if (marker) {
+                return { kind: marker.kind, changed: false, workspaceFolder, target };
+            }
+            settings[index]._inlineScriptRegistration = { kind: 'adopted' };
+            await writeProjectSettings(config, target, settings);
+            return { kind: 'adopted', changed: true, workspaceFolder, target };
+        }
+
+        settings.push({
+            path: getInlineScriptProjectSettingPath(project, workspaceFolder, target),
+            envManager: getDefaultEnvManagerSetting(wm, project.uri),
+            packageManager: getDefaultPkgManagerSetting(wm, project.uri),
+            workspace:
+                target === ConfigurationTarget.Workspace &&
+                (workspaceApis.getWorkspaceFolders()?.length ?? 0) > 1
+                    ? workspaceFolder.name
+                    : undefined,
+            _inlineScriptRegistration: { kind: 'created' },
+        });
+        await writeProjectSettings(config, target, settings);
+        return { kind: 'created', changed: true, workspaceFolder, target };
+    });
+}
+
+async function cleanupInlineScriptPythonProjectSetting(
+    project: PythonProject,
+    workspaceFolder: WorkspaceFolder,
+    target: InlineScriptProjectSettingsTarget,
+    expectedKind?: InlineScriptProjectRegistrationKind,
+): Promise<{ changed: boolean; removeProject: boolean }> {
+    const config = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri);
+    const settings = getExplicitProjectSettings(config, target);
+    if (!settings) {
+        return { changed: false, removeProject: false };
+    }
+    const index = settings.findIndex((setting) =>
+        matchesProjectSettingEdit(setting, { project }, workspaceFolder),
+    );
+    const marker = index >= 0 ? getManagedInlineScriptProjectRegistration(settings[index]) : undefined;
+    if (!marker || (expectedKind && marker.kind !== expectedKind)) {
+        return { changed: false, removeProject: false };
+    }
+    if (marker.kind === 'created') {
+        settings.splice(index, 1);
+    } else {
+        delete settings[index]._inlineScriptRegistration;
+    }
+    await writeProjectSettings(config, target, settings);
+    return { changed: true, removeProject: marker.kind === 'created' };
+}
+
+export function rollbackInlineScriptPythonProjectSetting(
+    project: PythonProject,
+    registration: InlineScriptPythonProjectRegistration,
+): Promise<boolean> {
+    if (!registration.changed) {
+        return Promise.resolve(false);
+    }
+    return enqueueInlineScriptProjectSettingsMutation(async () =>
+        (
+            await cleanupInlineScriptPythonProjectSetting(
+            project,
+            registration.workspaceFolder,
+            registration.target,
+            registration.kind,
+            )
+        ).removeProject,
+    );
+}
+
+export function removeManagedInlineScriptPythonProjectSetting(project: PythonProject): Promise<boolean> {
+    return enqueueInlineScriptProjectSettingsMutation(async () => {
+        const workspaceFolder = workspaceApis.getWorkspaceFolder(project.uri);
+        if (!workspaceFolder) {
+            return false;
+        }
+        const config = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri);
+        for (const target of getDefinedProjectSettingsTargets(config)) {
+            const result = await cleanupInlineScriptPythonProjectSetting(project, workspaceFolder, target);
+            if (result.changed) {
+                return result.removeProject;
+            }
+        }
+        return false;
+    });
+}
+
+export function removeInlineScriptPythonProjectSettings(
+    currentProjects: readonly PythonProject[],
+): Promise<PythonProject[]> {
+    return enqueueInlineScriptProjectSettingsMutation(async () => {
+        const workspaceFolders = workspaceApis.getWorkspaceFolders() ?? [];
+        const currentProjectsByPath = new Map(
+            currentProjects.map((project) => [normalizePath(project.uri.fsPath), project] as const),
+        );
+        const createdProjectPaths = new Set<string>();
+        const remainingProjectPaths = new Set<string>();
+
+        const cleanupTarget = async (
+            config: WorkspaceConfiguration,
+            target: InlineScriptProjectSettingsTarget,
+            workspaceFolder: WorkspaceFolder | undefined,
+        ) => {
+            const settings = getExplicitProjectSettings(config, target);
+            if (!settings) {
+                return;
+            }
+            let changed = false;
+            const remaining: PythonProjectSettings[] = [];
+            for (const setting of settings) {
+                const marker = getManagedInlineScriptProjectRegistration(setting);
+                if (!marker) {
+                    remaining.push(setting);
+                    const uri = workspaceFolder
+                        ? resolveProjectSettingUri(setting, workspaceFolder, workspaceFolders)
+                        : undefined;
+                    if (uri) {
+                        remainingProjectPaths.add(normalizePath(uri.fsPath));
+                    }
+                    continue;
+                }
+                changed = true;
+                if (marker.kind === 'adopted') {
+                    const restored = { ...setting };
+                    delete restored._inlineScriptRegistration;
+                    remaining.push(restored);
+                    const uri = workspaceFolder
+                        ? resolveProjectSettingUri(restored, workspaceFolder, workspaceFolders)
+                        : undefined;
+                    if (uri) {
+                        remainingProjectPaths.add(normalizePath(uri.fsPath));
+                    }
+                    continue;
+                }
+                const uri = workspaceFolder
+                    ? resolveProjectSettingUri(setting, workspaceFolder, workspaceFolders)
+                    : undefined;
+                if (uri) {
+                    createdProjectPaths.add(normalizePath(uri.fsPath));
+                }
+            }
+            if (changed) {
+                await writeProjectSettings(config, target, remaining);
+            }
+        };
+
+        const firstWorkspace = workspaceFolders[0];
+        const sharedConfig = workspaceApis.getConfiguration('python-envs', firstWorkspace?.uri);
+        await cleanupTarget(sharedConfig, ConfigurationTarget.Global, firstWorkspace);
+        if (firstWorkspace) {
+            await cleanupTarget(sharedConfig, ConfigurationTarget.Workspace, firstWorkspace);
+        }
+        for (const workspaceFolder of workspaceFolders) {
+            const config = workspaceApis.getConfiguration('python-envs', workspaceFolder.uri);
+            await cleanupTarget(config, ConfigurationTarget.WorkspaceFolder, workspaceFolder);
+        }
+
+        return Array.from(createdProjectPaths)
+            .filter((projectPath) => !remainingProjectPaths.has(projectPath))
+            .map((projectPath) => currentProjectsByPath.get(projectPath))
+            .filter((project): project is PythonProject => project !== undefined);
+    });
 }
 
 export async function addPythonProjectSetting(edits: EditProjectSettings[]): Promise<void> {

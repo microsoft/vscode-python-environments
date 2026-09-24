@@ -11,11 +11,18 @@ import {
     ThemeIcon,
     Uri,
 } from 'vscode';
-import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
+import {
+    EnvironmentManager,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonEnvironmentInfo,
+    RemoveEnvironmentOptions,
+} from '../../api';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
+import { PythonVersion } from '../../common/pythonVersion';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -149,7 +156,10 @@ function getName(binPath: string): string {
     return path.basename(dir1);
 }
 
-async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo> {
+/** Controls how {@link getPythonInfo} formats an environment's user-facing name. */
+export type VenvNameStyle = 'default' | 'inlineScript';
+
+async function getPythonInfo(env: NativeEnvInfo, nameStyle: VenvNameStyle = 'default'): Promise<PythonEnvironmentInfo> {
     // Handle broken environments that have an error field
     if (env.error) {
         const venvName = env.name ?? (env.prefix ? path.basename(env.prefix) : 'Unknown');
@@ -178,7 +188,12 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
     if (env.executable && env.version && env.prefix) {
         const venvName = env.name ?? getName(env.executable);
         const sv = shortenVersionString(env.version);
-        const name = `${venvName} (${sv})`;
+        // Inline-script (PEP 723) environments live in content-addressed cache folders whose names
+        // are hashes. Surface a human-readable label instead of leaking that hash: the short form
+        // leads with the version (compact for the status bar), the full name reads "script env".
+        const isInlineScript = nameStyle === 'inlineScript';
+        const name = isInlineScript ? l10n.t('script env ({0})', sv) : `${venvName} (${sv})`;
+        const shortDisplayName = isInlineScript ? l10n.t('{0} (script)', sv) : `${sv} (${venvName})`;
         let description = undefined;
         if (env.kind === NativePythonEnvironmentKind.venvUv) {
             description = l10n.t('uv');
@@ -193,7 +208,7 @@ async function getPythonInfo(env: NativeEnvInfo): Promise<PythonEnvironmentInfo>
         return {
             name: name,
             displayName: name,
-            shortDisplayName: `${sv} (${venvName})`,
+            shortDisplayName: shortDisplayName,
             displayPath: env.executable,
             version: env.version,
             description: description,
@@ -344,6 +359,50 @@ export async function getGlobalVenvLocation(): Promise<Uri | undefined> {
     return undefined;
 }
 
+export interface CreateWithProgressOptions {
+    /** Overrides the progress-notification title shown while the environment is created. */
+    readonly progressTitle?: string;
+    /** Controls how the created environment's user-facing name is formatted. */
+    readonly nameStyle?: VenvNameStyle;
+}
+
+/**
+ * The interpreter to build a venv from. Usually the environment's own executable, but a discovered
+ * base can point at a launcher/shim outside its prefix (e.g. uv's `.local/bin/pythonX.Y`), which uv
+ * cannot inspect for older Pythons (`uv venv --python <shim>` fails to initialize). When the
+ * executable is not inside its own prefix, use the interpreter inside the prefix instead.
+ */
+export async function getBaseInterpreterForVenv(basePython: PythonEnvironment): Promise<string | undefined> {
+    const executable = basePython.execInfo?.run.executable;
+    const sysPrefix = basePython.sysPrefix;
+    if (!executable || !sysPrefix || !path.isAbsolute(executable) || !path.isAbsolute(sysPrefix)) {
+        return executable;
+    }
+    if (isInterpreterInsidePrefix(executable, sysPrefix)) {
+        return executable;
+    }
+    for (const candidate of [
+        path.join(sysPrefix, 'python.exe'),
+        path.join(sysPrefix, 'bin', 'python'),
+        path.join(sysPrefix, 'bin', 'python3'),
+    ]) {
+        if (await fsapi.pathExists(candidate)) {
+            return candidate;
+        }
+    }
+    return executable;
+}
+
+function isInterpreterInsidePrefix(executable: string, prefix: string): boolean {
+    const relative = path.relative(prefix, executable);
+    return (
+        relative.length > 0 &&
+        relative !== '..' &&
+        !relative.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relative)
+    );
+}
+
 export async function createWithProgress(
     nativeFinder: NativePythonFinder,
     api: PythonEnvironmentApi,
@@ -354,37 +413,36 @@ export async function createWithProgress(
     envPath: string,
     packages?: PipPackages,
     trackUvEnvironment = true,
+    options?: CreateWithProgressOptions,
 ): Promise<CreateEnvironmentResult | undefined> {
     const pythonPath = getVenvPythonPath(envPath);
 
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: l10n.t(
-                'Creating virtual environment named {0} using python version {1}.',
-                path.basename(envPath),
-                basePython.version,
-            ),
+            title:
+                options?.progressTitle ??
+                l10n.t(
+                    'Creating virtual environment named {0} using python version {1}.',
+                    path.basename(envPath),
+                    basePython.version,
+                ),
         },
         async () => {
             const result: CreateEnvironmentResult = {};
             try {
                 const useUv = await shouldUseUv(log, basePython.environmentPath.fsPath);
                 // env creation
-                if (basePython.execInfo?.run.executable) {
+                const baseExecutable = await getBaseInterpreterForVenv(basePython);
+                if (baseExecutable) {
                     if (useUv) {
                         await runUV(
-                            ['venv', '--verbose', '--seed', '--python', basePython.execInfo?.run.executable, envPath],
+                            ['venv', '--verbose', '--seed', '--python', baseExecutable, envPath],
                             venvRoot.fsPath,
                             log,
                         );
                     } else {
-                        await runPython(
-                            basePython.execInfo.run.executable,
-                            ['-m', 'venv', envPath],
-                            venvRoot.fsPath,
-                            manager.log,
-                        );
+                        await runPython(baseExecutable, ['-m', 'venv', envPath], venvRoot.fsPath, manager.log);
                     }
                     if (!(await fsapi.pathExists(pythonPath))) {
                         throw new Error('no python executable found in virtual environment');
@@ -393,7 +451,7 @@ export async function createWithProgress(
 
                 // handle admin of new env
                 const resolved = await nativeFinder.resolve(pythonPath);
-                const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved), manager);
+                const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved, options?.nameStyle), manager);
 
                 if (
                     trackUvEnvironment &&
@@ -435,7 +493,7 @@ export function ensureGlobalEnv(basePythons: PythonEnvironment[], log: LogOutput
         throw new Error('No base python found');
     }
 
-    const filtered = basePythons.filter((e) => e.version.startsWith('3.'));
+    const filtered = basePythons.filter((e) => PythonVersion.tryParse(e.version)?.major === 3);
     if (filtered.length === 0) {
         log.error('Did not find any base python 3.*');
         showErrorMessage(VenvManagerStrings.venvErrorNoPython3);
@@ -507,7 +565,7 @@ export async function createPythonVenv(
     return createStepBasedVenvFlow(nativeFinder, api, log, manager, basePythons, venvRoot, options);
 }
 
-function isDriveRoot(fsPath: string): boolean {
+export function isDriveRoot(fsPath: string): boolean {
     const normalized = path.normalize(fsPath);
     if (os.platform() === 'win32') {
         return /^[a-zA-Z]:[\\/]?$/.test(normalized);
@@ -515,7 +573,7 @@ function isDriveRoot(fsPath: string): boolean {
     return normalized === '/';
 }
 
-function hasMinimumPathDepth(fsPath: string, minDepth: number = 2): boolean {
+export function hasMinimumPathDepth(fsPath: string, minDepth: number = 2): boolean {
     const normalized = path.normalize(fsPath);
     const parts = normalized.split(path.sep).filter((p) => p.length > 0 && p !== '.');
 
@@ -553,7 +611,11 @@ async function validateVenvRemovalPath(envPath: string, log: LogOutputChannel): 
     return undefined;
 }
 
-export async function removeVenv(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
+export async function removeVenv(
+    environment: PythonEnvironment,
+    log: LogOutputChannel,
+    options?: RemoveEnvironmentOptions,
+): Promise<boolean> {
     const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
 
     const envFsPath = path.normalize(environment.environmentPath.fsPath);
@@ -568,15 +630,19 @@ export async function removeVenv(environment: PythonEnvironment, log: LogOutputC
     // Normalize path for UI display - ensure forward slashes on Windows
     const displayPath = normalizePath(envPath);
 
-    const confirm = await showWarningMessage(
-        l10n.t('Are you sure you want to remove {0}?', displayPath),
-        {
-            modal: true,
-        },
-        { title: Common.yes },
-        { title: Common.no, isCloseAffordance: true },
-    );
-    if (confirm?.title === Common.yes) {
+    const confirmed =
+        options?.runHeadless === true ||
+        (
+            await showWarningMessage(
+                l10n.t('Are you sure you want to remove {0}?', displayPath),
+                {
+                    modal: true,
+                },
+                { title: Common.yes },
+                { title: Common.no, isCloseAffordance: true },
+            )
+        )?.title === Common.yes;
+    if (confirmed) {
         const result = await withProgress(
             {
                 location: ProgressLocation.Notification,
@@ -607,6 +673,7 @@ export async function resolveVenvPythonEnvironmentPath(
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
     baseManager: EnvironmentManager,
+    nameStyle: VenvNameStyle = 'default',
 ): Promise<PythonEnvironment | undefined> {
     try {
         const resolved = await nativeFinder.resolve(fsPath);
@@ -616,7 +683,7 @@ export async function resolveVenvPythonEnvironmentPath(
             resolved.kind === NativePythonEnvironmentKind.venvUv ||
             resolved.kind === NativePythonEnvironmentKind.uvWorkspace
         ) {
-            const envInfo = await getPythonInfo(resolved);
+            const envInfo = await getPythonInfo(resolved, nameStyle);
             return api.createPythonEnvironmentItem(envInfo, manager);
         }
     } catch (ex) {

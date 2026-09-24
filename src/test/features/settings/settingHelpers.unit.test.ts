@@ -11,12 +11,22 @@ import {
     addPythonProjectSetting,
     getDefaultEnvManagerSetting,
     getDefaultPkgManagerSetting,
+    getExactPythonProjectSetting,
     migrateGlobalDefaultEnvManagerSetting,
+    registerInlineScriptPythonProjectSetting,
+    removeInlineScriptPythonProjectSettings,
+    removeManagedInlineScriptPythonProjectSetting,
+    removePythonProjectSetting,
+    rollbackInlineScriptPythonProjectSetting,
     setAllManagerSettings,
     setEnvironmentManager,
     setPackageManager,
 } from '../../../features/settings/settingHelpers';
-import { PythonProjectManager, PythonProjectsImpl } from '../../../internal.api';
+import {
+    PythonProjectSettings,
+    PythonProjectsImpl,
+} from '../../../features/projectManager';
+import type { PythonProjectManager } from '../../../features/projectManager';
 import { MockWorkspaceConfiguration } from '../../mocks/mockWorkspaceConfig';
 
 /**
@@ -50,11 +60,11 @@ suite('Setting Helpers - Optional Project Managers', () => {
         sinon.restore();
     });
 
-    function createPathOnlyProjectConfig(): MockWorkspaceConfiguration {
+    function createProjectConfig(projectSettings: PythonProjectSettings): MockWorkspaceConfiguration {
         const mockConfig = new MockWorkspaceConfiguration();
         (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
             if (key === 'pythonProjects') {
-                return [{ path: 'backend' }] as T;
+                return [projectSettings] as T;
             }
             if (key === 'defaultEnvManager') {
                 return VENV_MANAGER_ID as T;
@@ -68,7 +78,17 @@ suite('Setting Helpers - Optional Project Managers', () => {
     }
 
     test('uses default managers when a pythonProjects entry only specifies path', () => {
-        sinon.stub(workspaceApis, 'getConfiguration').returns(createPathOnlyProjectConfig());
+        sinon.stub(workspaceApis, 'getConfiguration').returns(createProjectConfig({ path: 'backend' }));
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+
+        assert.strictEqual(getDefaultEnvManagerSetting(projectManager, projectUri), VENV_MANAGER_ID);
+        assert.strictEqual(getDefaultPkgManagerSetting(projectManager, projectUri), PIP_MANAGER_ID);
+    });
+
+    test('uses default managers when a pythonProjects entry has empty manager values', () => {
+        sinon.stub(workspaceApis, 'getConfiguration').returns(
+            createProjectConfig({ path: 'backend', envManager: '', packageManager: '' }),
+        );
         sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
 
         assert.strictEqual(getDefaultEnvManagerSetting(projectManager, projectUri), VENV_MANAGER_ID);
@@ -664,6 +684,762 @@ suite('Setting Helpers - Empty Path Migration', () => {
             assert.ok(projects.length > 0, 'Should have at least one project entry');
             assert.strictEqual(projects[0].path, '.', 'Path should be fixed to "." not empty string');
             assert.strictEqual(projects[0].envManager, CONDA_MANAGER_ID, 'envManager should be updated');
+        });
+    });
+});
+
+suite('Setting Helpers - Project Removal', () => {
+    const INLINE_MANAGER_ID = 'ms-python.python:inline-script';
+    const VENV_MANAGER_ID = 'ms-python.python:venv';
+    const PIP_MANAGER_ID = 'ms-python.python:pip';
+    const firstWorkspacePath = getTestWorkspacePath();
+    const firstWorkspaceUri = Uri.file(firstWorkspacePath);
+    const firstWorkspace: WorkspaceFolder = {
+        uri: firstWorkspaceUri,
+        name: 'workspace',
+        index: 0,
+    };
+    const secondWorkspaceUri = Uri.file(process.platform === 'win32' ? 'C:\\workspace2' : '/workspace2');
+    const secondWorkspace: WorkspaceFolder = {
+        uri: secondWorkspaceUri,
+        name: 'workspace2',
+        index: 1,
+    };
+
+    let updateCalls: Array<{
+        workspace: string;
+        key: string;
+        value: unknown;
+        target: boolean | ConfigurationTarget | undefined;
+    }>;
+
+    setup(() => {
+        updateCalls = [];
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    function createProjectConfig(options: {
+        workspaceName: string;
+        globalValue?: PythonProjectSettings[];
+        workspaceValue?: PythonProjectSettings[];
+        workspaceFolderValue?: PythonProjectSettings[];
+    }): MockWorkspaceConfiguration {
+        const mockConfig = new MockWorkspaceConfiguration();
+        const mergedProjects = [
+            ...(options.globalValue ?? []),
+            ...(options.workspaceValue ?? []),
+            ...(options.workspaceFolderValue ?? []),
+        ];
+        (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined =>
+            key === 'pythonProjects' ? (mergedProjects as unknown as T) : defaultValue;
+        (mockConfig as any).inspect = (key: string) =>
+            key === 'pythonProjects'
+                ? {
+                      globalValue: options.globalValue,
+                      workspaceValue: options.workspaceValue,
+                      workspaceFolderValue: options.workspaceFolderValue,
+                  }
+                : undefined;
+        mockConfig.update = (
+            section: string,
+            value: unknown,
+            configurationTarget?: boolean | ConfigurationTarget,
+        ): Promise<void> => {
+            updateCalls.push({
+                workspace: options.workspaceName,
+                key: section,
+                value,
+                target: configurationTarget,
+            });
+            return Promise.resolve();
+        };
+        return mockConfig;
+    }
+
+    function cloneSettings(settings: PythonProjectSettings[] | undefined): PythonProjectSettings[] {
+        return (settings ?? []).map((setting) => ({ ...setting }));
+    }
+
+    function createdInlineSetting(pathValue: string, workspace?: string): PythonProjectSettings {
+        return {
+            path: pathValue,
+            envManager: INLINE_MANAGER_ID,
+            packageManager: PIP_MANAGER_ID,
+            workspace,
+            _inlineScriptRegistration: { kind: 'created' },
+        };
+    }
+
+    function createSharedWorkspaceConfigs(options: {
+        workspaceValue: PythonProjectSettings[];
+        firstWorkspaceFolderValue?: PythonProjectSettings[];
+        secondWorkspaceFolderValue?: PythonProjectSettings[];
+    }): { firstConfig: MockWorkspaceConfiguration; secondConfig: MockWorkspaceConfiguration; getWorkspaceValue: () => PythonProjectSettings[] } {
+        let sharedWorkspaceValue = cloneSettings(options.workspaceValue);
+        const workspaceFolderValues = new Map<string, PythonProjectSettings[]>([
+            [firstWorkspace.name, cloneSettings(options.firstWorkspaceFolderValue)],
+            [secondWorkspace.name, cloneSettings(options.secondWorkspaceFolderValue)],
+        ]);
+
+        function createConfigForWorkspace(workspace: WorkspaceFolder): MockWorkspaceConfiguration {
+            const mockConfig = new MockWorkspaceConfiguration();
+            (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined =>
+                key === 'pythonProjects'
+                    ? ([...sharedWorkspaceValue, ...workspaceFolderValues.get(workspace.name)!] as unknown as T)
+                    : defaultValue;
+            (mockConfig as any).inspect = (key: string) =>
+                key === 'pythonProjects'
+                    ? {
+                          workspaceValue: cloneSettings(sharedWorkspaceValue),
+                          workspaceFolderValue: cloneSettings(workspaceFolderValues.get(workspace.name)),
+                      }
+                    : undefined;
+            mockConfig.update = (
+                section: string,
+                value: unknown,
+                configurationTarget?: boolean | ConfigurationTarget,
+            ): Promise<void> => {
+                updateCalls.push({
+                    workspace: workspace.name,
+                    key: section,
+                    value,
+                    target: configurationTarget,
+                });
+                const updatedSettings = cloneSettings(value as PythonProjectSettings[] | undefined);
+                if (configurationTarget === ConfigurationTarget.Workspace) {
+                    sharedWorkspaceValue = updatedSettings;
+                } else if (configurationTarget === ConfigurationTarget.WorkspaceFolder) {
+                    workspaceFolderValues.set(workspace.name, updatedSettings);
+                }
+                return Promise.resolve();
+            };
+            return mockConfig;
+        }
+
+        return {
+            firstConfig: createConfigForWorkspace(firstWorkspace),
+            secondConfig: createConfigForWorkspace(secondWorkspace),
+            getWorkspaceValue: () => cloneSettings(sharedWorkspaceValue),
+        };
+    }
+
+    test('exact project lookup respects the workspace discriminator in multi-root settings', () => {
+        const project = new PythonProjectsImpl(
+            'script.py',
+            Uri.file(path.join(secondWorkspaceUri.fsPath, 'script.py')),
+        );
+        const config = createProjectConfig({
+            workspaceName: secondWorkspace.name,
+            workspaceValue: [
+                createdInlineSetting('script.py', firstWorkspace.name),
+                {
+                    path: 'script.py',
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                    workspace: secondWorkspace.name,
+                },
+            ],
+        });
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(secondWorkspace);
+        sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+        const projectManager = {
+            get: () => project,
+        } as unknown as PythonProjectManager;
+
+        assert.strictEqual(
+            getExactPythonProjectSetting(projectManager, project.uri)?.workspace,
+            secondWorkspace.name,
+        );
+    });
+
+    suite('removePythonProjectSetting (bde7cf8-equivalent generic behavior)', () => {
+        test('rewrites the merged effective array back to workspace scope', async () => {
+            const project = new PythonProjectsImpl('script.py', Uri.file(path.join(firstWorkspacePath, 'script.py')));
+            const config = createProjectConfig({
+                workspaceName: firstWorkspace.name,
+                workspaceValue: [
+                    { path: 'script.py', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+                workspaceFolderValue: [
+                    { path: 'script.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(firstWorkspace);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            await removePythonProjectSetting([{ project }]);
+
+            assert.strictEqual(updateCalls.length, 1, 'Should update pythonProjects once');
+            assert.deepStrictEqual(updateCalls[0], {
+                workspace: firstWorkspace.name,
+                key: 'pythonProjects',
+                value: [{ path: 'script.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID }],
+                target: ConfigurationTarget.Workspace,
+            });
+        });
+
+        test('ignores envManager metadata and removes the first same-path entry', async () => {
+            const project = new PythonProjectsImpl('script.py', Uri.file(path.join(firstWorkspacePath, 'script.py')));
+            const config = createProjectConfig({
+                workspaceName: firstWorkspace.name,
+                workspaceValue: [
+                    { path: 'script.py', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                    { path: 'script.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                    { path: 'other.py', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(firstWorkspace);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            await removePythonProjectSetting([{ project, envManager: VENV_MANAGER_ID }]);
+
+            assert.strictEqual(updateCalls.length, 1, 'Should update pythonProjects once');
+            assert.deepStrictEqual(updateCalls[0].value, [
+                { path: 'script.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                { path: 'other.py', envManager: INLINE_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+            ]);
+            assert.strictEqual(updateCalls[0].target, ConfigurationTarget.Workspace);
+        });
+    });
+
+    suite('inline-script project registration', () => {
+        function createStatefulWorkspaceConfig(
+            initial: PythonProjectSettings[],
+            expectedTarget: ConfigurationTarget.Workspace | ConfigurationTarget.WorkspaceFolder =
+                ConfigurationTarget.Workspace,
+        ) {
+            let workspaceValue = cloneSettings(initial);
+            const config = new MockWorkspaceConfiguration();
+            (config as any).get = <T>(key: string, defaultValue?: T): T | undefined =>
+                key === 'pythonProjects' ? (cloneSettings(workspaceValue) as unknown as T) : defaultValue;
+            (config as any).inspect = (key: string) =>
+                key === 'pythonProjects'
+                    ? {
+                          globalValue: undefined,
+                          workspaceValue:
+                              expectedTarget === ConfigurationTarget.Workspace
+                                  ? cloneSettings(workspaceValue)
+                                  : undefined,
+                          workspaceFolderValue:
+                              expectedTarget === ConfigurationTarget.WorkspaceFolder
+                                  ? cloneSettings(workspaceValue)
+                                  : undefined,
+                      }
+                    : undefined;
+            config.update = (
+                _section: string,
+                value: unknown,
+                configurationTarget?: boolean | ConfigurationTarget,
+            ): Promise<void> => {
+                assert.strictEqual(configurationTarget, expectedTarget);
+                workspaceValue = cloneSettings(value as PythonProjectSettings[] | undefined);
+                return Promise.resolve();
+            };
+            return { config, getWorkspaceValue: () => cloneSettings(workspaceValue) };
+        }
+
+        function createProjectManager(project: PythonProjectsImpl): PythonProjectManager {
+            const containingProject = new PythonProjectsImpl(firstWorkspace.name, firstWorkspace.uri);
+            return {
+                get: () => containingProject,
+                getProjects: () => [containingProject, project],
+            } as unknown as PythonProjectManager;
+        }
+
+        test('creates a marked exact project setting and rolls it back on setup failure', async () => {
+            const project = new PythonProjectsImpl(
+                'script.py',
+                Uri.file(path.join(firstWorkspacePath, 'script.py')),
+            );
+            const { config, getWorkspaceValue } = createStatefulWorkspaceConfig([]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(firstWorkspace);
+            sinon.stub(workspaceApis, 'getWorkspaceFile').returns(undefined);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            const registration = await registerInlineScriptPythonProjectSetting(
+                createProjectManager(project),
+                project,
+            );
+
+            assert.deepStrictEqual(registration, {
+                kind: 'created',
+                changed: true,
+                workspaceFolder: firstWorkspace,
+                target: ConfigurationTarget.Workspace,
+            });
+            assert.deepStrictEqual(getWorkspaceValue(), [
+                {
+                    path: 'script.py',
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                    workspace: undefined,
+                    _inlineScriptRegistration: { kind: 'created' },
+                },
+            ]);
+
+            assert.strictEqual(
+                await rollbackInlineScriptPythonProjectSetting(project, registration!),
+                true,
+            );
+            assert.deepStrictEqual(getWorkspaceValue(), []);
+        });
+
+        test('temporarily marks an existing exact project and restores it without removing the project', async () => {
+            const project = new PythonProjectsImpl(
+                'script.py',
+                Uri.file(path.join(firstWorkspacePath, 'script.py')),
+            );
+            const existing = {
+                path: 'script.py',
+                envManager: VENV_MANAGER_ID,
+                packageManager: PIP_MANAGER_ID,
+            };
+            const { config, getWorkspaceValue } = createStatefulWorkspaceConfig([existing]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(firstWorkspace);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            const registration = await registerInlineScriptPythonProjectSetting(
+                createProjectManager(project),
+                project,
+            );
+
+            assert.strictEqual(registration?.kind, 'adopted');
+            assert.deepStrictEqual(getWorkspaceValue(), [
+                { ...existing, _inlineScriptRegistration: { kind: 'adopted' } },
+            ]);
+            assert.strictEqual(await removeManagedInlineScriptPythonProjectSetting(project), false);
+            assert.deepStrictEqual(getWorkspaceValue(), [existing]);
+        });
+
+        test('updates only the matching managed script when roots share the same relative path', async () => {
+            const project = new PythonProjectsImpl(
+                'script.py',
+                Uri.file(path.join(secondWorkspaceUri.fsPath, 'script.py')),
+            );
+            const firstSetting = createdInlineSetting('script.py', firstWorkspace.name);
+            const secondSetting = createdInlineSetting('script.py', secondWorkspace.name);
+            const { config, getWorkspaceValue } = createStatefulWorkspaceConfig([
+                firstSetting,
+                secondSetting,
+            ]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace, secondWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(secondWorkspace);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            await setAllManagerSettings([
+                {
+                    project,
+                    envManager: 'ms-python.python:conda',
+                    packageManager: PIP_MANAGER_ID,
+                },
+            ]);
+
+            assert.deepStrictEqual(getWorkspaceValue(), [
+                firstSetting,
+                {
+                    path: 'script.py',
+                    envManager: 'ms-python.python:conda',
+                    packageManager: PIP_MANAGER_ID,
+                    workspace: secondWorkspace.name,
+                },
+            ]);
+        });
+
+        test('updates a workspace-folder-owned managed script at its owning target', async () => {
+            const project = new PythonProjectsImpl(
+                'script.py',
+                Uri.file(path.join(firstWorkspacePath, 'script.py')),
+            );
+            const { config, getWorkspaceValue } = createStatefulWorkspaceConfig(
+                [createdInlineSetting('script.py')],
+                ConfigurationTarget.WorkspaceFolder,
+            );
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(firstWorkspace);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            await setEnvironmentManager([
+                {
+                    project,
+                    envManager: 'ms-python.python:conda',
+                },
+            ]);
+
+            assert.deepStrictEqual(getWorkspaceValue(), [
+                {
+                    path: 'script.py',
+                    envManager: 'ms-python.python:conda',
+                    packageManager: PIP_MANAGER_ID,
+                    workspace: undefined,
+                },
+            ]);
+        });
+    });
+
+    suite('removeInlineScriptPythonProjectSettings', () => {
+        test('removes global inline entries when no workspace folders are open', async () => {
+            const config = createProjectConfig({
+                workspaceName: 'global',
+                globalValue: [
+                    createdInlineSetting('script.py'),
+                    { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(undefined);
+            sinon.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
+                assert.strictEqual(scope, undefined);
+                return config;
+            });
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([]);
+
+            assert.deepStrictEqual(removedProjects, []);
+            assert.deepStrictEqual(updateCalls, [
+                {
+                    workspace: 'global',
+                    key: 'pythonProjects',
+                    value: [{ path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID }],
+                    target: ConfigurationTarget.Global,
+                },
+            ]);
+        });
+
+        test('removes all inline-script entries while preserving non-inline duplicates', async () => {
+            const project = new PythonProjectsImpl('script.py', Uri.file(path.join(firstWorkspacePath, 'script.py')));
+            const otherProject = new PythonProjectsImpl('other.py', Uri.file(path.join(firstWorkspacePath, 'other.py')));
+            const config = createProjectConfig({
+                workspaceName: firstWorkspace.name,
+                workspaceValue: [
+                    createdInlineSetting('script.py'),
+                    { path: 'script.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                    createdInlineSetting('other.py'),
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(firstWorkspace);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([project, otherProject]);
+
+            assert.deepStrictEqual(
+                removedProjects.map((entry) => entry.uri.fsPath),
+                [otherProject.uri.fsPath],
+                'Only projects left without any non-inline setting should be removed from memory',
+            );
+            assert.strictEqual(updateCalls.length, 1, 'Should update pythonProjects once');
+            assert.strictEqual(updateCalls[0].workspace, firstWorkspace.name);
+            assert.strictEqual(updateCalls[0].key, 'pythonProjects');
+            assert.strictEqual(updateCalls[0].target, ConfigurationTarget.Workspace);
+            assert.deepStrictEqual(updateCalls[0].value, [
+                { path: 'script.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+            ]);
+        });
+
+        test('removes inline-script settings even when the project is not loaded', async () => {
+            const config = createProjectConfig({
+                workspaceName: firstWorkspace.name,
+                workspaceValue: [
+                    createdInlineSetting('runner'),
+                    { path: 'keep', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace]);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([]);
+
+            assert.deepStrictEqual(removedProjects, [], 'No loaded project should be returned for memory cleanup');
+            assert.strictEqual(updateCalls.length, 1, 'Should update pythonProjects once');
+            assert.deepStrictEqual(updateCalls[0].value, [
+                { path: 'keep', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+            ]);
+        });
+
+        test('removes only one of two roots that share the same relative path', async () => {
+            const firstProject = new PythonProjectsImpl('script.py', Uri.file(path.join(firstWorkspacePath, 'script.py')));
+            const secondProject = new PythonProjectsImpl(
+                'script.py',
+                Uri.file(path.join(secondWorkspaceUri.fsPath, 'script.py')),
+            );
+            const firstConfig = createProjectConfig({
+                workspaceName: firstWorkspace.name,
+                workspaceFolderValue: [
+                    createdInlineSetting('script.py'),
+                ],
+            });
+            const secondConfig = createProjectConfig({
+                workspaceName: secondWorkspace.name,
+                workspaceFolderValue: [
+                    { path: 'script.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace, secondWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').callsFake((uri) =>
+                uri.fsPath.startsWith(secondWorkspaceUri.fsPath) ? secondWorkspace : firstWorkspace,
+            );
+            sinon.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
+                const uri = scope as Uri;
+                return uri.fsPath === secondWorkspaceUri.fsPath ? secondConfig : firstConfig;
+            });
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([firstProject, secondProject]);
+
+            assert.deepStrictEqual(removedProjects.map((project) => project.uri.fsPath), [firstProject.uri.fsPath]);
+            assert.strictEqual(updateCalls.length, 1, 'Only the matching workspace folder should be updated');
+            assert.strictEqual(updateCalls[0].workspace, firstWorkspace.name);
+            assert.strictEqual(updateCalls[0].target, ConfigurationTarget.WorkspaceFolder);
+            assert.strictEqual(updateCalls[0].value, undefined);
+            assert.strictEqual(secondProject.uri.fsPath, path.join(secondWorkspaceUri.fsPath, 'script.py'));
+        });
+
+        test('removes a hidden shared inline entry while preserving a folder override for the same URI', async () => {
+            const project = new PythonProjectsImpl('script.py', Uri.file(path.join(firstWorkspacePath, 'script.py')));
+            const config = createProjectConfig({
+                workspaceName: firstWorkspace.name,
+                workspaceValue: [
+                    createdInlineSetting('script.py', firstWorkspace.name),
+                ],
+                workspaceFolderValue: [
+                    { path: 'script.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(firstWorkspace);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([project]);
+
+            assert.deepStrictEqual(removedProjects, [], 'Folder override should keep the project configured');
+            const workspaceUpdate = updateCalls.find((call) => call.target === ConfigurationTarget.Workspace);
+            const folderUpdate = updateCalls.find((call) => call.target === ConfigurationTarget.WorkspaceFolder);
+            assert.ok(workspaceUpdate, 'WorkspaceValue source should be updated');
+            assert.strictEqual(workspaceUpdate!.value, undefined);
+            assert.strictEqual(folderUpdate, undefined, 'Folder override should not be rewritten');
+        });
+
+        test('aggregates shared workspaceValue removals across folders into one update', async () => {
+            const firstProject = new PythonProjectsImpl('first', Uri.file(path.join(firstWorkspacePath, 'first')));
+            const secondProject = new PythonProjectsImpl('second', Uri.file(path.join(secondWorkspaceUri.fsPath, 'second')));
+            const { firstConfig, secondConfig, getWorkspaceValue } = createSharedWorkspaceConfigs({
+                workspaceValue: [
+                    createdInlineSetting('first', firstWorkspace.name),
+                    createdInlineSetting('second', secondWorkspace.name),
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace, secondWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').callsFake((uri) =>
+                uri.fsPath.startsWith(secondWorkspaceUri.fsPath) ? secondWorkspace : firstWorkspace,
+            );
+            sinon.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
+                const uri = scope as Uri;
+                return uri.fsPath === secondWorkspaceUri.fsPath ? secondConfig : firstConfig;
+            });
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([firstProject, secondProject]);
+
+            assert.deepStrictEqual(
+                removedProjects.map((project) => project.uri.fsPath).sort(),
+                [firstProject.uri.fsPath, secondProject.uri.fsPath].sort(),
+            );
+            assert.strictEqual(
+                updateCalls.filter((call) => call.target === ConfigurationTarget.Workspace).length,
+                1,
+                'Shared workspaceValue should be written once',
+            );
+            assert.deepStrictEqual(getWorkspaceValue(), []);
+        });
+
+        test('removes every inline shared entry without resurrecting non-inline siblings', async () => {
+            const firstProject = new PythonProjectsImpl('first', Uri.file(path.join(firstWorkspacePath, 'first')));
+            const secondProject = new PythonProjectsImpl(
+                'second',
+                Uri.file(path.join(secondWorkspaceUri.fsPath, 'second')),
+            );
+            const { firstConfig, secondConfig, getWorkspaceValue } = createSharedWorkspaceConfigs({
+                workspaceValue: [
+                    createdInlineSetting('first', firstWorkspace.name),
+                    createdInlineSetting('second', secondWorkspace.name),
+                    {
+                        path: 'keep',
+                        envManager: VENV_MANAGER_ID,
+                        packageManager: PIP_MANAGER_ID,
+                        workspace: secondWorkspace.name,
+                    },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace, secondWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').callsFake((uri) =>
+                uri.fsPath.startsWith(secondWorkspaceUri.fsPath) ? secondWorkspace : firstWorkspace,
+            );
+            sinon.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
+                const uri = scope as Uri;
+                return uri.fsPath === secondWorkspaceUri.fsPath ? secondConfig : firstConfig;
+            });
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([firstProject, secondProject]);
+
+            assert.deepStrictEqual(
+                removedProjects.map((project) => project.uri.fsPath).sort(),
+                [firstProject.uri.fsPath, secondProject.uri.fsPath].sort(),
+            );
+            assert.strictEqual(
+                updateCalls.filter((call) => call.target === ConfigurationTarget.Workspace).length,
+                1,
+                'Shared workspaceValue should still be written once',
+            );
+            assert.deepStrictEqual(getWorkspaceValue(), [
+                {
+                    path: 'keep',
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: PIP_MANAGER_ID,
+                    workspace: secondWorkspace.name,
+                },
+            ]);
+            assert.strictEqual(secondProject.uri.fsPath, path.join(secondWorkspaceUri.fsPath, 'second'));
+        });
+
+        test('removes matching inline-script projects independently in a multi-root workspace', async () => {
+            const firstProject = new PythonProjectsImpl('script.py', Uri.file(path.join(firstWorkspacePath, 'script.py')));
+            const secondProject = new PythonProjectsImpl(
+                'script.py',
+                Uri.file(path.join(secondWorkspaceUri.fsPath, 'script.py')),
+            );
+            const firstConfig = createProjectConfig({
+                workspaceName: firstWorkspace.name,
+                workspaceValue: [
+                    createdInlineSetting('script.py'),
+                ],
+                workspaceFolderValue: [
+                    { path: 'keep-folder.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            const secondConfig = createProjectConfig({
+                workspaceName: secondWorkspace.name,
+                workspaceFolderValue: [
+                    createdInlineSetting('script.py'),
+                    { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace, secondWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').callsFake((uri) =>
+                uri.fsPath.startsWith(secondWorkspaceUri.fsPath) ? secondWorkspace : firstWorkspace,
+            );
+            sinon.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
+                const uri = scope as Uri;
+                return uri.fsPath === secondWorkspaceUri.fsPath ? secondConfig : firstConfig;
+            });
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([firstProject, secondProject]);
+
+            assert.deepStrictEqual(
+                removedProjects.map((project) => project.uri.fsPath).sort(),
+                [firstProject.uri.fsPath, secondProject.uri.fsPath].sort(),
+            );
+            assert.strictEqual(updateCalls.length, 2, 'Should update each workspace independently');
+            const firstWorkspaceUpdate = updateCalls.find((call) => call.workspace === firstWorkspace.name);
+            const secondWorkspaceUpdate = updateCalls.find((call) => call.workspace === secondWorkspace.name);
+            assert.ok(firstWorkspaceUpdate, 'First workspace should receive an update');
+            assert.ok(secondWorkspaceUpdate, 'Second workspace should receive an update');
+            assert.strictEqual(firstWorkspaceUpdate!.value, undefined);
+            assert.deepStrictEqual(secondWorkspaceUpdate!.value, [
+                { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+            ]);
+            assert.ok(
+                updateCalls.some((call) => call.workspace === firstWorkspace.name && call.target === ConfigurationTarget.Workspace) &&
+                    updateCalls.some(
+                        (call) =>
+                            call.workspace === secondWorkspace.name &&
+                            call.target === ConfigurationTarget.WorkspaceFolder,
+                    ),
+                'Should update the same configuration scope that originally contained each project entry',
+            );
+        });
+
+        test('removes global inline entries once while preserving higher-precedence non-inline entries', async () => {
+            const globalProject = new PythonProjectsImpl(
+                'global.py',
+                Uri.file(path.join(firstWorkspacePath, 'global.py')),
+            );
+            const workspaceProject = new PythonProjectsImpl(
+                'workspace.py',
+                Uri.file(path.join(firstWorkspacePath, 'workspace.py')),
+            );
+            const folderProject = new PythonProjectsImpl(
+                'folder.py',
+                Uri.file(path.join(secondWorkspaceUri.fsPath, 'folder.py')),
+            );
+            const firstConfig = createProjectConfig({
+                workspaceName: firstWorkspace.name,
+                globalValue: [
+                    createdInlineSetting('global.py'),
+                    { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+                workspaceValue: [
+                    createdInlineSetting('workspace.py'),
+                ],
+                workspaceFolderValue: [
+                    { path: 'global.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+            });
+            const secondConfig = createProjectConfig({
+                workspaceName: secondWorkspace.name,
+                globalValue: [
+                    createdInlineSetting('global.py'),
+                    { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+                ],
+                workspaceFolderValue: [
+                    createdInlineSetting('folder.py'),
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace, secondWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').callsFake((uri) =>
+                uri.fsPath.startsWith(secondWorkspaceUri.fsPath) ? secondWorkspace : firstWorkspace,
+            );
+            sinon.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
+                const uri = scope as Uri;
+                return uri.fsPath === secondWorkspaceUri.fsPath ? secondConfig : firstConfig;
+            });
+
+            const removedProjects = await removeInlineScriptPythonProjectSettings([
+                globalProject,
+                workspaceProject,
+                folderProject,
+            ]);
+
+            assert.deepStrictEqual(
+                removedProjects.map((project) => project.uri.fsPath).sort(),
+                [workspaceProject.uri.fsPath, folderProject.uri.fsPath].sort(),
+                'The folder-level non-inline entry keeps the global project loaded',
+            );
+            const globalUpdates = updateCalls.filter((call) => call.target === ConfigurationTarget.Global);
+            assert.strictEqual(globalUpdates.length, 1, 'Global settings should be updated exactly once');
+            assert.deepStrictEqual(globalUpdates[0].value, [
+                { path: 'keep.py', envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID },
+            ]);
+            assert.ok(
+                updateCalls.some(
+                    (call) =>
+                        call.workspace === firstWorkspace.name &&
+                        call.target === ConfigurationTarget.Workspace &&
+                        call.value === undefined,
+                ),
+                'Workspace-scoped inline entry should be removed at its source',
+            );
+            assert.ok(
+                updateCalls.some(
+                    (call) =>
+                        call.workspace === secondWorkspace.name &&
+                        call.target === ConfigurationTarget.WorkspaceFolder &&
+                        call.value === undefined,
+                ),
+                'Folder-scoped inline entry should be removed at its source',
+            );
         });
     });
 });

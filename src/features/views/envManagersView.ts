@@ -3,15 +3,17 @@ import { DidChangeEnvironmentEventArgs, EnvironmentGroupInfo, PythonEnvironment 
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createTreeView } from '../../common/window.apis';
-import {
+import type {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
     EnvironmentManagers,
     InternalDidChangeEnvironmentsEventArgs,
     InternalDidChangePackagesEventArgs,
+} from '../envManagers';
+import type {
     InternalEnvironmentManager,
     InternalPackageManager,
-} from '../../internal.api';
+} from '../../managers/common/registeredManagers';
 import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     EnvInfoTreeItem,
@@ -252,7 +254,8 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             const views: EnvTreeItem[] = [];
 
             if (pkgManager) {
-                let packages = await pkgManager.refresh(environment);
+                await pkgManager.refresh(environment);
+                const packages = await pkgManager.getPackages(environment);
                 if (packages && packages.length > 0) {
                     views.push(
                         ...packages

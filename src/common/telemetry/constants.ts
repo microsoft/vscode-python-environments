@@ -222,6 +222,29 @@ export enum EventNames {
      */
     INLINE_SCRIPT_DETECTED = 'inlineScript.detected',
     /**
+     * Telemetry event fired when inline-script environment creation completes
+     * successfully with a newly-built cache entry that passed verification and
+     * metadata persistence.
+     * Measures:
+     * - duration: number (ms spent in the underlying create/rebuild operation)
+     * - dependencyCount: number (normalized dependency count in the cache key)
+     */
+    INLINE_SCRIPT_ENV_CREATED = 'inlineScript.envCreated',
+    /**
+     * Telemetry event fired when inline-script environment creation validates
+     * and reuses an existing cache entry without rebuilding it.
+     * Measures:
+     * - dependencyCount: number (normalized dependency count in the cache key)
+     */
+    INLINE_SCRIPT_ENV_REUSE_HIT = 'inlineScript.envReuseHit',
+    /**
+     * Telemetry event fired when inline-script environment creation cannot
+     * complete.
+     * Properties:
+     * - category: stable low-cardinality failure category
+     */
+    INLINE_SCRIPT_ENV_ERROR = 'inlineScript.envError',
+    /**
      * Telemetry event fired once per session, per URI, the first time a `.py`
      * file that previously raised an `inlineScript.detected` event receives a
      * real text edit. Together with `inlineScript.detected` this measures the
@@ -231,6 +254,16 @@ export enum EventNames {
      */
     INLINE_SCRIPT_EDITED = 'inlineScript.edited',
 }
+
+export type InlineScriptEnvErrorCategory =
+    | 'compatible-python-declined'
+    | 'discovery-failure'
+    | 'no-compatible-python'
+    | 'package-install-cancelled'
+    | 'install-failure'
+    | 'setup-failure'
+    | 'lock-timeout'
+    | 'lock-unavailable';
 
 // Map all events to their properties
 export interface IEventNamePropertyMapping {
@@ -693,6 +726,36 @@ export interface IEventNamePropertyMapping {
     [EventNames.MIGRATION_SYSTEM_ENV_MANAGER]: {
         outcome: 'removed' | 'partial' | 'not_set' | 'failed';
         errorType?: string;
+    };
+
+    /* __GDPR__
+        "inlineScript.envCreated": {
+            "dependencyCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.INLINE_SCRIPT_ENV_CREATED]: {
+        // Goes through the measures payload (numeric); listed here for GDPR only.
+        dependencyCount?: number;
+    };
+
+    /* __GDPR__
+        "inlineScript.envReuseHit": {
+            "dependencyCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.INLINE_SCRIPT_ENV_REUSE_HIT]: {
+        // Goes through the measures payload (numeric); listed here for GDPR only.
+        dependencyCount?: number;
+    };
+
+    /* __GDPR__
+        "inlineScript.envError": {
+            "category": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.INLINE_SCRIPT_ENV_ERROR]: {
+        category: InlineScriptEnvErrorCategory;
     };
 
     /* __GDPR__

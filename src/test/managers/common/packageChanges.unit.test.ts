@@ -127,6 +127,35 @@ suite('packageChanges', () => {
             assert.strictEqual(changes[0].kind, PackageChangeKind.add);
         });
 
+        test('uses an operation-specific package fetcher when provided', async () => {
+            const fetched = [{ name: 'requests', version: '2.31.0' } as Package];
+            const fetchPackages = sinon.stub().resolves(fetched);
+            const onChanges = sinon.stub();
+
+            const result = await updatePackagesAndNotify(
+                packageManager,
+                environment,
+                undefined,
+                onChanges,
+                fetchPackages,
+            );
+
+            assert.deepStrictEqual(result, fetched);
+            assert.ok(fetchPackages.calledOnce);
+            assert.ok(getPackagesStub.notCalled);
+        });
+
+        test('preserves undefined and does not report removals when fetching fails', async () => {
+            const before = [{ name: 'requests', version: '2.31.0' } as Package];
+            getPackagesStub.resolves(undefined);
+            const onChanges = sinon.stub();
+
+            const result = await updatePackagesAndNotify(packageManager, environment, before, onChanges);
+
+            assert.strictEqual(result, undefined);
+            assert.ok(onChanges.notCalled);
+        });
+
         test('does not fire callback when nothing changed', async () => {
             const pkgs = [{ name: 'requests', version: '2.31.0' } as Package];
             getPackagesStub.resolves(pkgs);
