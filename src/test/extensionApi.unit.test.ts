@@ -57,6 +57,63 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
     });
 });
 
+suite('PythonEnvironmentApiImpl - createEnvironment', () => {
+    setup(() => {
+        sinon.stub(managerReady, 'waitForEnvManager').resolves();
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    function createApi(create: sinon.SinonStub): PythonEnvironmentApiImpl {
+        type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
+        const mockEnvManagers = {
+            onDidChangeActiveEnvironment: new EventEmitter().event,
+            getEnvironmentManager: sinon.stub().returns({
+                id: 'ms-python.python:venv',
+                supportsCreate: true,
+                create,
+            }),
+        } as unknown as ApiArgs[0];
+
+        return new PythonEnvironmentApiImpl(
+            mockEnvManagers,
+            { getProjects: () => [], onDidChangeProjects: new EventEmitter<void>().event } as unknown as ApiArgs[1],
+            {} as unknown as ApiArgs[2],
+            {} as unknown as ApiArgs[3],
+            { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4],
+        );
+    }
+
+    test('forwards an explicit environment name to the selected manager', async () => {
+        const created = {} as PythonEnvironment;
+        const create = sinon.stub().resolves(created);
+        const api = createApi(create);
+        const scope = Uri.file('workspace');
+        const options = { name: 'analysis-env', quickCreate: true };
+
+        const result = await api.createEnvironment(scope, options);
+
+        assert.strictEqual(result, created);
+        assert.ok(create.calledOnceWithExactly(scope, options));
+    });
+
+    test('rejects invalid environment names', async () => {
+        const create = sinon.stub();
+        const api = createApi(create);
+
+        for (const name of ['   ', '.', '..', '../outside', '..\\outside', 'nested/name', 'nested\\name']) {
+            await assert.rejects(
+                api.createEnvironment(Uri.file('workspace'), { name }),
+                /must be a non-empty path segment/,
+            );
+        }
+
+        assert.ok(create.notCalled);
+    });
+});
+
 suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
     let clock: sinon.SinonFakeTimers;
 
