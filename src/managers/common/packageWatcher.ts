@@ -188,7 +188,22 @@ export function registerPackageWatchers(
     const terminalActivationDisposable = terminalActivation.onDidChangeTerminalActivationState((changes) => {
         if (changes.activated) {
             if (!closedTerminals.has(changes.terminal)) {
-                watchEnvironment(changes.terminal, changes.environment, changes.environment);
+                const projectScope = Array.from(activeEnvironmentByScope.values()).find(
+                    ({ scope, environment }) =>
+                        scope &&
+                        environment.envId.id === changes.environment.envId.id &&
+                        environment.envId.managerId === changes.environment.envId.managerId,
+                )?.scope;
+                const managerContext = projectScope ?? changes.environment;
+                const packageManager = envManagers.getPackageManager(managerContext);
+                if (!projectScope && packageManager?.supportsProjectBinding) {
+                    releaseConsumer(changes.terminal);
+                    log.debug(
+                        `Skipping unscoped package watcher for project-aware manager ${packageManager.id}`,
+                    );
+                    return;
+                }
+                watchEnvironment(changes.terminal, managerContext, changes.environment);
             }
         } else {
             releaseConsumer(changes.terminal);

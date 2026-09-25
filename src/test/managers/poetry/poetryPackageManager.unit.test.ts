@@ -97,6 +97,19 @@ suite('PoetryPackageManager', () => {
         assert.strictEqual(runPoetryStub.callCount, 0);
     });
 
+    test('unbound package management rejects before no-op exits or prompts', async () => {
+        const showInputBox = sinon.stub(windowApis, 'showInputBox');
+
+        await assert.rejects(
+            manager.manage(environment, { install: [], runHeadless: true }),
+            /require a Python project/,
+        );
+        await assert.rejects(manager.manage(environment, { install: [] }), /require a Python project/);
+
+        assert.ok(showInputBox.notCalled);
+        assert.strictEqual(runPoetryStub.callCount, 0);
+    });
+
     test('refresh rejects operations without a project', async () => {
         await assert.rejects(manager.refresh(environment), /require a Python project/);
         assert.strictEqual(runPoetryStub.callCount, 0);

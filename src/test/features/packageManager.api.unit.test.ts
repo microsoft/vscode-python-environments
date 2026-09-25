@@ -48,6 +48,7 @@ suite('PythonPackageManagerApi Tests', () => {
     let environment: typeMoq.IMock<PythonEnvironment>;
     let packageManager: typeMoq.IMock<PackageManager>;
     let onDidChangePackagesEmitter: EventEmitter<DidChangePackagesEventArgs>;
+    let projectChangesEmitter: EventEmitter<PythonProject[] | undefined>;
     let getExtensionStub: sinon.SinonStub;
 
     setup(() => {
@@ -71,6 +72,9 @@ suite('PythonPackageManagerApi Tests', () => {
 
         // Mock project manager
         projectManager = typeMoq.Mock.ofType<PythonProjectManager>();
+        projectChangesEmitter = new EventEmitter<PythonProject[] | undefined>();
+        projectManager.setup((pm) => pm.getProjects()).returns(() => []);
+        projectManager.setup((pm) => pm.onDidChangeProjects).returns(() => projectChangesEmitter.event);
         setupNonThenable(projectManager);
 
         // Create environment managers instance
@@ -96,6 +100,7 @@ suite('PythonPackageManagerApi Tests', () => {
         sinon.restore();
         envManagers.dispose();
         onDidChangePackagesEmitter.dispose();
+        projectChangesEmitter.dispose();
     });
 
     /**
@@ -805,6 +810,66 @@ suite('PythonPackageManagerApi Tests', () => {
             } as WorkspaceConfiguration);
 
             assert.strictEqual(envManagers.getPackageManager(project.uri), registeredManager);
+        });
+
+        test('Should evict scoped package managers when their project is removed', async () => {
+            disposable.dispose();
+            const projectUri = Uri.file(path.join(process.cwd(), 'removed-project'));
+            let currentProject = { name: 'original', uri: projectUri } as PythonProject;
+            projectManager.setup((pm) => pm.get(projectUri)).returns(() => currentProject);
+            const scopedManagers: PackageManager[] = [];
+            const scopedEmitters: EventEmitter<DidChangePackagesEventArgs>[] = [];
+            const provider: PackageManager = {
+                name: 'project-pkg-mgr',
+                manage: async () => undefined,
+                refresh: async () => undefined,
+                getPackages: async () => [],
+                createForProject: () => {
+                    const emitter = new EventEmitter<DidChangePackagesEventArgs>();
+                    const scopedManager: PackageManager = {
+                        name: 'project-pkg-mgr',
+                        manage: async () => undefined,
+                        refresh: async () => undefined,
+                        getPackages: async () => [],
+                        onDidChangePackages: emitter.event,
+                    };
+                    scopedEmitters.push(emitter);
+                    scopedManagers.push(scopedManager);
+                    return scopedManager;
+                },
+            };
+            disposable = envManagers.registerPackageManager(provider);
+            const registeredManager = envManagers.packageManagers[0];
+            sinon.stub(workspaceApis, 'getConfiguration').returns({
+                get: (section: string, defaultValue?: unknown) =>
+                    section === 'defaultPackageManager' ? registeredManager.id : defaultValue,
+            } as WorkspaceConfiguration);
+            const events: unknown[] = [];
+            const eventDisposable = envManagers.onDidChangePackages((event) => events.push(event));
+
+            const original = envManagers.getPackageManager(projectUri);
+            currentProject = { name: 'replacement', uri: projectUri } as PythonProject;
+            projectChangesEmitter.fire([currentProject]);
+            const replacement = envManagers.getPackageManager(projectUri);
+
+            assert.notStrictEqual(original, replacement);
+            assert.strictEqual(scopedManagers.length, 2);
+            assert.strictEqual(replacement?.project, currentProject);
+
+            const packageChange = {
+                environment: environment.object,
+                changes: [],
+            };
+            scopedEmitters[0].fire({ ...packageChange, manager: scopedManagers[0] });
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            assert.strictEqual(events.length, 0);
+
+            scopedEmitters[1].fire({ ...packageChange, manager: scopedManagers[1] });
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            assert.strictEqual(events.length, 1);
+
+            eventDisposable.dispose();
+            scopedEmitters.forEach((emitter) => emitter.dispose());
         });
     });
 });

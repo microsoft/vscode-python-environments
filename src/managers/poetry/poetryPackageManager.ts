@@ -78,6 +78,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        const cwd = await this.getProjectCwd();
         let toInstall: string[] = [...(options.install ?? [])];
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
@@ -104,7 +105,6 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
         }
 
-        const cwd = await this.getProjectCwd();
         const execute = async (token?: CancellationToken): Promise<void> => {
             try {
                 await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, cwd, token);

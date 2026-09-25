@@ -538,6 +538,61 @@ suite('Package Watcher', () => {
             assert.strictEqual(createFileSystemWatcherStub.callCount, 1);
         });
 
+        test('should reuse a project-scoped watcher for terminal activation', () => {
+            createFileSystemWatcherStub.returns(createMockWatcher());
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const scope = Uri.file('workspace');
+            const project = { name: 'project', uri: scope } as PythonProject;
+            const rootManager = new InternalPackageManager('poetry', {
+                ...createMockPackageManager(),
+                createForProject: () => createMockPackageManager() as PackageManager,
+            } as PackageManager);
+            const scopedManager = new InternalPackageManager(
+                'poetry',
+                createMockPackageManager() as PackageManager,
+                project,
+            );
+            const env = createMockEnvironment();
+            const terminal = { name: 'terminal' } as Terminal;
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox
+                    .stub()
+                    .callsFake((context) => (context instanceof Uri ? scopedManager : rootManager)),
+            } as unknown as EnvironmentManagers;
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            environmentChanges.fire({ uri: scope, new: env, old: undefined });
+            terminalActivationChanges.fire({ terminal, environment: env, activated: true });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 1);
+            assert.ok((envManagers.getPackageManager as sinon.SinonStub).calledWith(scope));
+        });
+
+        test('should skip terminal-only watchers for project-aware package managers', () => {
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const packageManager = new InternalPackageManager('poetry', {
+                ...createMockPackageManager(),
+                createForProject: () => createMockPackageManager() as PackageManager,
+            } as PackageManager);
+            const env = createMockEnvironment();
+            const terminal = { name: 'terminal' } as Terminal;
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox.stub().returns(packageManager),
+            } as unknown as EnvironmentManagers;
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            terminalActivationChanges.fire({ terminal, environment: env, activated: true });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 0);
+            assert.ok(
+                (mockLogOutputChannel.debug as sinon.SinonStub).calledWith(
+                    'Skipping unscoped package watcher for project-aware manager poetry',
+                ),
+            );
+        });
+
         test('should release a terminal environment watcher when the terminal closes', () => {
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);

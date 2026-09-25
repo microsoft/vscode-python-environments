@@ -175,7 +175,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     private _projectPackageManagers: Map<string, InternalPackageManager> = new Map();
     private readonly _packageManagerEventSubscriptions = new Map<
         string,
-        Map<Event<DidChangePackagesEventArgs>, Disposable>
+        Map<Event<DidChangePackagesEventArgs>, { disposable: Disposable; references: number }>
     >();
     private readonly subscriptions: Disposable[] = [];
 
@@ -235,6 +235,15 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         private readonly pm: PythonProjectManager,
         private readonly inlineScriptRouting?: InlineScriptRoutingRegistry,
     ) {
+        const projectChanges = this.pm.onDidChangeProjects;
+        if (projectChanges) {
+            const subscription = projectChanges((projects) =>
+                this.evictRemovedProjectPackageManagers(projects ?? this.pm.getProjects()),
+            );
+            if (subscription) {
+                this.subscriptions.push(subscription);
+            }
+        }
         if (this.inlineScriptRouting) {
             this.subscriptions.push(
                 this.inlineScriptRouting.onDidChangeRouteability((e) => {
@@ -328,6 +337,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             for (const [key, scopedManager] of this._projectPackageManagers) {
                 if (scopedManager.id === managerId) {
                     this._projectPackageManagers.delete(key);
+                    this.unsubscribeFromPackageManagerEvents(scopedManager);
                 }
             }
             this.disposePackageManagerEventSubscriptions(managerId);
@@ -485,32 +495,72 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             subscriptions = new Map();
             this._packageManagerEventSubscriptions.set(provider.id, subscriptions);
         }
-        if (subscriptions.has(event)) {
+        const existing = subscriptions.get(event);
+        if (existing) {
+            existing.references += 1;
             return;
         }
 
         subscriptions.set(
             event,
-            event((e) => {
-                this._onDidChangePackageProviderPackages.fire(e);
-                const eventManager =
-                    Array.from(this._projectPackageManagers.values()).find(
-                        (candidate) => candidate.id === provider.id && candidate.wraps(e.manager),
-                    ) ?? provider;
-                setImmediate(() =>
-                    this._onDidChangePackages.fire({
-                        environment: e.environment,
-                        manager: eventManager,
-                        changes: e.changes,
-                    }),
-                );
-            }),
+            {
+                references: 1,
+                disposable: event((e) => {
+                    this._onDidChangePackageProviderPackages.fire(e);
+                    const eventManager =
+                        Array.from(this._projectPackageManagers.values()).find(
+                            (candidate) => candidate.id === provider.id && candidate.wraps(e.manager),
+                        ) ?? provider;
+                    setImmediate(() =>
+                        this._onDidChangePackages.fire({
+                            environment: e.environment,
+                            manager: eventManager,
+                            changes: e.changes,
+                        }),
+                    );
+                }),
+            },
         );
+    }
+
+    private unsubscribeFromPackageManagerEvents(manager: InternalPackageManager): void {
+        const event = manager.packageChangeEvent;
+        if (!event) {
+            return;
+        }
+
+        const subscriptions = this._packageManagerEventSubscriptions.get(manager.id);
+        const subscription = subscriptions?.get(event);
+        if (!subscription) {
+            return;
+        }
+
+        subscription.references -= 1;
+        if (subscription.references === 0) {
+            subscription.disposable.dispose();
+            subscriptions?.delete(event);
+            if (subscriptions?.size === 0) {
+                this._packageManagerEventSubscriptions.delete(manager.id);
+            }
+        }
+    }
+
+    private evictRemovedProjectPackageManagers(projects: readonly PythonProject[]): void {
+        const projectsByPath = new Map(
+            projects.map((project) => [normalizePath(project.uri.fsPath), project] as const),
+        );
+        for (const [key, manager] of this._projectPackageManagers) {
+            const projectPath = manager.project && normalizePath(manager.project.uri.fsPath);
+            if (!projectPath || projectsByPath.get(projectPath) !== manager.project) {
+                this._projectPackageManagers.delete(key);
+                this.unsubscribeFromPackageManagerEvents(manager);
+            }
+        }
     }
 
     private disposePackageManagerEventSubscriptions(managerId: string): void {
         const subscriptions = this._packageManagerEventSubscriptions.get(managerId);
-        subscriptions?.forEach((subscription) => subscription.dispose());
+        subscriptions?.forEach(({ disposable }) => disposable.dispose());
         this._packageManagerEventSubscriptions.delete(managerId);
     }
 

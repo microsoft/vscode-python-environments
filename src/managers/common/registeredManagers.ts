@@ -291,6 +291,10 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.onDidChangePackages;
     }
 
+    get supportsProjectBinding(): boolean {
+        return this.manager.createForProject !== undefined;
+    }
+
     wraps(other: PackageManager): boolean {
         return this.manager === other;
     }
