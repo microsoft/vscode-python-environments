@@ -204,7 +204,7 @@ suite('Helpers - isUvInstalled', () => {
 
     test('falls back to the owning workspace pyprojectx executable when uv is not on PATH', async () => {
         const root = path.join(process.cwd(), 'project');
-        const uvExecutable = path.join(root, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        const uvExecutable = path.join(Uri.file(root).fsPath, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
         sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
         sinon.stub(workspaceApis, 'getWorkspaceFolder').returns({
             name: 'project',
@@ -251,7 +251,7 @@ suite('Helpers - isUvInstalled', () => {
 
     test('does not use a missing or failing workspace executable', async () => {
         const root = path.join(process.cwd(), 'project');
-        const executable = path.join(root, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        const executable = path.join(Uri.file(root).fsPath, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
         sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
         const workspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
         workspaceFolder.onFirstCall().returns(undefined);
@@ -272,7 +272,7 @@ suite('Helpers - isUvInstalled', () => {
     });
 
     test('resolves separate workspace executables for different roots', async () => {
-        const roots = ['first', 'second'].map((name) => path.join(process.cwd(), name));
+        const roots = ['first', 'second'].map((name) => Uri.file(path.join(process.cwd(), name)).fsPath);
         const executables = roots.map((root) =>
             path.join(root, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv'),
         );
