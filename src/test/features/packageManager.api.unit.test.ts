@@ -14,9 +14,10 @@
 import { Extension } from 'vscode';
 
 import * as assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { Disposable, EventEmitter, Uri } from 'vscode';
+import { Disposable, EventEmitter, Uri, WorkspaceConfiguration } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -26,8 +27,10 @@ import {
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
+    PythonProject,
 } from '../../api';
 import * as extensionApis from '../../common/extension.apis';
+import * as workspaceApis from '../../common/workspace.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import { setupNonThenable } from '../mocks/helper';
@@ -736,6 +739,72 @@ suite('PythonPackageManagerApi Tests', () => {
 
             // Assert
             assert.strictEqual(manager, undefined, 'Should return undefined for non-existent ID');
+        });
+
+        test('Should cache project-bound package managers by project', () => {
+            disposable.dispose();
+            const firstProject = {
+                name: 'first',
+                uri: Uri.file(path.join(process.cwd(), 'first-project')),
+            } as PythonProject;
+            const secondProject = {
+                name: 'second',
+                uri: Uri.file(path.join(process.cwd(), 'second-project')),
+            } as PythonProject;
+            projectManager.setup((pm) => pm.get(firstProject.uri)).returns(() => firstProject);
+            projectManager.setup((pm) => pm.get(secondProject.uri)).returns(() => secondProject);
+
+            const scopedManagers: PackageManager[] = [];
+            const scopedProvider: PackageManager = {
+                name: 'project-pkg-mgr',
+                manage: async () => undefined,
+                refresh: async () => undefined,
+                getPackages: async () => [],
+                createForProject: () => {
+                    const scopedManager: PackageManager = {
+                        name: 'project-pkg-mgr',
+                        manage: async () => undefined,
+                        refresh: async () => undefined,
+                        getPackages: async () => [],
+                    };
+                    scopedManagers.push(scopedManager);
+                    return scopedManager;
+                },
+            };
+            disposable = envManagers.registerPackageManager(scopedProvider);
+            const registeredManager = envManagers.packageManagers[0];
+            sinon.stub(workspaceApis, 'getConfiguration').returns({
+                get: (section: string, defaultValue?: unknown) =>
+                    section === 'defaultPackageManager' ? registeredManager.id : defaultValue,
+            } as WorkspaceConfiguration);
+
+            const first = envManagers.getPackageManager(firstProject.uri);
+            const repeatedFirst = envManagers.getPackageManager(firstProject.uri);
+            const second = envManagers.getPackageManager(secondProject.uri);
+
+            assert.strictEqual(first, repeatedFirst);
+            assert.notStrictEqual(first, second);
+            assert.strictEqual(scopedManagers.length, 2);
+            assert.strictEqual(first?.project, firstProject);
+            assert.strictEqual(second?.project, secondProject);
+            assert.ok(registeredManager.equals(scopedManagers[0]));
+            assert.ok(registeredManager.equals(scopedManagers[1]));
+            assert.strictEqual(envManagers.packageManagers.length, 1);
+        });
+
+        test('Should share a project-independent package manager across projects', () => {
+            const project = {
+                name: 'project',
+                uri: Uri.file(path.join(process.cwd(), 'project')),
+            } as PythonProject;
+            projectManager.setup((pm) => pm.get(project.uri)).returns(() => project);
+            const registeredManager = envManagers.packageManagers[0];
+            sinon.stub(workspaceApis, 'getConfiguration').returns({
+                get: (section: string, defaultValue?: unknown) =>
+                    section === 'defaultPackageManager' ? registeredManager.id : defaultValue,
+            } as WorkspaceConfiguration);
+
+            assert.strictEqual(envManagers.getPackageManager(project.uri), registeredManager);
         });
     });
 });

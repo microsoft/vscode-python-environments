@@ -343,7 +343,8 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
         }
         const moduleName = context.pkg.name;
         const environment = context.parent.environment;
-        const packageManager = em.getPackageManager(environment);
+        const packageManager =
+            context instanceof ProjectPackage ? context.manager : em.getPackageManager(environment);
         await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
         return;
     }
@@ -358,7 +359,8 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const pkg = context.pkg;
         const environment = context.parent.environment;
-        const packageManager = em.getPackageManager(environment);
+        const packageManager =
+            context instanceof ProjectPackage ? context.manager : em.getPackageManager(environment);
 
         if (!packageManager) {
             return;

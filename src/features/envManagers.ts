@@ -111,6 +111,7 @@ export interface EnvironmentManagers extends Disposable {
      */
     onDidChangeActiveEnvironment: Event<DidChangeEnvironmentEventArgs>;
     onDidChangePackages: Event<InternalDidChangePackagesEventArgs>;
+    onDidChangePackageProviderPackages: Event<DidChangePackagesEventArgs>;
 
     onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs>;
     onDidChangePackageManager: Event<DidChangePackageManagerEventArgs>;
@@ -171,6 +172,11 @@ function generateId(name: string, extensionId?: string): string {
 export class PythonEnvironmentManagers implements EnvironmentManagers {
     private _environmentManagers: Map<string, InternalEnvironmentManager> = new Map();
     private _packageManagers: Map<string, InternalPackageManager> = new Map();
+    private _projectPackageManagers: Map<string, InternalPackageManager> = new Map();
+    private readonly _packageManagerEventSubscriptions = new Map<
+        string,
+        Map<Event<DidChangePackagesEventArgs>, Disposable>
+    >();
     private readonly subscriptions: Disposable[] = [];
 
     /**
@@ -198,6 +204,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     /** Fires when the active (selected) environment for a scope actually changes. */
     private _onDidChangeActiveEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
     private _onDidChangePackages = new EventEmitter<InternalDidChangePackagesEventArgs>();
+    private _onDidChangePackageProviderPackages = new EventEmitter<DidChangePackagesEventArgs>();
 
     public onDidChangeEnvironmentManager: Event<DidChangeEnvironmentManagerEventArgs> =
         this._onDidChangeEnvironmentManager.event;
@@ -208,6 +215,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     public onDidChangeManagerEnvironment: Event<DidChangeEnvironmentEventArgs> =
         this._onDidChangeManagerEnvironment.event;
     public onDidChangePackages: Event<InternalDidChangePackagesEventArgs> = this._onDidChangePackages.event;
+    public onDidChangePackageProviderPackages: Event<DidChangePackagesEventArgs> =
+        this._onDidChangePackageProviderPackages.event;
 
     /** Fires only when the *selected* manager's environment for a scope actually changes. */
     public onDidChangeActiveEnvironment: Event<DidChangeEnvironmentEventArgs> =
@@ -301,20 +310,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             traceError(ex);
             throw ex;
         }
-        const disposables: Disposable[] = [];
         const mgr = new InternalPackageManager(managerId, manager);
 
-        disposables.push(
-            mgr.onDidChangePackages((e: DidChangePackagesEventArgs) => {
-                setImmediate(() =>
-                    this._onDidChangePackages.fire({
-                        environment: e.environment,
-                        manager: mgr,
-                        changes: e.changes,
-                    }),
-                );
-            }),
-        );
+        this.subscribeToPackageManagerEvents(mgr, mgr);
 
         this._packageManagers.set(managerId, mgr);
         this._onDidChangePackageManager.fire({ kind: 'registered', manager: mgr });
@@ -327,7 +325,12 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         return new Disposable(() => {
             this._packageManagers.delete(managerId);
-            disposables.forEach((d) => d.dispose());
+            for (const [key, scopedManager] of this._projectPackageManagers) {
+                if (scopedManager.id === managerId) {
+                    this._projectPackageManagers.delete(key);
+                }
+            }
+            this.disposePackageManagerEventSubscriptions(managerId);
             setImmediate(() => this._onDidChangePackageManager.fire({ kind: 'unregistered', manager: mgr }));
         });
     }
@@ -335,6 +338,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     public dispose() {
         this._environmentManagers.clear();
         this._packageManagers.clear();
+        this._projectPackageManagers.clear();
+        for (const managerId of this._packageManagerEventSubscriptions.keys()) {
+            this.disposePackageManagerEventSubscriptions(managerId);
+        }
         this._inlineRoutingOverrides.clear();
         this.subscriptions.forEach((subscription) => subscription.dispose());
         this._onDidChangeEnvironmentManager.dispose();
@@ -343,6 +350,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         this._onDidChangeManagerEnvironment.dispose();
         this._onDidChangeActiveEnvironment.dispose();
         this._onDidChangePackages.dispose();
+        this._onDidChangePackageProviderPackages.dispose();
     }
 
     /**
@@ -407,17 +415,21 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         if (context === undefined || context instanceof Uri) {
+            const project = context ? this.pm.get(context) : undefined;
             const defaultPkgManagerId = getDefaultPkgManagerSetting(this.pm, context);
             const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
             if (defaultPkgManagerId) {
-                return this._packageManagers.get(defaultPkgManagerId);
+                return this.getProjectPackageManager(this._packageManagers.get(defaultPkgManagerId), project);
             }
 
             if (defaultEnvManagerId) {
                 const preferredPkgManagerId =
                     this._environmentManagers.get(defaultEnvManagerId)?.preferredPackageManagerId;
                 if (preferredPkgManagerId) {
-                    return this._packageManagers.get(preferredPkgManagerId);
+                    return this.getProjectPackageManager(
+                        this._packageManagers.get(preferredPkgManagerId),
+                        project,
+                    );
                 }
             }
             return undefined;
@@ -437,6 +449,69 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         return undefined;
+    }
+
+    private getProjectPackageManager(
+        manager: InternalPackageManager | undefined,
+        project: PythonProject | undefined,
+    ): InternalPackageManager | undefined {
+        if (!manager || !project) {
+            return manager;
+        }
+
+        const key = `${manager.id}:${normalizePath(project.uri.fsPath)}`;
+        let scopedManager = this._projectPackageManagers.get(key);
+        if (!scopedManager) {
+            scopedManager = manager.createProjectScopedManager(project);
+            if (scopedManager) {
+                this._projectPackageManagers.set(key, scopedManager);
+                this.subscribeToPackageManagerEvents(manager, scopedManager);
+            }
+        }
+        return scopedManager ?? manager;
+    }
+
+    private subscribeToPackageManagerEvents(
+        provider: InternalPackageManager,
+        manager: InternalPackageManager,
+    ): void {
+        const event = manager.packageChangeEvent;
+        if (!event) {
+            return;
+        }
+
+        let subscriptions = this._packageManagerEventSubscriptions.get(provider.id);
+        if (!subscriptions) {
+            subscriptions = new Map();
+            this._packageManagerEventSubscriptions.set(provider.id, subscriptions);
+        }
+        if (subscriptions.has(event)) {
+            return;
+        }
+
+        subscriptions.set(
+            event,
+            event((e) => {
+                this._onDidChangePackageProviderPackages.fire(e);
+                const eventManager =
+                    Array.from(this._projectPackageManagers.values()).find(
+                        (candidate) => candidate.id === provider.id && candidate.wraps(e.manager),
+                    ) ?? provider;
+                setImmediate(() =>
+                    this._onDidChangePackages.fire({
+                        environment: e.environment,
+                        manager: eventManager,
+                        changes: e.changes,
+                    }),
+                );
+            }),
+        );
+    }
+
+    private disposePackageManagerEventSubscriptions(managerId: string): void {
+        const subscriptions = this._packageManagerEventSubscriptions.get(managerId);
+        subscriptions?.forEach((subscription) => subscription.dispose());
+        this._packageManagerEventSubscriptions.delete(managerId);
     }
 
     public get managers(): InternalEnvironmentManager[] {

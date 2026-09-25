@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import type { Pep440Version } from '@renovatebot/pep440';
-import { CancellationError, Disposable, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
+import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
 import { PackageVersionLookupNotSupportedError } from '../../publicErrors';
 import { ISSUES_URL } from '../../common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from '../../common/errors/NotSupportedError';
@@ -27,6 +27,7 @@ import type {
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
+    PythonProject,
     QuickCreateConfig,
     RefreshEnvironmentsScope,
     RemoveEnvironmentOptions,
@@ -210,10 +211,17 @@ function inferPackageManagementTrigger(
 }
 
 export class InternalPackageManager implements PackageManager {
+    private readonly relatedManagers: WeakSet<PackageManager>;
+
     public constructor(
         public readonly id: string,
         private readonly manager: PackageManager,
-    ) {}
+        public readonly project?: PythonProject,
+        relatedManagers?: WeakSet<PackageManager>,
+    ) {
+        this.relatedManagers = relatedManagers ?? new WeakSet<PackageManager>();
+        this.relatedManagers.add(manager);
+    }
 
     public get name(): string {
         return this.manager.name;
@@ -279,8 +287,21 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.onDidChangePackages ? this.manager.onDidChangePackages(handler) : new Disposable(() => {});
     }
 
-    equals(other: PackageManager): boolean {
+    get packageChangeEvent(): Event<DidChangePackagesEventArgs> | undefined {
+        return this.manager.onDidChangePackages;
+    }
+
+    wraps(other: PackageManager): boolean {
         return this.manager === other;
+    }
+
+    equals(other: PackageManager): boolean {
+        return this.relatedManagers.has(other);
+    }
+
+    createProjectScopedManager(project: PythonProject): InternalPackageManager | undefined {
+        const manager = this.manager.createForProject?.(project);
+        return manager ? new InternalPackageManager(this.id, manager, project, this.relatedManagers) : undefined;
     }
 
     getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {

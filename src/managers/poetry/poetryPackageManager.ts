@@ -23,6 +23,7 @@ import {
     PackageVersionLookupNotSupportedError,
     PythonEnvironment,
     PythonEnvironmentApi,
+    PythonProject,
 } from '../../api';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import { updatePackagesAndNotify } from '../common/packageChanges';
@@ -38,15 +39,16 @@ import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
-    private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
-    onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
+    private readonly packagesChangedEmitter = new EventEmitter<DidChangePackagesEventArgs>();
+    readonly onDidChangePackages: Event<DidChangePackagesEventArgs> = this.packagesChangedEmitter.event;
 
     private packages: Map<string, Package[]> = new Map();
 
     constructor(
         private readonly api: PythonEnvironmentApi,
         public readonly log: LogOutputChannel,
-        _poetry: PoetryManager,
+        private readonly poetryManager: PoetryManager,
+        private readonly project?: PythonProject,
     ) {
         this.name = 'poetry';
         this.displayName = 'Poetry';
@@ -59,6 +61,21 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     readonly description?: string;
     readonly tooltip?: string | MarkdownString;
     readonly iconPath?: IconPath;
+
+    /**
+     * Creates a Poetry package manager bound to a Python project.
+     *
+     * @param project The project whose working directory Poetry commands should use.
+     * @returns A Poetry package manager scoped to the project.
+     */
+    createForProject(project: PythonProject): PoetryPackageManager {
+        return new PoetryPackageManager(
+            this.api,
+            this.log,
+            this.poetryManager,
+            project,
+        );
+    }
 
     async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
         let toInstall: string[] = [...(options.install ?? [])];
@@ -87,15 +104,16 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
         }
 
+        const cwd = await this.getProjectCwd();
         const execute = async (token?: CancellationToken): Promise<void> => {
             try {
-                await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, token);
+                await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, cwd, token);
                 await updatePackagesAndNotify(
                     this,
                     environment,
                     this.packages.get(environment.envId.id),
                     (changes) => {
-                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        this.packagesChangedEmitter.fire({ environment, manager: this, changes });
                     },
                 );
             } catch (e) {
@@ -131,6 +149,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {
+        await this.getProjectCwd();
         await withProgress(
             {
                 location: ProgressLocation.Window,
@@ -143,7 +162,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                         environment,
                         this.packages.get(environment.envId.id),
                         (changes) => {
-                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                            this.packagesChangedEmitter.fire({ environment, manager: this, changes });
                         },
                     );
                     this.packages.set(environment.envId.id, packages ?? []);
@@ -162,6 +181,9 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        if (!this.project) {
+            return undefined;
+        }
         if (options?.skipCache || !this.packages.has(environment.envId.id)) {
             const packages = await this.fetchPackagesFromTool(environment);
             this.packages.set(environment.envId.id, packages);
@@ -197,12 +219,13 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     dispose(): void {
-        this._onDidChangePackages.dispose();
+        this.packagesChangedEmitter.dispose();
         this.packages.clear();
     }
 
     private async runPoetryManage(
         options: { install?: string[]; uninstall?: string[] },
+        cwd: string,
         token?: CancellationToken,
     ): Promise<void> {
         const poetry = await getPoetry();
@@ -217,6 +240,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         if (options.uninstall && options.uninstall.length > 0) {
             const removeCmd = new PoetryRemoveCommand({
                 pythonExecutable: poetry,
+                cwd,
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.uninstall);
@@ -227,6 +251,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         if (options.install && options.install.length > 0) {
             const addCmd = new PoetryAddCommand({
                 pythonExecutable: poetry,
+                cwd,
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.install);
@@ -244,7 +269,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             );
         }
 
-        const cwd = await this.getPoetryCwd(environment);
+        const cwd = await this.getProjectCwd();
         const showCmd = new PoetryShowCommand({
             pythonExecutable: poetry,
             cwd,
@@ -260,6 +285,9 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
+        if (!this.project) {
+            return undefined;
+        }
         try {
             const poetry = await getPoetry();
             if (!poetry) {
@@ -267,6 +295,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
             const showTopLevelCmd = new PoetryShowTopLevelCommand({
                 pythonExecutable: poetry,
+                cwd: await this.getProjectCwd(),
                 log: this.log,
             });
             return await showTopLevelCmd.execute();
@@ -276,12 +305,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         }
     }
 
-    private async getPoetryCwd(environment: PythonEnvironment): Promise<string | undefined> {
-        const projects = this.api.getPythonProjects();
-        if (projects.length === 0) {
-            return undefined;
+    private async getProjectCwd(): Promise<string> {
+        if (!this.project) {
+            throw new Error(l10n.t('Poetry package operations require a Python project.'));
         }
-
         const toDirectory = async (fsPath: string): Promise<string> => {
             try {
                 const stat = await fsapi.stat(fsPath);
@@ -291,20 +318,6 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
         };
 
-        if (projects.length === 1) {
-            return toDirectory(projects[0].uri.fsPath);
-        }
-
-        const matchingDirectories = new Set<string>();
-        await Promise.all(
-            projects.map(async (project) => {
-                const projectEnvironment = await this.api.getEnvironment(project.uri);
-                if (projectEnvironment?.envId.id === environment.envId.id) {
-                    matchingDirectories.add(await toDirectory(project.uri.fsPath));
-                }
-            }),
-        );
-
-        return Array.from(matchingDirectories).sort((a, b) => b.length - a.length)[0];
+        return toDirectory(this.project.uri.fsPath);
     }
 }

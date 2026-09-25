@@ -1613,6 +1613,7 @@ Reports and changes the packages of an environment.
 | `refresh(environment)` | `(environment: PythonEnvironment) => Promise<void>` | Yes | Re-reads the installed package list. |
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
+| `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
 | `getVersion(environment)` | `(environment: PythonEnvironment) => Promise<Pep440Version \| undefined>` | No | Version of the underlying tool, such as pip, uv, or conda. |

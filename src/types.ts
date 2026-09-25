@@ -719,6 +719,16 @@ export interface PackageManager {
     onDidChangePackages?: Event<DidChangePackagesEventArgs>;
 
     /**
+     * Creates a package manager bound to a Python project.
+     *
+     * Project-independent package managers can omit this method.
+     *
+     * @param project - The project to bind to the package manager.
+     * @returns A package manager that uses the project for project-sensitive operations.
+     */
+    createForProject?(project: PythonProject): PackageManager;
+
+    /**
      * Fetches the names of direct (non-transitive) packages for the specified Python environment.
      *
      * **Caveat:** Most package managers cannot track user install intent. For pip, this uses

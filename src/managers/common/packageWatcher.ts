@@ -153,7 +153,9 @@ export function registerPackageWatchers(
             return;
         }
 
-        const watcherKey = `${environment.envId.managerId}:${environment.envId.id}:${selectedPackageManager.id}`;
+        const packageManagerKey =
+            `${selectedPackageManager.id}:${selectedPackageManager.project?.uri.toString() ?? ''}`;
+        const watcherKey = `${environment.envId.managerId}:${environment.envId.id}:${packageManagerKey}`;
         if (activeWatcherByConsumer.get(consumer) === watcherKey) {
             return;
         }

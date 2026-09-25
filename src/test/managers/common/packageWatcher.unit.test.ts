@@ -4,7 +4,13 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { Disposable, EventEmitter, LogOutputChannel, RelativePattern, Terminal, Uri } from 'vscode';
-import { DidChangeEnvironmentEventArgs, PackageManager, PythonEnvironment, PythonEnvironmentId } from '../../../api';
+import {
+    DidChangeEnvironmentEventArgs,
+    PackageManager,
+    PythonEnvironment,
+    PythonEnvironmentId,
+    PythonProject,
+} from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import type { EnvironmentManagers } from '../../../features/envManagers';
@@ -406,6 +412,36 @@ suite('Package Watcher', () => {
             assert.ok((mockWatcher.dispose as sinon.SinonStub).called, 'Should dispose watcher after the final scope');
         });
 
+        test('should use separate watchers for project-bound package managers', () => {
+            createFileSystemWatcherStub.returns(createMockWatcher());
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const firstScope = Uri.file('workspace-one');
+            const secondScope = Uri.file('workspace-two');
+            const firstPackageManager = new InternalPackageManager(
+                'poetry',
+                createMockPackageManager() as PackageManager,
+                { name: 'first', uri: firstScope } as PythonProject,
+            );
+            const secondPackageManager = new InternalPackageManager(
+                'poetry',
+                createMockPackageManager() as PackageManager,
+                { name: 'second', uri: secondScope } as PythonProject,
+            );
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox
+                    .stub()
+                    .callsFake((scope) => (scope === firstScope ? firstPackageManager : secondPackageManager)),
+            } as unknown as EnvironmentManagers;
+            const env = createMockEnvironment();
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            environmentChanges.fire({ uri: firstScope, new: env, old: undefined });
+            environmentChanges.fire({ uri: secondScope, new: env, old: undefined });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+        });
+
         test('should stop watching an environment when the active environment changes', () => {
             const firstWatcher = createMockWatcher();
             const secondWatcher = createMockWatcher();
@@ -573,10 +609,16 @@ suite('Package Watcher', () => {
                 configurationChanges.event(listener),
             );
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
-            const firstPackageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
-            const secondPackageManager = new InternalPackageManager(
-                'conda',
+            const project = { name: 'project', uri: Uri.file('workspace') } as PythonProject;
+            const firstPackageManager = new InternalPackageManager(
+                'first',
                 createMockPackageManager() as PackageManager,
+                project,
+            );
+            const secondPackageManager = new InternalPackageManager(
+                'second',
+                createMockPackageManager() as PackageManager,
+                project,
             );
             let selectedPackageManager = firstPackageManager;
             const envManagers = {

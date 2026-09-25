@@ -16,7 +16,10 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
         } as unknown as PythonProjectManager;
 
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
-        const mockEnvManagers = { onDidChangeActiveEnvironment: new EventEmitter().event } as unknown as ApiArgs[0];
+        const mockEnvManagers = {
+            onDidChangeActiveEnvironment: new EventEmitter().event,
+            onDidChangePackageProviderPackages: new EventEmitter().event,
+        } as unknown as ApiArgs[0];
         const mockProjectCreators = {} as unknown as ApiArgs[2];
         const mockTerminalManager = {} as unknown as ApiArgs[3];
         const mockEnvVarManager = { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4];
@@ -91,6 +94,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
         const mockEnvManagers = {
             onDidChangeActiveEnvironment: new EventEmitter().event,
+            onDidChangePackageProviderPackages: new EventEmitter().event,
             getEnvironment: sinon.stub().returns(
                 new Promise<PythonEnvironment | undefined>((resolve) => {
                     resolveEnvironment = resolve;
@@ -134,6 +138,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
         const mockEnvManagers = {
             onDidChangeActiveEnvironment: new EventEmitter().event,
+            onDidChangePackageProviderPackages: new EventEmitter().event,
             getEnvironment: sinon.stub().returns(
                 new Promise<PythonEnvironment | undefined>((resolve) => {
                     resolveEnvironment = resolve;

@@ -21,17 +21,12 @@ suite('PoetryPackageManager', () => {
     });
     let logError: sinon.SinonStub;
     let manager: PoetryPackageManager;
+    let projectManager: PoetryPackageManager;
     let runPoetryStub: sinon.SinonStub;
+    const projectUri = Uri.file(path.join(process.cwd(), 'project', 'pyproject.toml'));
 
     setup(() => {
-        const api = {
-            getPythonProjects: () => [
-                {
-                    name: 'project',
-                    uri: Uri.file(path.join(process.cwd(), 'project', 'pyproject.toml')),
-                },
-            ],
-        } as unknown as PythonEnvironmentApi;
+        const api = {} as PythonEnvironmentApi;
         logError = sinon.stub();
         const log = {
             append: sinon.stub(),
@@ -45,6 +40,7 @@ suite('PoetryPackageManager', () => {
         sinon.stub(packageChanges, 'updatePackagesAndNotify').resolves([]);
         runPoetryStub = sinon.stub(runPoetryModule, 'runPoetry').resolves('');
         manager = new PoetryPackageManager(api, log, {} as PoetryManager);
+        projectManager = manager.createForProject({ name: 'project', uri: projectUri });
     });
 
     teardown(() => {
@@ -52,28 +48,57 @@ suite('PoetryPackageManager', () => {
         sinon.restore();
     });
 
-    test('package management inherits the process working directory', async () => {
-        await manager.manage(environment, { install: ['requests'], uninstall: ['flask'] });
+    test('package management uses the project working directory', async () => {
+        await projectManager.manage(environment, { install: ['requests'], uninstall: ['flask'] });
 
         assert.strictEqual(runPoetryStub.callCount, 2);
-        assert.strictEqual(runPoetryStub.firstCall.args[1], undefined);
-        assert.strictEqual(runPoetryStub.secondCall.args[1], undefined);
+        assert.strictEqual(runPoetryStub.firstCall.args[1], path.dirname(projectUri.fsPath));
+        assert.strictEqual(runPoetryStub.secondCall.args[1], path.dirname(projectUri.fsPath));
     });
 
-    test('direct package listing inherits the process working directory', async () => {
-        await manager.getDirectPackageNames(environment);
+    test('direct package listing uses the project working directory', async () => {
+        await projectManager.getDirectPackageNames(environment);
 
         assert.strictEqual(runPoetryStub.callCount, 1);
-        assert.strictEqual(runPoetryStub.firstCall.args[1], undefined);
+        assert.strictEqual(runPoetryStub.firstCall.args[1], path.dirname(projectUri.fsPath));
+    });
+
+    test('directory project URIs are used directly as the working directory', async () => {
+        const directoryUri = Uri.file(process.cwd());
+        const directoryManager = manager.createForProject({ name: 'directory-project', uri: directoryUri });
+
+        await directoryManager.getDirectPackageNames(environment);
+
+        assert.strictEqual(runPoetryStub.callCount, 1);
+        assert.strictEqual(runPoetryStub.firstCall.args[1], directoryUri.fsPath);
     });
 
     test('package loading returns an empty list when poetry show fails', async () => {
         const showError = new Error('poetry show failed');
         runPoetryStub.rejects(showError);
 
-        const packages = await manager.getPackages(environment, { skipCache: true });
+        const packages = await projectManager.getPackages(environment, { skipCache: true });
 
         assert.deepStrictEqual(packages, []);
         assert.ok(logError.calledOnceWithExactly(`Error refreshing packages with Poetry: ${showError}`));
+    });
+
+    test('project-sensitive reads are unavailable without a project', async () => {
+        assert.strictEqual(await manager.getPackages(environment), undefined);
+        assert.strictEqual(await manager.getDirectPackageNames(environment), undefined);
+        assert.strictEqual(runPoetryStub.callCount, 0);
+    });
+
+    test('package management rejects operations without a project', async () => {
+        await assert.rejects(
+            manager.manage(environment, { install: ['requests'] }),
+            /require a Python project/,
+        );
+        assert.strictEqual(runPoetryStub.callCount, 0);
+    });
+
+    test('refresh rejects operations without a project', async () => {
+        await assert.rejects(manager.refresh(environment), /require a Python project/);
+        assert.strictEqual(runPoetryStub.callCount, 0);
     });
 });

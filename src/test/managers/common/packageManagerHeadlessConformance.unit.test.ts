@@ -202,7 +202,10 @@ suite('Package manager headless conformance', () => {
             getProjectsByEnvironment: sinon.stub().returns([]),
         } as unknown as VenvManager);
         const conda = new CondaPackageManager(api, log);
-        const poetry = new PoetryPackageManager(api, log, {} as PoetryManager);
+        const poetry = new PoetryPackageManager(api, log, {} as PoetryManager).createForProject({
+            name: 'project',
+            uri: Uri.file(process.cwd()),
+        });
         return { pip, conda, poetry, all: [pip, conda, poetry] };
     }
 
