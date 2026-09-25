@@ -27,6 +27,7 @@ import {
 } from '../../api';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
+import { PackageManagerRequiresProjectError } from '../common/errors';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import {
@@ -150,7 +151,9 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     }
 
     async refresh(environment: PythonEnvironment): Promise<void> {
-        await this.getProjectCwd();
+        if (!this.project) {
+            return;
+        }
         await withProgress(
             {
                 location: ProgressLocation.Window,
@@ -308,12 +311,14 @@ export class PoetryPackageManager implements PackageManager, Disposable {
 
     private async getProjectCwd(): Promise<string> {
         if (!this.project) {
-            throw new Error(l10n.t('Poetry package operations require a Python project.'));
+            throw new PackageManagerRequiresProjectError();
         }
 
         try {
             const stat = await workspaceFs.stat(this.project.uri);
-            return stat.type === FileType.Directory ? this.project.uri.fsPath : path.dirname(this.project.uri.fsPath);
+            return (stat.type & FileType.Directory) === FileType.Directory
+                ? this.project.uri.fsPath
+                : path.dirname(this.project.uri.fsPath);
         } catch (error) {
             const message = l10n.t('Unable to access the Python project at "{0}".', this.project.uri.fsPath);
             this.log.error(message, error);

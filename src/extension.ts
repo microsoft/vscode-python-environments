@@ -115,6 +115,7 @@ import {
     NativePythonFinder,
 } from './managers/common/nativePythonFinder';
 import { registerPackageWatchers } from './managers/common/packageWatcher';
+import { PackageManagerRequiresProjectError } from './managers/common/errors';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPipenvFeatures } from './managers/pipenv/main';
@@ -367,8 +368,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 return;
             }
             try {
-                resolved.packageManager.manage(resolved.environment, { install: [] });
+                await resolved.packageManager.manage(resolved.environment, { install: [] });
             } catch (err) {
+                if (err instanceof PackageManagerRequiresProjectError) {
+                    await window.showErrorMessage(err.message);
+                    return;
+                }
                 traceError('Error when running command python-envs.packages', err);
             }
         }),

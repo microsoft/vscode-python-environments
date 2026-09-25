@@ -31,6 +31,7 @@ import type {
     InternalEnvironmentManager,
     InternalPackageManager,
 } from '../managers/common/registeredManagers';
+import { PackageManagerRequiresProjectError } from '../managers/common/errors';
 import {
     removePythonProjectSetting,
     setEnvironmentManager,
@@ -345,7 +346,15 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
         const environment = context.parent.environment;
         const packageManager =
             context instanceof ProjectPackage ? context.manager : em.getPackageManager(environment);
-        await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
+        try {
+            await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
+        } catch (error) {
+            if (error instanceof PackageManagerRequiresProjectError) {
+                await showErrorMessage(error.message);
+                return;
+            }
+            throw error;
+        }
         return;
     }
     traceError(`Invalid context for uninstall command: ${typeof context}`);
@@ -434,10 +443,18 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
             return;
         }
 
-        await packageManager.manage(environment, {
-            install: [packageManager.formatInstallSpec(pkg.name, version)],
-            uninstall: [],
-        });
+        try {
+            await packageManager.manage(environment, {
+                install: [packageManager.formatInstallSpec(pkg.name, version)],
+                uninstall: [],
+            });
+        } catch (error) {
+            if (error instanceof PackageManagerRequiresProjectError) {
+                await showErrorMessage(error.message);
+                return;
+            }
+            throw error;
+        }
     } else {
         traceError(`Invalid context for manage package version command: ${typeof context}`);
     }

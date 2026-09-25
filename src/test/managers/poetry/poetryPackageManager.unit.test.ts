@@ -78,6 +78,22 @@ suite('PoetryPackageManager', () => {
         assert.strictEqual(runPoetryStub.firstCall.args[1], directoryUri.fsPath);
     });
 
+    test('symlinked directory project URIs are used directly as the working directory', async () => {
+        const symlinkedDirectoryUri = Uri.file(path.join(process.cwd(), 'symlinked-project'));
+        statStub
+            .withArgs(symlinkedDirectoryUri)
+            .resolves({ type: FileType.Directory | FileType.SymbolicLink, ctime: 0, mtime: 0, size: 0 });
+        const symlinkedDirectoryManager = manager.createForProject({
+            name: 'symlinked-directory-project',
+            uri: symlinkedDirectoryUri,
+        });
+
+        await symlinkedDirectoryManager.getDirectPackageNames(environment);
+
+        assert.strictEqual(runPoetryStub.callCount, 1);
+        assert.strictEqual(runPoetryStub.firstCall.args[1], symlinkedDirectoryUri.fsPath);
+    });
+
     test('inaccessible projects reject instead of falling back to the parent directory', async () => {
         const inaccessibleUri = Uri.file(path.join(process.cwd(), 'missing-project'));
         statStub.withArgs(inaccessibleUri).rejects(new Error('access denied'));
@@ -128,8 +144,8 @@ suite('PoetryPackageManager', () => {
         assert.strictEqual(runPoetryStub.callCount, 0);
     });
 
-    test('refresh rejects operations without a project', async () => {
-        await assert.rejects(manager.refresh(environment), /require a Python project/);
+    test('refresh is a no-op without a project', async () => {
+        await manager.refresh(environment);
         assert.strictEqual(runPoetryStub.callCount, 0);
     });
 });
