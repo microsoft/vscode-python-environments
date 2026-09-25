@@ -65,7 +65,7 @@ parameters:
         packageArch: x64
         vsceTarget: darwin-x64
       - name: Windows
-        packageArch: arm
+        packageArch: arm64
         vsceTarget: win32-arm64
       - name: Windows
         packageArch: x64
@@ -119,7 +119,7 @@ parameters:
           buildType: specific
           project: Monaco
           definition: 591
-          buildVersionToDownload: latest
+          buildVersionToDownload: latestFromBranch
           branchName: refs/heads/main
           targetPath: $(Build.SourcesDirectory)/python-env-tools/bin
           artifactName: bin-$(buildTarget)
