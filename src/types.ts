@@ -715,6 +715,9 @@ export interface PackageManager {
 
     /**
      * Event that is fired when packages change.
+     *
+     * A manager returned by createForProject must report that exact manager instance in
+     * DidChangePackagesEventArgs.manager, even when root and scoped managers share an emitter.
      */
     onDidChangePackages?: Event<DidChangePackagesEventArgs>;
 
@@ -734,6 +737,14 @@ export interface PackageManager {
      * @returns A package manager that uses the project for project-sensitive operations.
      */
     createForProject?(project: PythonProject): PackageManager;
+
+    /**
+     * Releases resources owned by this package manager.
+     *
+     * The extension invokes this method for managers returned by createForProject when their
+     * project is removed or replaced, their provider is unregistered, or the extension shuts down.
+     */
+    dispose?(): void;
 
     /**
      * Fetches the names of direct (non-transitive) packages for the specified Python environment.

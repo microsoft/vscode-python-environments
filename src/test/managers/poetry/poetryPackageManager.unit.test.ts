@@ -8,6 +8,7 @@ import { FileType, LogOutputChannel, Uri } from 'vscode';
 import { PythonEnvironmentApi } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceFs from '../../../common/workspace.fs.apis';
+import { PackageManagerRequiresProjectError } from '../../../managers/common/errors';
 import * as packageChanges from '../../../managers/common/packageChanges';
 import * as runPoetryModule from '../../../managers/poetry/commands/runPoetry';
 import { PoetryPackageManager } from '../../../managers/poetry/poetryPackageManager';
@@ -144,8 +145,8 @@ suite('PoetryPackageManager', () => {
         assert.strictEqual(runPoetryStub.callCount, 0);
     });
 
-    test('refresh is a no-op without a project', async () => {
-        await manager.refresh(environment);
+    test('refresh rejects without a project', async () => {
+        await assert.rejects(manager.refresh(environment), PackageManagerRequiresProjectError);
         assert.strictEqual(runPoetryStub.callCount, 0);
     });
 });

@@ -145,9 +145,7 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
         }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const pkgManager =
-            (await managers?.resolvePackageManager(view.environment)) ??
-            managers?.getPackageManager(view.environment);
+        const pkgManager = await managers?.resolvePackageManager(view.environment);
         if (pkgManager) {
             await pkgManager.refresh(view.environment);
         }

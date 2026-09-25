@@ -1614,6 +1614,7 @@ Reports and changes the packages of an environment.
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
 | `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
+| `dispose()` | `() => void` | No | Releases resources owned by the manager. The extension disposes project-scoped managers when their project is removed or replaced, their provider is unregistered, or the extension shuts down. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
 | `getVersion(environment)` | `(environment: PythonEnvironment) => Promise<Pep440Version \| undefined>` | No | Version of the underlying tool, such as pip, uv, or conda. |
@@ -1635,7 +1636,12 @@ manager as an unbound fallback, while package views can suppress operations when
 there is no unique project. Project-sensitive methods on the root manager must
 therefore fail clearly or report that data is unavailable rather than running
 from the extension host's working directory. Keep project-specific caches and
-mutable state on the manager returned by `createForProject`.
+mutable state on the manager returned by `createForProject`, and implement
+`dispose` when that manager owns resources.
+
+When a scoped manager fires `onDidChangePackages`, the event's `manager` must be
+the exact scoped instance returned by `createForProject`. This requirement also
+applies when root and scoped managers share an event emitter.
 
 ```typescript
 class ProjectPackageManager implements PackageManager {
@@ -1645,6 +1651,10 @@ class ProjectPackageManager implements PackageManager {
 
     createForProject(project: PythonProject): PackageManager {
         return new ProjectPackageManager(project);
+    }
+
+    dispose(): void {
+        // Release project-specific watchers or processes.
     }
 
     async manage(

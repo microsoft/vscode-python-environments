@@ -152,7 +152,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
 
     async refresh(environment: PythonEnvironment): Promise<void> {
         if (!this.project) {
-            return;
+            throw new PackageManagerRequiresProjectError();
         }
         await withProgress(
             {

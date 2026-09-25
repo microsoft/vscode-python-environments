@@ -212,6 +212,8 @@ function inferPackageManagementTrigger(
 
 export class InternalPackageManager implements PackageManager {
     private readonly relatedManagers: WeakSet<PackageManager>;
+    private readonly packageChangeEventValue: Event<DidChangePackagesEventArgs> | undefined;
+    private isDisposed = false;
     public readonly createForProject?: (project: PythonProject) => InternalPackageManager;
 
     public constructor(
@@ -222,6 +224,15 @@ export class InternalPackageManager implements PackageManager {
     ) {
         this.relatedManagers = relatedManagers ?? new WeakSet<PackageManager>();
         this.relatedManagers.add(manager);
+        const packageChangeEvent = manager.onDidChangePackages;
+        if (packageChangeEvent) {
+            this.packageChangeEventValue = (listener) =>
+                packageChangeEvent((event) => {
+                    if (event.manager === manager) {
+                        listener(event);
+                    }
+                });
+        }
         const createForProject = manager.createForProject?.bind(manager);
         if (createForProject) {
             this.createForProject = (scopedProject) => {
@@ -300,11 +311,11 @@ export class InternalPackageManager implements PackageManager {
     }
 
     onDidChangePackages(handler: (e: DidChangePackagesEventArgs) => void): Disposable {
-        return this.manager.onDidChangePackages ? this.manager.onDidChangePackages(handler) : new Disposable(() => {});
+        return this.packageChangeEventValue ? this.packageChangeEventValue(handler) : new Disposable(() => {});
     }
 
     get packageChangeEvent(): Event<DidChangePackagesEventArgs> | undefined {
-        return this.manager.onDidChangePackages;
+        return this.packageChangeEventValue;
     }
 
     wraps(other: PackageManager): boolean {
@@ -313,6 +324,13 @@ export class InternalPackageManager implements PackageManager {
 
     equals(other: PackageManager): boolean {
         return this.relatedManagers.has(other);
+    }
+
+    dispose(): void {
+        if (!this.isDisposed) {
+            this.isDisposed = true;
+            this.manager.dispose?.();
+        }
     }
 
     getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {

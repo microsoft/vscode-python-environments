@@ -4,7 +4,7 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Disposable, EventEmitter, Uri, WorkspaceConfiguration } from 'vscode';
+import { Disposable, Event, EventEmitter, Uri, WorkspaceConfiguration } from 'vscode';
 import {
     DidChangeEnvironmentVariablesEventArgs,
     DidChangePackagesEventArgs,
@@ -35,6 +35,7 @@ for (const inlineEnabled of [false, true]) {
         let scopedProvider: PackageManager | undefined;
         let emitter: EventEmitter<DidChangePackagesEventArgs>;
         let scopedEmitter: EventEmitter<DidChangePackagesEventArgs>;
+        let scopedEvent: Event<DidChangePackagesEventArgs>;
         let project: PythonProject;
         let routing: InlineScriptRoutingRegistry | undefined;
         let disposables: Disposable[];
@@ -67,6 +68,7 @@ for (const inlineEnabled of [false, true]) {
             );
             emitter = new EventEmitter<DidChangePackagesEventArgs>();
             scopedEmitter = new EventEmitter<DidChangePackagesEventArgs>();
+            scopedEvent = scopedEmitter.event;
             provider = {
                 name: 'custom',
                 manage: async () => undefined,
@@ -79,7 +81,7 @@ for (const inlineEnabled of [false, true]) {
                         manage: async () => undefined,
                         refresh: async () => undefined,
                         getPackages: async () => [],
-                        onDidChangePackages: scopedEmitter.event,
+                        onDidChangePackages: scopedEvent,
                     };
                     return scopedProvider;
                 },
@@ -174,6 +176,27 @@ for (const inlineEnabled of [false, true]) {
             assert.strictEqual(internalEvents[0].manager, scopedManager);
             assert.strictEqual(internalEvents[0].changes, scopedChanges);
             assert.strictEqual(scopedChanges[0].pkg.pkgId.managerId, scopedManager.id);
+        });
+
+        test('routes a shared emitter event by the exact scoped manager instance', () => {
+            scopedEvent = emitter.event;
+            const scopedManager = managers.getPackageManager(project.uri);
+            assert.ok(scopedManager);
+            assert.ok(scopedProvider);
+
+            const event: DidChangePackagesEventArgs = {
+                environment,
+                manager: scopedProvider,
+                changes,
+            };
+
+            emitter.fire(event);
+            clock.runAll();
+
+            assert.strictEqual(publicEvents.length, 1);
+            assert.strictEqual(publicEvents[0], event);
+            assert.strictEqual(internalEvents.length, 1);
+            assert.strictEqual(internalEvents[0].manager, scopedManager);
         });
     });
 }

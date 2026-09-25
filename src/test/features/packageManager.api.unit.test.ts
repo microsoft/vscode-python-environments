@@ -1007,6 +1007,7 @@ suite('PythonPackageManagerApi Tests', () => {
             projectManager.setup((pm) => pm.get(projectUri)).returns(() => currentProject);
             const scopedManagers: PackageManager[] = [];
             const scopedEmitters: EventEmitter<DidChangePackagesEventArgs>[] = [];
+            const scopedDisposers: sinon.SinonStub[] = [];
             const provider: PackageManager = {
                 name: 'project-pkg-mgr',
                 manage: async () => undefined,
@@ -1014,14 +1015,17 @@ suite('PythonPackageManagerApi Tests', () => {
                 getPackages: async () => [],
                 createForProject: () => {
                     const emitter = new EventEmitter<DidChangePackagesEventArgs>();
+                    const dispose = sinon.stub();
                     const scopedManager: PackageManager = {
                         name: 'project-pkg-mgr',
                         manage: async () => undefined,
                         refresh: async () => undefined,
                         getPackages: async () => [],
                         onDidChangePackages: emitter.event,
+                        dispose,
                     };
                     scopedEmitters.push(emitter);
+                    scopedDisposers.push(dispose);
                     scopedManagers.push(scopedManager);
                     return scopedManager;
                 },
@@ -1043,6 +1047,8 @@ suite('PythonPackageManagerApi Tests', () => {
             assert.notStrictEqual(original, replacement);
             assert.strictEqual(scopedManagers.length, 2);
             assert.strictEqual(replacement?.project, currentProject);
+            assert.ok(scopedDisposers[0].calledOnce);
+            assert.ok(scopedDisposers[1].notCalled);
 
             const packageChange = {
                 environment: environment.object,
@@ -1058,6 +1064,72 @@ suite('PythonPackageManagerApi Tests', () => {
 
             eventDisposable.dispose();
             scopedEmitters.forEach((emitter) => emitter.dispose());
+        });
+
+        test('Should dispose scoped package managers when their provider is unregistered', () => {
+            disposable.dispose();
+            const project = {
+                name: 'project',
+                uri: Uri.file(path.join(process.cwd(), 'unregistered-provider-project')),
+            } as PythonProject;
+            projectManager.setup((pm) => pm.get(typeMoq.It.isAny())).returns(() => project);
+            const scopedDispose = sinon.stub();
+            disposable = envManagers.registerPackageManager({
+                name: 'project-pkg-mgr',
+                manage: async () => undefined,
+                refresh: async () => undefined,
+                getPackages: async () => [],
+                createForProject: () => ({
+                    name: 'project-pkg-mgr',
+                    manage: async () => undefined,
+                    refresh: async () => undefined,
+                    getPackages: async () => [],
+                    dispose: scopedDispose,
+                }),
+            });
+            const registeredManager = envManagers.packageManagers[0];
+            sinon.stub(workspaceApis, 'getConfiguration').returns({
+                get: (section: string, defaultValue?: unknown) =>
+                    section === 'defaultPackageManager' ? registeredManager.id : defaultValue,
+            } as WorkspaceConfiguration);
+            assert.ok(envManagers.getPackageManager(project.uri)?.project);
+
+            disposable.dispose();
+
+            assert.ok(scopedDispose.calledOnce);
+        });
+
+        test('Should dispose scoped package managers during environment-manager shutdown', () => {
+            disposable.dispose();
+            const project = {
+                name: 'project',
+                uri: Uri.file(path.join(process.cwd(), 'shutdown-project')),
+            } as PythonProject;
+            projectManager.setup((pm) => pm.get(typeMoq.It.isAny())).returns(() => project);
+            const scopedDispose = sinon.stub();
+            disposable = envManagers.registerPackageManager({
+                name: 'project-pkg-mgr',
+                manage: async () => undefined,
+                refresh: async () => undefined,
+                getPackages: async () => [],
+                createForProject: () => ({
+                    name: 'project-pkg-mgr',
+                    manage: async () => undefined,
+                    refresh: async () => undefined,
+                    getPackages: async () => [],
+                    dispose: scopedDispose,
+                }),
+            });
+            const registeredManager = envManagers.packageManagers[0];
+            sinon.stub(workspaceApis, 'getConfiguration').returns({
+                get: (section: string, defaultValue?: unknown) =>
+                    section === 'defaultPackageManager' ? registeredManager.id : defaultValue,
+            } as WorkspaceConfiguration);
+            assert.ok(envManagers.getPackageManager(project.uri)?.project);
+
+            envManagers.dispose();
+
+            assert.ok(scopedDispose.calledOnce);
         });
     });
 });
