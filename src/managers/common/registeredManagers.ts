@@ -236,6 +236,7 @@ export class InternalPackageManager implements PackageManager {
         const createForProject = manager.createForProject?.bind(manager);
         if (createForProject) {
             this.createForProject = (scopedProject) => {
+                this.throwIfDisposed();
                 const scopedManager = createForProject(scopedProject);
                 if (!scopedManager) {
                     throw new Error(`Package manager ${this.id} did not create a manager for the requested project`);
@@ -270,6 +271,7 @@ export class InternalPackageManager implements PackageManager {
     }
 
     async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        this.throwIfDisposed();
         const stopWatch = new StopWatch();
         const triggerSource = inferPackageManagementTrigger(options);
         try {
@@ -299,14 +301,17 @@ export class InternalPackageManager implements PackageManager {
     }
 
     refresh(environment: PythonEnvironment): Promise<void> {
+        this.throwIfDisposed();
         return this.manager.refresh(environment);
     }
 
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        this.throwIfDisposed();
         return this.manager.getPackages(environment, options);
     }
 
     getPackageWatchTargets(environment: PythonEnvironment): RelativePattern[] {
+        this.throwIfDisposed();
         return this.manager.getPackageWatchTargets?.(environment) ?? [];
     }
 
@@ -334,6 +339,7 @@ export class InternalPackageManager implements PackageManager {
     }
 
     getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        this.throwIfDisposed();
         return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
     }
 
@@ -356,6 +362,7 @@ export class InternalPackageManager implements PackageManager {
         packageName: string,
         options?: GetPackageAvailableVersionsOptions,
     ): Promise<Pep440Version[] | undefined> {
+        this.throwIfDisposed();
         const shouldThrow = options?.errorMode === 'throw';
         try {
             if (!this.manager.getPackageAvailableVersions) {
@@ -379,14 +386,22 @@ export class InternalPackageManager implements PackageManager {
     }
 
     getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
+        this.throwIfDisposed();
         return this.manager.getDirectPackageNames
             ? this.manager.getDirectPackageNames(environment)
             : Promise.resolve(undefined);
     }
 
     formatInstallSpec(packageName: string, version: string): string {
+        this.throwIfDisposed();
         return this.manager.formatInstallSpec
             ? this.manager.formatInstallSpec(packageName, version)
             : `${packageName}==${version}`;
+    }
+
+    private throwIfDisposed(): void {
+        if (this.isDisposed) {
+            throw new Error(`Package manager ${this.id} has been disposed`);
+        }
     }
 }

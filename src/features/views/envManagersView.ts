@@ -115,6 +115,9 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             this.providers.onDidChangePackageManager((p: DidChangePackageManagerEventArgs) => {
                 this.onDidChangePackageManager(p);
             }),
+            this.providers.onDidChangeProjectPackageManager(() => {
+                this.fireDataChanged(undefined);
+            }),
         );
 
         this.disposables.push(
@@ -240,7 +243,7 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         if (element.kind === EnvTreeItemKind.environment) {
             const pythonEnvItem = element as PythonEnvTreeItem;
             const environment = pythonEnvItem.environment;
-            const pkgManager = await this.providers.resolvePackageManager(environment);
+            const { manager: pkgManager } = this.providers.resolvePackageManagerForEnvironment(environment);
             const parent = element as PythonEnvTreeItem;
             const views: EnvTreeItem[] = [];
 

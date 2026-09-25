@@ -138,14 +138,14 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
     if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
         if (managers) {
-            const pkgManager = await managers.resolvePackageManager(view.environment, view.parent.project);
+            const pkgManager = managers.getPackageManagerForProject(view.parent.project);
             if (pkgManager) {
                 await pkgManager.refresh(view.environment);
             }
         }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const pkgManager = await managers?.resolvePackageManager(view.environment);
+        const pkgManager = managers?.resolvePackageManagerForEnvironment(view.environment).manager;
         if (pkgManager) {
             await pkgManager.refresh(view.environment);
         }
@@ -793,7 +793,7 @@ async function resolvePackageCommandOptions(
 
     if (e instanceof ProjectEnvironment) {
         const environment = e.environment;
-        const packageManager = await em.resolvePackageManager(environment, e.parent.project);
+        const packageManager = em.getPackageManagerForProject(e.parent.project);
         if (packageManager) {
             return { environment, packageManager };
         }
@@ -801,9 +801,14 @@ async function resolvePackageCommandOptions(
 
     if (e instanceof PythonEnvTreeItem) {
         const environment = e.environment;
-        const packageManager = (await em.resolvePackageManager(environment)) ?? em.getPackageManager(environment);
-        if (packageManager) {
-            return { environment, packageManager };
+        const resolution = em.resolvePackageManagerForEnvironment(environment);
+        switch (resolution.kind) {
+            case 'resolved':
+                return { environment, packageManager: resolution.manager };
+            case 'projectRequired':
+                throw new PackageManagerRequiresProjectError();
+            case 'notFound':
+                break;
         }
     }
 

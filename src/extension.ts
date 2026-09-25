@@ -298,9 +298,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                   commands.registerCommand(
                       'python-envs.test.getDirectPackageNames',
                       async (environment: PythonEnvironment) => {
-                          const manager =
-                              (await envManagers.resolvePackageManager(environment)) ??
-                              envManagers.getPackageManager(environment);
+                          const { manager } = envManagers.resolvePackageManagerForEnvironment(environment);
                           const names = await manager?.getDirectPackageNames?.(environment);
                           return names ? Array.from(names) : undefined;
                       },
@@ -361,11 +359,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             try {
                 resolved = await getPackageCommandOptions(options, envManagers, projectManager);
             } catch (err) {
-                if (!(err instanceof InlineScriptPackagesNotManagedError)) {
+                if (
+                    !(err instanceof InlineScriptPackagesNotManagedError) &&
+                    !(err instanceof PackageManagerRequiresProjectError)
+                ) {
                     // Preserve the existing contract: other resolution failures still surface.
                     throw err;
                 }
-                traceError('Rejected a package command for an inline-script environment:', err);
+                traceError('Rejected a package command for the selected environment:', err);
                 await window.showErrorMessage(err.message);
                 return;
             }

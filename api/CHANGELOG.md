@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added the optional `PackageManager.createForProject` factory for package managers whose operations depend on the calling Python project. Explicit project contexts are used directly; environment-only operations use a scoped manager only when exactly one tracked project matches.
 - Added optional `PackageManager.dispose` support for releasing resources owned by project-scoped package managers.
+- Added `PackageManagerRequiresProjectError` and `isPackageManagerRequiresProjectError` for environment-only package mutations and refreshes that cannot identify a unique project.
+
+### Changed
+
+- Environment-only package operations no longer fall back to an unbound project-aware package manager. Package reads return `undefined`; mutations and refreshes reject with `PackageManagerRequiresProjectError`.
 
 ## [1.4.0]
 

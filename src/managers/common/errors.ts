@@ -2,18 +2,10 @@
 // Licensed under the MIT License.
 
 import { l10n } from 'vscode';
+import { PackageManagerRequiresProjectError as PublicPackageManagerRequiresProjectError } from '../../publicErrors';
 
-/**
- * Raised when a package-management operation is invoked on a package manager that is not
- * bound to a Python project.
- *
- * Callers that resolve package managers without a specific project (e.g. the environment
- * manager view) should catch this error and surface a friendly message rather than letting
- * it propagate as an unhandled failure.
- */
-export class PackageManagerRequiresProjectError extends Error {
+export class PackageManagerRequiresProjectError extends PublicPackageManagerRequiresProjectError {
     constructor() {
         super(l10n.t('Package operations require a Python project.'));
-        this.name = 'PackageManagerRequiresProjectError';
     }
 }

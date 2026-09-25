@@ -726,9 +726,8 @@ export interface PackageManager {
      *
      * The extension uses the explicit project supplied by project-based callers. When a caller
      * provides only an environment, the extension uses a project-bound manager only if exactly
-     * one tracked project uses that environment. The registered root manager may still receive
-     * environment-only operations when no project can be selected safely, so project-sensitive
-     * operations must handle an unbound manager without running in an arbitrary working directory.
+     * one tracked project uses that environment. It does not invoke project-sensitive operations
+     * on the registered root manager when no project can be selected safely.
      *
      * Project-independent package managers can omit this method. Implementations should keep
      * project-specific caches and mutable state on the returned manager rather than the root.
@@ -1180,6 +1179,8 @@ export interface PythonPackageGetterApi {
      *
      * @param environment The Python Environment for which the list of packages is to be refreshed.
      * @returns A promise that resolves when the list of packages has been refreshed.
+     * @throws {@link PackageManagerRequiresProjectError} if a project-aware manager cannot identify
+     * a unique project for the environment.
      */
     refreshPackages(environment: PythonEnvironment): Promise<void>;
 
@@ -1188,7 +1189,8 @@ export interface PythonPackageGetterApi {
      *
      * @param environment The Python Environment for which the list of packages is required.
      * @param options Optional settings for package retrieval.
-     * @returns The list of packages in the Python Environment.
+     * @returns The list of packages in the Python Environment, or `undefined` if no package manager
+     * can be resolved for the environment.
      */
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined>;
 
@@ -1241,8 +1243,9 @@ export interface PythonPackageManagementApi {
      * Install/Uninstall packages into a Python Environment.
      *
      * @param environment The Python Environment into which packages are to be installed.
-     * @param packages The packages to install.
      * @param options Options for installing packages.
+     * @throws {@link PackageManagerRequiresProjectError} if a project-aware manager cannot identify
+     * a unique project for the environment.
      */
     managePackages(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void>;
 }
