@@ -67,6 +67,7 @@ suite('createWithProgress uv tracking', () => {
 
         sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => task({} as never, {} as never));
         sinon.stub(builtinHelpers, 'shouldUseUv').resolves(true);
+        sinon.stub(builtinHelpers, 'getUvExecutable').resolves(path.join(tempRoot, '.pyprojectx', 'main', 'uv'));
         sinon.stub(builtinHelpers, 'runUV').resolves('');
         sinon.stub(managerUtils, 'getShellActivationCommands').resolves({
             shellActivation: new Map(),
@@ -93,6 +94,10 @@ suite('createWithProgress uv tracking', () => {
 
         assert.ok(result?.environment);
         assert.ok(addUvEnvironmentStub.calledOnce);
+        assert.strictEqual(
+            (builtinHelpers.runUV as sinon.SinonStub).firstCall.args[5],
+            path.join(tempRoot, '.pyprojectx', 'main', 'uv'),
+        );
     });
 
     test('skips workspace-scoped uv tracking when explicitly disabled', async () => {

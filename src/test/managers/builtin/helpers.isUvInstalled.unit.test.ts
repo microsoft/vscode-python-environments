@@ -1,10 +1,12 @@
 import assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
-import { LogOutputChannel } from 'vscode';
+import { LogOutputChannel, Uri, WorkspaceFolder } from 'vscode';
 import * as childProcessApis from '../../../common/childProcess.apis';
+import * as workspaceApis from '../../../common/workspace.apis';
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
-import { isUvInstalled, resetUvInstallationCache } from '../../../managers/builtin/helpers';
+import { getUvExecutable, isUvInstalled, resetUvInstallationCache } from '../../../managers/builtin/helpers';
 import { createMockLogOutputChannel } from '../../mocks/helper';
 import { MockChildProcess } from '../../mocks/mockChildProcess';
 
@@ -198,5 +200,99 @@ suite('Helpers - isUvInstalled', () => {
         assert.strictEqual(firstResult, true);
         assert.strictEqual(secondResult, false);
         assert(spawnStub.calledTwice, 'Should spawn process twice after cache reset');
+    });
+
+    test('falls back to the owning workspace pyprojectx executable when uv is not on PATH', async () => {
+        const root = path.join(process.cwd(), 'project');
+        const uvExecutable = path.join(Uri.file(root).fsPath, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').returns({
+            name: 'project',
+            uri: Uri.file(root),
+        } as WorkspaceFolder);
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        const localProc = new MockChildProcess(uvExecutable, ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+        spawnStub.withArgs(uvExecutable, ['--version']).returns(localProc);
+
+        const first = getUvExecutable(mockLog, path.join(root, '.venv'));
+        globalProc.emit('error', new Error('ENOENT'));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        localProc.emit('exit', 0, null);
+        assert.strictEqual(await first, uvExecutable);
+        assert(spawnStub.calledWith(uvExecutable, ['--version']));
+    });
+
+    test('does not execute workspace binaries in an untrusted workspace', async () => {
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(false);
+        const getWorkspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+
+        const result = getUvExecutable(mockLog, path.join(process.cwd(), 'project', '.venv'));
+        globalProc.emit('error', new Error('ENOENT'));
+        assert.strictEqual(await result, undefined);
+        sinon.assert.notCalled(getWorkspaceFolder);
+        sinon.assert.calledOnce(spawnStub);
+    });
+
+    test('prefers uv on PATH without looking up a workspace executable', async () => {
+        const getWorkspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+
+        const result = getUvExecutable(mockLog, path.join(process.cwd(), 'project', '.venv'));
+        globalProc.emit('exit', 0, null);
+
+        assert.strictEqual(await result, 'uv');
+        sinon.assert.notCalled(getWorkspaceFolder);
+        sinon.assert.calledOnce(spawnStub);
+    });
+
+    test('does not use a missing or failing workspace executable', async () => {
+        const root = path.join(process.cwd(), 'project');
+        const executable = path.join(Uri.file(root).fsPath, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
+        const workspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
+        workspaceFolder.onFirstCall().returns(undefined);
+        workspaceFolder.onSecondCall().returns({ name: 'project', uri: Uri.file(root) } as WorkspaceFolder);
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        const localProc = new MockChildProcess(executable, ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+        spawnStub.withArgs(executable, ['--version']).returns(localProc);
+
+        const missing = getUvExecutable(mockLog, path.join(root, '.venv'));
+        globalProc.emit('error', new Error('ENOENT'));
+        assert.strictEqual(await missing, undefined);
+
+        const failing = getUvExecutable(mockLog, path.join(root, '.venv'));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        localProc.emit('exit', 1, null);
+        assert.strictEqual(await failing, undefined);
+    });
+
+    test('resolves separate workspace executables for different roots', async () => {
+        const roots = ['first', 'second'].map((name) => Uri.file(path.join(process.cwd(), name)).fsPath);
+        const executables = roots.map((root) =>
+            path.join(root, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv'),
+        );
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').callsFake((uri) => {
+            const root = roots.find((candidate) => uri.fsPath.startsWith(`${candidate}${path.sep}`));
+            return root ? ({ name: path.basename(root), uri: Uri.file(root) } as WorkspaceFolder) : undefined;
+        });
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+        for (const [index, root] of roots.entries()) {
+            const proc = new MockChildProcess(executables[index], ['--version']);
+            spawnStub.withArgs(executables[index], ['--version']).returns(proc);
+            const result = getUvExecutable(mockLog, path.join(root, '.venv'));
+            if (index === 0) {
+                globalProc.emit('error', new Error('ENOENT'));
+            }
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            proc.emit('exit', 0, null);
+            assert.strictEqual(await result, executables[index]);
+        }
     });
 });
