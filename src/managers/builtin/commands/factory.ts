@@ -1,5 +1,5 @@
 import { CommandConstructorOptions } from '../../base/commands/index';
-import { shouldUseUv } from '../helpers';
+import { getUvExecutable, shouldUseUv } from '../helpers';
 
 type CommandConstructor<T> = new (options: CommandConstructorOptions) => T;
 
@@ -12,11 +12,15 @@ export async function createPipOrUvCommandWithKind<P, U>(
     UvCommand: CommandConstructor<U>,
 ): Promise<PipOrUvCommand<P, U>> {
     if (await shouldUseUv(options.log, environmentPath)) {
+        const uvExecutable = await getUvExecutable(options.log, environmentPath);
+        if (!uvExecutable) {
+            throw new Error(`uv became unavailable for environment: ${environmentPath}`);
+        }
         // uv accepts an environment directory as its `--python` target. A symlinked
         // environment executable (for example Pipenv) can resolve to the externally
         // managed base interpreter, so passing the environment directory preserves
         // the environment boundary. Pip commands keep using the interpreter itself.
-        return { kind: 'uv', command: new UvCommand({ ...options, pythonExecutable: environmentPath }) };
+        return { kind: 'uv', command: new UvCommand({ ...options, pythonExecutable: environmentPath, uvExecutable }) };
     }
     return { kind: 'pip', command: new PipCommand(options) };
 }

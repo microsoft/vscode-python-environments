@@ -42,7 +42,7 @@ import {
     NativePythonFinder,
 } from '../common/nativePythonFinder';
 import { getShellActivationCommands, shortenVersionString, sortEnvironments } from '../common/utils';
-import { runPython, runUV, shouldUseUv } from './helpers';
+import { getUvExecutable, runPython, runUV, shouldUseUv } from './helpers';
 import { getProjectInstallable, PipPackages, shouldProceedAfterPyprojectValidation } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
 import { addUvEnvironment, removeUvEnvironment, UV_ENVS_KEY } from './uvEnvironments';
@@ -431,15 +431,22 @@ export async function createWithProgress(
         async () => {
             const result: CreateEnvironmentResult = {};
             try {
-                const useUv = await shouldUseUv(log, basePython.environmentPath.fsPath);
+                const useUv = await shouldUseUv(log, basePython.environmentPath.fsPath, venvRoot.fsPath);
                 // env creation
                 const baseExecutable = await getBaseInterpreterForVenv(basePython);
                 if (baseExecutable) {
                     if (useUv) {
+                        const uvExecutable = await getUvExecutable(log, venvRoot.fsPath);
+                        if (!uvExecutable) {
+                            throw new Error(`uv became unavailable for workspace: ${venvRoot.fsPath}`);
+                        }
                         await runUV(
                             ['venv', '--verbose', '--seed', '--python', baseExecutable, envPath],
                             venvRoot.fsPath,
                             log,
+                            undefined,
+                            undefined,
+                            uvExecutable,
                         );
                     } else {
                         await runPython(baseExecutable, ['-m', 'venv', envPath], venvRoot.fsPath, manager.log);
