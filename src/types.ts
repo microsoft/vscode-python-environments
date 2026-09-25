@@ -196,7 +196,7 @@ export interface PythonEnvironmentInfo {
     readonly version: string;
 
     /**
-     * Path to the python binary or environment folder.
+     * Path to the Python executable.
      */
     readonly environmentPath: Uri;
 

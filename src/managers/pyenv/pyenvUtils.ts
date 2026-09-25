@@ -170,7 +170,8 @@ export async function getPyenv(): Promise<string | undefined> {
     }
 }
 
-function nativeToPythonEnv(
+/** Converts native finder data to a pyenv environment. @internal Exported for testing. */
+export function nativeToPythonEnv(
     info: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
@@ -211,7 +212,7 @@ function nativeToPythonEnv(
         shortDisplayName: displayName,
         displayPath: info.prefix,
         version: info.version,
-        environmentPath: Uri.file(info.prefix),
+        environmentPath: Uri.file(info.executable),
         description: undefined,
         tooltip: info.prefix,
         execInfo: {

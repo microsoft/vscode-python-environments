@@ -166,6 +166,7 @@ export class PipenvManager implements EnvironmentManager, Disposable {
         return this.collection.find(
             (env) =>
                 normalizePath(env.environmentPath.fsPath) === normalized ||
+                normalizePath(env.sysPrefix) === normalized ||
                 (env.execInfo?.run.executable && normalizePath(env.execInfo.run.executable) === normalized),
         );
     }

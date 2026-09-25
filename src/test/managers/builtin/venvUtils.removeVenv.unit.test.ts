@@ -158,6 +158,11 @@ suite('venvUtils removeVenv validation integration', () => {
     test('headless removal skips confirmation and removes the environment', async () => {
         const tempRoot = await fse.mkdtemp(path.join(os.tmpdir(), 'remove-venv-'));
         const envPath = path.join(tempRoot, '.venv');
+        const executable = path.join(
+            envPath,
+            os.platform() === 'win32' ? 'Scripts' : 'bin',
+            os.platform() === 'win32' ? 'python3.12.exe' : 'python3.12',
+        );
         await fse.outputFile(path.join(envPath, 'pyvenv.cfg'), 'home = base');
         const showWarningMessageStub = sinon.stub(windowApis, 'showWarningMessage');
         sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => task({} as never, {} as never));
@@ -165,7 +170,7 @@ suite('venvUtils removeVenv validation integration', () => {
 
         try {
             const removed = await removeVenv(
-                createMockPythonEnvironment({ name: '.venv', envPath }),
+                createMockPythonEnvironment({ name: '.venv', envPath: executable, sysPrefix: envPath }),
                 createMockLogOutputChannel(),
                 { runHeadless: true },
             );

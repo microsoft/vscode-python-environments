@@ -106,7 +106,8 @@ suite('Conda Utils - createNamedCondaEnvironment', () => {
             assert.ok(!mockState.get.calledWith(CONDA_PREFIXES_KEY));
 
             const info = createEnvironmentItem.firstCall.args[0] as PythonEnvironmentInfo;
-            assert.strictEqual(info.environmentPath.fsPath, Uri.file(envPrefix).fsPath);
+            const executable = path.join(envPrefix, os.platform() === 'win32' ? 'python.exe' : path.join('bin', 'python'));
+            assert.strictEqual(info.environmentPath.fsPath, Uri.file(executable).fsPath);
         });
     });
 });
