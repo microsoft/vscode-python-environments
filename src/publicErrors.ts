@@ -8,6 +8,48 @@
  */
 
 /**
+ * Error thrown when a project-aware package manager cannot determine which Python project to use.
+ *
+ * The {@link code} property is a stable discriminator that can be checked across extension bundle
+ * boundaries with {@link isPackageManagerRequiresProjectError}.
+ */
+export class PackageManagerRequiresProjectError extends Error {
+    /**
+     * Stable discriminator identifying this error type across bundle boundaries.
+     */
+    public readonly code = 'PackageManagerRequiresProject';
+
+    /**
+     * Creates a project-required package error.
+     *
+     * @param message Optional caller-facing explanation.
+     */
+    constructor(message?: string) {
+        super(message ?? 'Package operations require a Python project.');
+        this.name = 'PackageManagerRequiresProjectError';
+        Object.setPrototypeOf(this, new.target.prototype);
+    }
+}
+
+/**
+ * Reports whether an error means that a package operation requires an unambiguous Python project.
+ *
+ * @param error The value to test.
+ * @returns `true` when the error carries the project-required discriminator.
+ */
+export function isPackageManagerRequiresProjectError(
+    error: unknown,
+): error is PackageManagerRequiresProjectError {
+    return (
+        error instanceof PackageManagerRequiresProjectError ||
+        (typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            (error as { code?: unknown }).code === 'PackageManagerRequiresProject')
+    );
+}
+
+/**
  * Error thrown when a package manager cannot list available package versions.
  *
  * This distinguishes an *unsupported capability* from an *operational failure* (such as a

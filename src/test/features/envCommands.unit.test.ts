@@ -14,6 +14,7 @@ import {
     clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
+    handlePackageUninstall,
     removeEnvironmentCommand,
     removePythonProject,
     revealEnvInManagerView,
@@ -26,10 +27,11 @@ import * as shellProviders from '../../features/terminal/shells/providers';
 import { ShellStartupScriptProvider } from '../../features/terminal/shells/startupProvider';
 import { TerminalManager } from '../../features/terminal/terminalManager';
 import { EnvManagerView } from '../../features/views/envManagersView';
-import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
+import { EnvManagerTreeItem, PackageTreeItem, ProjectEnvironment, ProjectItem, PythonEnvTreeItem } from '../../features/views/treeViewItems';
 import type { EnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
-import { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
+import { InternalEnvironmentManager, InternalPackageManager } from '../../managers/common/registeredManagers';
+import { PackageManagerRequiresProjectError } from '../../managers/common/errors';
 import { setupNonThenable } from '../mocks/helper';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
@@ -638,5 +640,50 @@ suite('Run In Terminal Command Tests', () => {
 
         sinon.assert.notCalled(getDedicatedTerminal);
         sinon.assert.notCalled(runInTerminalStub);
+    });
+});
+
+suite('handlePackageUninstall - unbound package manager', () => {
+    let showError: sinon.SinonStub;
+
+    setup(() => {
+        showError = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
+    });
+
+    teardown(() => sinon.restore());
+
+    test('shows a friendly message instead of throwing when the resolved manager requires a project', async () => {
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), 'unbound-poetry-env'),
+            managerId: 'ms-python.python:poetry',
+        });
+        const rawManager = {
+            name: 'poetry',
+            manage: sinon.stub().rejects(new PackageManagerRequiresProjectError()),
+            refresh: async () => undefined,
+            getPackages: async () => undefined,
+        };
+        const packageManager = new InternalPackageManager('ms-python.python:poetry', rawManager as never);
+        const provider = {
+            name: 'poetry',
+            preferredPackageManagerId: 'ms-python.python:poetry',
+            get: async () => environment,
+            set: async () => undefined,
+            getEnvironments: async () => [environment],
+            refresh: async () => undefined,
+            resolve: async () => undefined,
+        };
+        const parent = new EnvManagerTreeItem(new InternalEnvironmentManager('ms-python.python:poetry', provider));
+        const envItem = new PythonEnvTreeItem(environment, parent);
+        const pkg = {
+            name: 'requests',
+            displayName: 'requests',
+            pkgId: { id: 'requests', managerId: 'ms-python.python:poetry', environmentId: environment.envId.id },
+        };
+        const context = new PackageTreeItem(pkg, envItem, packageManager);
+
+        await handlePackageUninstall(context);
+
+        assert.ok(showError.calledOnceWithExactly(new PackageManagerRequiresProjectError().message));
     });
 });

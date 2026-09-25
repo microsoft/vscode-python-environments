@@ -793,8 +793,8 @@ getPackages(
 
 **Returns** `Promise<Package[] | undefined>`. `undefined` means the manager
 could not produce a list - for example no package manager is associated with
-the environment - which is different from an empty array meaning "nothing
-installed".
+the environment or a project-aware manager cannot identify one unique project -
+which is different from an empty array meaning "nothing installed".
 
 ```typescript
 const packages = await api.getPackages(env);
@@ -818,7 +818,9 @@ refreshPackages(environment: PythonEnvironment): Promise<void>;
 | `environment` | [`PythonEnvironment`](#pythonenvironment) | Yes | The environment whose package list should be refreshed. |
 
 **Returns** `Promise<void>`. Changes surface through
-[`onDidChangePackages`](#ondidchangepackages).
+[`onDidChangePackages`](#ondidchangepackages). Rejects with
+`PackageManagerRequiresProjectError` when a project-aware manager cannot identify
+one unique project for the environment.
 
 ```typescript
 // Packages were installed outside the extension - re-read the list.
@@ -842,8 +844,9 @@ managePackages(
 | `environment` | [`PythonEnvironment`](#pythonenvironment) | Yes | The environment to modify. |
 | `options` | [`PackageManagementOptions`](#packagemanagementoptions) | Yes | Must specify `install`, `uninstall`, or both. Also carries `upgrade`, `showSkipOption`, and `runHeadless`. |
 
-**Returns** `Promise<void>`, resolving when the operation finishes. Rejects if
-the underlying tool fails.
+**Returns** `Promise<void>`, resolving when the operation finishes. Rejects with
+`PackageManagerRequiresProjectError` when a project-aware manager cannot identify
+one unique project for the environment, or if the underlying tool fails.
 
 ```typescript
 await api.managePackages(env, {
@@ -972,6 +975,30 @@ context.subscriptions.push(
 ```
 
 ### Package errors
+
+#### `PackageManagerRequiresProjectError`
+
+Thrown by environment-only package mutations and refreshes when the selected
+package manager is project-aware but the environment does not identify exactly
+one tracked project. Its `code` is the stable
+`'PackageManagerRequiresProject'` discriminator.
+
+Use `isPackageManagerRequiresProjectError(error)` instead of `instanceof` when
+the error may cross extension bundle boundaries:
+
+```typescript
+import { isPackageManagerRequiresProjectError } from '@vscode/python-environments';
+
+try {
+    await api.refreshPackages(env);
+} catch (error) {
+    if (isPackageManagerRequiresProjectError(error)) {
+        // Ask the user to open or select the intended Python project.
+    } else {
+        throw error;
+    }
+}
+```
 
 #### `PackageVersionLookupNotSupportedError`
 
@@ -1613,12 +1640,60 @@ Reports and changes the packages of an environment.
 | `refresh(environment)` | `(environment: PythonEnvironment) => Promise<void>` | Yes | Re-reads the installed package list. |
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
+| `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
+| `dispose()` | `() => void` | No | Releases resources owned by the manager. The extension disposes project-scoped managers when their project is removed or replaced, their provider is unregistered, or the extension shuts down. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
 | `getVersion(environment)` | `(environment: PythonEnvironment) => Promise<Pep440Version \| undefined>` | No | Version of the underlying tool, such as pip, uv, or conda. |
 | `getPackageAvailableVersions(environment, packageName)` | `(environment: PythonEnvironment, packageName: string) => Promise<Pep440Version[] \| undefined>` | No | Available versions, newest first. Throw `PackageVersionLookupNotSupportedError` when unsupported and let operational failures propagate. Resolving to `undefined` is treated as unsupported. |
 | `formatInstallSpec(packageName, version)` | `(packageName: string, version: string) => string` | No | Formats a pinned specifier for this tool, for example `requests==2.31.0` for pip or `requests=2.31.0` for conda. Callers default to `name==version` when absent. |
 | `onDidChangePackages` | `Event<DidChangePackagesEventArgs>` | No | Fire when packages change. |
+
+##### Project-scoped package managers
+
+Implement `createForProject` when package operations depend on project files or
+the process working directory, as they do for tools such as Poetry. Callers that
+already have a `PythonProject` use that project directly. For environment-only
+operations, the extension selects a project-scoped manager only when exactly one
+tracked project uses the environment; it does not choose arbitrarily when no
+project or multiple projects match.
+
+Environment-only paths never use a project-aware provider as an unbound
+fallback. When no unique project can be inferred, package reads return
+`undefined`, package views suppress those operations, and package mutations or
+refreshes reject with `PackageManagerRequiresProjectError`. Keep
+project-specific caches and mutable state on the manager returned by
+`createForProject`, and implement `dispose` when that manager owns resources.
+
+When a scoped manager fires `onDidChangePackages`, the event's `manager` must be
+the exact scoped instance returned by `createForProject`. This requirement also
+applies when root and scoped managers share an event emitter.
+
+```typescript
+class ProjectPackageManager implements PackageManager {
+    readonly name = 'project-pm';
+
+    constructor(private readonly project?: PythonProject) {}
+
+    createForProject(project: PythonProject): PackageManager {
+        return new ProjectPackageManager(project);
+    }
+
+    dispose(): void {
+        // Release project-specific watchers or processes.
+    }
+
+    async manage(
+        environment: PythonEnvironment,
+        options: PackageManagementOptions,
+    ): Promise<void> {
+        if (!this.project) {
+            throw new Error('Package management requires a Python project.');
+        }
+        await runPackageCommand(options, { cwd: this.project.uri.fsPath });
+    }
+}
+```
 
 ```typescript
 class MyPackageManager implements PackageManager {

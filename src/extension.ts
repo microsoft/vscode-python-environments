@@ -115,6 +115,7 @@ import {
     NativePythonFinder,
 } from './managers/common/nativePythonFinder';
 import { registerPackageWatchers } from './managers/common/packageWatcher';
+import { PackageManagerRequiresProjectError } from './managers/common/errors';
 import { IDisposable } from './managers/common/types';
 import { registerCondaFeatures } from './managers/conda/main';
 import { registerPipenvFeatures } from './managers/pipenv/main';
@@ -297,7 +298,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                   commands.registerCommand(
                       'python-envs.test.getDirectPackageNames',
                       async (environment: PythonEnvironment) => {
-                          const manager = envManagers.getPackageManager(environment);
+                          const { manager } = envManagers.resolvePackageManagerForEnvironment(environment);
                           const names = await manager?.getDirectPackageNames?.(environment);
                           return names ? Array.from(names) : undefined;
                       },
@@ -358,25 +359,32 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             try {
                 resolved = await getPackageCommandOptions(options, envManagers, projectManager);
             } catch (err) {
-                if (!(err instanceof InlineScriptPackagesNotManagedError)) {
+                if (
+                    !(err instanceof InlineScriptPackagesNotManagedError) &&
+                    !(err instanceof PackageManagerRequiresProjectError)
+                ) {
                     // Preserve the existing contract: other resolution failures still surface.
                     throw err;
                 }
-                traceError('Rejected a package command for an inline-script environment:', err);
+                traceError('Rejected a package command for the selected environment:', err);
                 await window.showErrorMessage(err.message);
                 return;
             }
             try {
-                resolved.packageManager.manage(resolved.environment, { install: [] });
+                await resolved.packageManager.manage(resolved.environment, { install: [] });
             } catch (err) {
+                if (err instanceof PackageManagerRequiresProjectError) {
+                    await window.showErrorMessage(err.message);
+                    return;
+                }
                 traceError('Error when running command python-envs.packages', err);
             }
         }),
         commands.registerCommand('python-envs.uninstallPackage', async (context: unknown) => {
-            await handlePackageUninstall(context, envManagers);
+            await handlePackageUninstall(context);
         }),
         commands.registerCommand('python-envs.managePackageVersion', async (context: unknown) => {
-            await managePackageVersion(context, envManagers);
+            await managePackageVersion(context);
         }),
         commands.registerCommand('python-envs.set', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);

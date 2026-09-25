@@ -1,3 +1,4 @@
+import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
 import { EventEmitter, TreeView, Uri } from 'vscode';
@@ -28,6 +29,7 @@ suite('EnvManagerView.reveal Tests', () => {
     let onDidChangeEnvironmentManagerEmitter: EventEmitter<DidChangeEnvironmentManagerEventArgs>;
     let onDidChangePackagesEmitter: EventEmitter<InternalDidChangePackagesEventArgs>;
     let onDidChangePackageManagerEmitter: EventEmitter<DidChangePackageManagerEventArgs>;
+    let onDidChangeProjectPackageManagerEmitter: EventEmitter<void>;
     let onDidChangeStateEmitter: EventEmitter<{ itemId: string; stateKey: string }>;
 
     setup(() => {
@@ -36,6 +38,7 @@ suite('EnvManagerView.reveal Tests', () => {
         onDidChangeEnvironmentManagerEmitter = new EventEmitter();
         onDidChangePackagesEmitter = new EventEmitter();
         onDidChangePackageManagerEmitter = new EventEmitter();
+        onDidChangeProjectPackageManagerEmitter = new EventEmitter();
         onDidChangeStateEmitter = new EventEmitter();
 
         // Mock manager
@@ -53,6 +56,12 @@ suite('EnvManagerView.reveal Tests', () => {
             .returns(() => onDidChangeEnvironmentManagerEmitter.event);
         envManagers.setup((e) => e.onDidChangePackages).returns(() => onDidChangePackagesEmitter.event);
         envManagers.setup((e) => e.onDidChangePackageManager).returns(() => onDidChangePackageManagerEmitter.event);
+        envManagers
+            .setup((e) => e.resolvePackageManagerForEnvironment(typeMoq.It.isAny()))
+            .returns(() => ({ kind: 'notFound' }));
+        envManagers
+            .setup((e) => e.onDidChangeProjectPackageManager)
+            .returns(() => onDidChangeProjectPackageManagerEmitter.event);
         setupNonThenable(envManagers);
 
         // Mock state manager
@@ -75,6 +84,7 @@ suite('EnvManagerView.reveal Tests', () => {
         onDidChangeEnvironmentManagerEmitter.dispose();
         onDidChangePackagesEmitter.dispose();
         onDidChangePackageManagerEmitter.dispose();
+        onDidChangeProjectPackageManagerEmitter.dispose();
         onDidChangeStateEmitter.dispose();
     });
 
@@ -216,6 +226,20 @@ suite('EnvManagerView.reveal Tests', () => {
         // Assert - reveal should not be called when not visible
         treeView.verifyAll();
 
+        view.dispose();
+    });
+
+    test('Refreshes the tree when a project-scoped package manager is invalidated', () => {
+        const clock = sinon.useFakeTimers();
+        const view = new EnvManagerView(envManagers.object, stateManager.object);
+        const changed = sinon.stub();
+        const listener = view.onDidChangeTreeData(changed);
+
+        onDidChangeProjectPackageManagerEmitter.fire();
+        clock.tick(500);
+
+        assert.ok(changed.calledOnce);
+        listener.dispose();
         view.dispose();
     });
 });

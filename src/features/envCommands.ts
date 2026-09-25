@@ -31,6 +31,7 @@ import type {
     InternalEnvironmentManager,
     InternalPackageManager,
 } from '../managers/common/registeredManagers';
+import { PackageManagerRequiresProjectError } from '../managers/common/errors';
 import {
     removePythonProjectSetting,
     setEnvironmentManager,
@@ -137,16 +138,14 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
     if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
         if (managers) {
-            const pkgManager = managers.getPackageManager(view.parent.project.uri);
+            const pkgManager = managers.getPackageManagerForProject(view.parent.project);
             if (pkgManager) {
                 await pkgManager.refresh(view.environment);
             }
         }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const envManager =
-            view.parent.kind === EnvTreeItemKind.environmentGroup ? view.parent.parent.manager : view.parent.manager;
-        const pkgManager = managers?.getPackageManager(envManager.preferredPackageManagerId);
+        const pkgManager = managers?.resolvePackageManagerForEnvironment(view.environment).manager;
         if (pkgManager) {
             await pkgManager.refresh(view.environment);
         }
@@ -325,7 +324,7 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
     }
 }
 
-export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
+export async function handlePackageUninstall(context: unknown) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         if (context.pkg.isTransitive) {
             const confirm = await showInformationMessage(
@@ -343,8 +342,15 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
         }
         const moduleName = context.pkg.name;
         const environment = context.parent.environment;
-        const packageManager = em.getPackageManager(environment);
-        await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
+        try {
+            await context.manager.manage(environment, { uninstall: [moduleName], install: [] });
+        } catch (error) {
+            if (error instanceof PackageManagerRequiresProjectError) {
+                await showErrorMessage(error.message);
+                return;
+            }
+            throw error;
+        }
         return;
     }
     traceError(`Invalid context for uninstall command: ${typeof context}`);
@@ -354,15 +360,11 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
  * Manages package versions by allowing the user to select from available versions or enter a specific version.
  * If available versions can be fetched, a QuickPick is shown. Otherwise, an InputBox is used for free-text version entry.
  */
-export async function managePackageVersion(context: unknown, em: EnvironmentManagers) {
+export async function managePackageVersion(context: unknown) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const pkg = context.pkg;
         const environment = context.parent.environment;
-        const packageManager = em.getPackageManager(environment);
-
-        if (!packageManager) {
-            return;
-        }
+        const packageManager = context.manager;
 
         if (pkg.isTransitive) {
             const confirm = await showInformationMessage(
@@ -432,10 +434,18 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
             return;
         }
 
-        await packageManager.manage(environment, {
-            install: [packageManager.formatInstallSpec(pkg.name, version)],
-            uninstall: [],
-        });
+        try {
+            await packageManager.manage(environment, {
+                install: [packageManager.formatInstallSpec(pkg.name, version)],
+                uninstall: [],
+            });
+        } catch (error) {
+            if (error instanceof PackageManagerRequiresProjectError) {
+                await showErrorMessage(error.message);
+                return;
+            }
+            throw error;
+        }
     } else {
         traceError(`Invalid context for manage package version command: ${typeof context}`);
     }
@@ -783,7 +793,7 @@ async function resolvePackageCommandOptions(
 
     if (e instanceof ProjectEnvironment) {
         const environment = e.environment;
-        const packageManager = em.getPackageManager(e.parent.project.uri);
+        const packageManager = em.getPackageManagerForProject(e.parent.project);
         if (packageManager) {
             return { environment, packageManager };
         }
@@ -791,9 +801,14 @@ async function resolvePackageCommandOptions(
 
     if (e instanceof PythonEnvTreeItem) {
         const environment = e.environment;
-        const packageManager = em.getPackageManager(environment);
-        if (packageManager) {
-            return { environment, packageManager };
+        const resolution = em.resolvePackageManagerForEnvironment(environment);
+        switch (resolution.kind) {
+            case 'resolved':
+                return { environment, packageManager: resolution.manager };
+            case 'projectRequired':
+                throw new PackageManagerRequiresProjectError();
+            case 'notFound':
+                break;
         }
     }
 
