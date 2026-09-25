@@ -695,5 +695,50 @@ suite('Package Watcher', () => {
             assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
             configurationChanges.dispose();
         });
+
+        test('should resolve the current scoped manager when refreshing', async () => {
+            const clock = sandbox.useFakeTimers();
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const project = { name: 'project', uri: Uri.file('workspace') } as PythonProject;
+            const firstProvider = createMockPackageManager();
+            const secondProvider = createMockPackageManager();
+            const firstManager = new InternalPackageManager(
+                'poetry',
+                firstProvider as PackageManager,
+                project,
+            );
+            const secondManager = new InternalPackageManager(
+                'poetry',
+                secondProvider as PackageManager,
+                { name: 'replacement', uri: project.uri } as PythonProject,
+            );
+            const rootProvider = createMockPackageManager();
+            const rootManager = new InternalPackageManager('poetry', rootProvider as PackageManager);
+            let selectedManager = firstManager;
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox.stub().callsFake(() => selectedManager),
+            } as unknown as EnvironmentManagers;
+            const env = createMockEnvironment();
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            environmentChanges.fire({ uri: project.uri, new: env, old: undefined });
+
+            selectedManager = secondManager;
+            mockWatcher._changeEmitter.fire(Uri.file('replacement.dist-info'));
+            await clock.tickAsync(600);
+
+            assert.ok((firstProvider.refresh as sinon.SinonStub).notCalled);
+            assert.ok((secondProvider.refresh as sinon.SinonStub).calledOnceWithExactly(env));
+
+            selectedManager = rootManager;
+            mockWatcher._changeEmitter.fire(Uri.file('removed.dist-info'));
+            await clock.tickAsync(600);
+
+            assert.ok((secondProvider.refresh as sinon.SinonStub).calledOnce);
+            assert.ok((rootProvider.refresh as sinon.SinonStub).notCalled);
+        });
     });
 });

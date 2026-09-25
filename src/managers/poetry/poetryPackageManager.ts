@@ -1,11 +1,11 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import {
     CancellationError,
     CancellationToken,
     Event,
     EventEmitter,
+    FileType,
     l10n,
     LogOutputChannel,
     MarkdownString,
@@ -26,6 +26,7 @@ import {
     PythonProject,
 } from '../../api';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
+import * as workspaceFs from '../../common/workspace.fs.apis';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import {
@@ -309,15 +310,14 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         if (!this.project) {
             throw new Error(l10n.t('Poetry package operations require a Python project.'));
         }
-        const toDirectory = async (fsPath: string): Promise<string> => {
-            try {
-                const stat = await fsapi.stat(fsPath);
-                return stat.isDirectory() ? fsPath : path.dirname(fsPath);
-            } catch {
-                return path.dirname(fsPath);
-            }
-        };
 
-        return toDirectory(this.project.uri.fsPath);
+        try {
+            const stat = await workspaceFs.stat(this.project.uri);
+            return stat.type === FileType.Directory ? this.project.uri.fsPath : path.dirname(this.project.uri.fsPath);
+        } catch (error) {
+            const message = l10n.t('Unable to access the Python project at "{0}".', this.project.uri.fsPath);
+            this.log.error(message, error);
+            throw new Error(message);
+        }
     }
 }

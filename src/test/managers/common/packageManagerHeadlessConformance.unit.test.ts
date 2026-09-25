@@ -3,7 +3,7 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { LogOutputChannel, Uri } from 'vscode';
+import { FileType, LogOutputChannel, Uri } from 'vscode';
 import {
     PackageManager,
     PythonEnvironment,
@@ -13,6 +13,7 @@ import {
 import * as childProcessApis from '../../../common/childProcess.apis';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
+import * as workspaceFs from '../../../common/workspace.fs.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 import { PipInstallCommand } from '../../../managers/builtin/commands/install';
@@ -39,6 +40,15 @@ suite('Package manager headless conformance', () => {
         execInfo: { run: { executable: 'python', args: [] } },
         version: '3.12.0',
     } as unknown as PythonEnvironment;
+
+    setup(() => {
+        sinon.stub(workspaceFs, 'stat').resolves({
+            type: FileType.Directory,
+            ctime: 0,
+            mtime: 0,
+            size: 0,
+        });
+    });
 
     teardown(() => {
         sinon.restore();

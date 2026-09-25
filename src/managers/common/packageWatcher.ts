@@ -45,12 +45,14 @@ function getDefaultPackageWatchTargets(env: PythonEnvironment): RelativePattern[
  * @param env - The Python environment to watch.
  * @param packageManager - The package manager to call refresh on when changes occur.
  * @param log - Logger for diagnostic messages.
+ * @param resolvePackageManager - Resolves the current package manager before each refresh.
  * @returns A disposable that removes the watcher when disposed.
  */
 export function watchPackageChangesForEnvironment(
     env: PythonEnvironment,
     packageManager: PackageManager,
     log: LogOutputChannel,
+    resolvePackageManager: () => PackageManager | undefined = () => packageManager,
 ): Disposable {
     const watchTargets = [
         ...getDefaultPackageWatchTargets(env),
@@ -63,7 +65,12 @@ export function watchPackageChangesForEnvironment(
 
     const debouncedRefresh = createSimpleDebounce(500, () => {
         log.debug(`Package change detected for environment ${env.envId.id}, refreshing packages.`);
-        void packageManager.refresh(env).catch((ex) => {
+        const currentPackageManager = resolvePackageManager();
+        if (!currentPackageManager) {
+            log.debug(`No current package manager found for environment ${env.envId.id}`);
+            return;
+        }
+        void currentPackageManager.refresh(env).catch((ex) => {
             log.error(
                 `Failed to refresh packages for environment ${env.envId.id}: ${ex instanceof Error ? ex.message : String(ex)}`,
             );
@@ -166,8 +173,24 @@ export function registerPackageWatchers(
         if (sharedWatcher) {
             sharedWatcher.references += 1;
         } else {
+            const resolvePackageManager = () => {
+                const currentPackageManager =
+                    envManagers.getPackageManager(packageManagerContext) ?? envManagers.getPackageManager(environment);
+                if (
+                    selectedPackageManager.project &&
+                    currentPackageManager?.project?.uri.toString() !== selectedPackageManager.project.uri.toString()
+                ) {
+                    return undefined;
+                }
+                return currentPackageManager;
+            };
             sharedWatchers.set(watcherKey, {
-                disposable: watchPackageChangesForEnvironment(environment, selectedPackageManager, log),
+                disposable: watchPackageChangesForEnvironment(
+                    environment,
+                    selectedPackageManager,
+                    log,
+                    resolvePackageManager,
+                ),
                 references: 1,
             });
         }

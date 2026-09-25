@@ -4,9 +4,10 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { LogOutputChannel, Uri } from 'vscode';
+import { FileType, LogOutputChannel, Uri } from 'vscode';
 import { PythonEnvironmentApi } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
+import * as workspaceFs from '../../../common/workspace.fs.apis';
 import * as packageChanges from '../../../managers/common/packageChanges';
 import * as runPoetryModule from '../../../managers/poetry/commands/runPoetry';
 import { PoetryPackageManager } from '../../../managers/poetry/poetryPackageManager';
@@ -23,6 +24,7 @@ suite('PoetryPackageManager', () => {
     let manager: PoetryPackageManager;
     let projectManager: PoetryPackageManager;
     let runPoetryStub: sinon.SinonStub;
+    let statStub: sinon.SinonStub;
     const projectUri = Uri.file(path.join(process.cwd(), 'project', 'pyproject.toml'));
 
     setup(() => {
@@ -39,6 +41,8 @@ suite('PoetryPackageManager', () => {
         sinon.stub(windowApis, 'withProgress').callsFake((_options, task) => task({} as never, {} as never));
         sinon.stub(packageChanges, 'updatePackagesAndNotify').resolves([]);
         runPoetryStub = sinon.stub(runPoetryModule, 'runPoetry').resolves('');
+        statStub = sinon.stub(workspaceFs, 'stat');
+        statStub.resolves({ type: FileType.File, ctime: 0, mtime: 0, size: 0 });
         manager = new PoetryPackageManager(api, log, {} as PoetryManager);
         projectManager = manager.createForProject({ name: 'project', uri: projectUri });
     });
@@ -65,12 +69,26 @@ suite('PoetryPackageManager', () => {
 
     test('directory project URIs are used directly as the working directory', async () => {
         const directoryUri = Uri.file(process.cwd());
+        statStub.withArgs(directoryUri).resolves({ type: FileType.Directory, ctime: 0, mtime: 0, size: 0 });
         const directoryManager = manager.createForProject({ name: 'directory-project', uri: directoryUri });
 
         await directoryManager.getDirectPackageNames(environment);
 
         assert.strictEqual(runPoetryStub.callCount, 1);
         assert.strictEqual(runPoetryStub.firstCall.args[1], directoryUri.fsPath);
+    });
+
+    test('inaccessible projects reject instead of falling back to the parent directory', async () => {
+        const inaccessibleUri = Uri.file(path.join(process.cwd(), 'missing-project'));
+        statStub.withArgs(inaccessibleUri).rejects(new Error('access denied'));
+        const inaccessibleManager = manager.createForProject({ name: 'missing', uri: inaccessibleUri });
+
+        await assert.rejects(
+            inaccessibleManager.manage(environment, { install: ['requests'] }),
+            /Unable to access the Python project/,
+        );
+
+        assert.strictEqual(runPoetryStub.callCount, 0);
     });
 
     test('package loading returns an empty list when poetry show fails', async () => {
