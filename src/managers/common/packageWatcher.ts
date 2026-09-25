@@ -219,7 +219,7 @@ export function registerPackageWatchers(
                 )?.scope;
                 const managerContext = projectScope ?? changes.environment;
                 const packageManager = envManagers.getPackageManager(managerContext);
-                if (!projectScope && packageManager?.supportsProjectBinding) {
+                if (!projectScope && packageManager?.createForProject) {
                     releaseConsumer(changes.terminal);
                     log.debug(
                         `Skipping unscoped package watcher for project-aware manager ${packageManager.id}`,

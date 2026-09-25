@@ -33,6 +33,7 @@ import * as extensionApis from '../../common/extension.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { InternalPackageManager } from '../../managers/common/registeredManagers';
 import { setupNonThenable } from '../mocks/helper';
 
 /**
@@ -50,6 +51,7 @@ suite('PythonPackageManagerApi Tests', () => {
     let onDidChangePackagesEmitter: EventEmitter<DidChangePackagesEventArgs>;
     let projectChangesEmitter: EventEmitter<PythonProject[] | undefined>;
     let getExtensionStub: sinon.SinonStub;
+    let projects: PythonProject[];
 
     setup(() => {
         // Mock extension APIs to avoid registration errors
@@ -73,7 +75,8 @@ suite('PythonPackageManagerApi Tests', () => {
         // Mock project manager
         projectManager = typeMoq.Mock.ofType<PythonProjectManager>();
         projectChangesEmitter = new EventEmitter<PythonProject[] | undefined>();
-        projectManager.setup((pm) => pm.getProjects()).returns(() => []);
+        projects = [];
+        projectManager.setup((pm) => pm.getProjects()).returns(() => projects);
         projectManager.setup((pm) => pm.onDidChangeProjects).returns(() => projectChangesEmitter.event);
         setupNonThenable(projectManager);
 
@@ -653,6 +656,86 @@ suite('PythonPackageManagerApi Tests', () => {
             disposable.dispose();
         });
 
+        function registerEnvironmentProvider(
+            preferredPackageManagerId: string,
+            usesEnvironment: boolean,
+        ): {
+            environment: PythonEnvironment;
+            getEnvironment: sinon.SinonStub;
+            managerId: string;
+            disposable: Disposable;
+        } {
+            const onDidChangeEnvironmentsEmitter = new EventEmitter<DidChangeEnvironmentsEventArgs>();
+            const onDidChangeEnvironmentEmitter = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            let selectedEnvironment: PythonEnvironment | undefined;
+            const getEnvironment = sinon.stub().callsFake(async () => selectedEnvironment);
+            const registration = envManagers.registerEnvironmentManager(
+                {
+                    name: 'resolver-env-mgr',
+                    preferredPackageManagerId,
+                    onDidChangeEnvironments: onDidChangeEnvironmentsEmitter.event,
+                    onDidChangeEnvironment: onDidChangeEnvironmentEmitter.event,
+                    refresh: async () => undefined,
+                    getEnvironments: async () => [],
+                    set: async () => undefined,
+                    get: getEnvironment,
+                    resolve: async () => undefined,
+                },
+                { extensionId: 'test-ext' },
+            );
+            const managerId = envManagers.managers.find((manager) => manager.name === 'resolver-env-mgr')!.id;
+            const resolvedEnvironment: PythonEnvironment = {
+                ...environment.object,
+                envId: { id: environment.object.envId.id, managerId },
+            };
+            selectedEnvironment = usesEnvironment ? resolvedEnvironment : undefined;
+            return {
+                environment: resolvedEnvironment,
+                getEnvironment,
+                managerId,
+                disposable: Disposable.from(
+                    registration,
+                    onDidChangeEnvironmentsEmitter,
+                    onDidChangeEnvironmentEmitter,
+                ),
+            };
+        }
+
+        function registerProjectAwarePackageManager(): {
+            manager: InternalPackageManager;
+            createForProject: sinon.SinonStub;
+        } {
+            disposable.dispose();
+            const createForProject = sinon.stub().callsFake(() => ({
+                name: 'project-pkg-mgr',
+                manage: async () => undefined,
+                refresh: async () => undefined,
+                getPackages: async () => [],
+            }));
+            disposable = envManagers.registerPackageManager({
+                name: 'project-pkg-mgr',
+                manage: async () => undefined,
+                refresh: async () => undefined,
+                getPackages: async () => [],
+                createForProject,
+            });
+            return { manager: envManagers.packageManagers[0], createForProject };
+        }
+
+        function configureDefaultManagers(packageManagerId: string, environmentManagerId: string): void {
+            sinon.stub(workspaceApis, 'getConfiguration').returns({
+                get: (section: string, defaultValue?: unknown) => {
+                    if (section === 'defaultPackageManager') {
+                        return packageManagerId;
+                    }
+                    if (section === 'defaultEnvManager') {
+                        return environmentManagerId;
+                    }
+                    return defaultValue;
+                },
+            } as WorkspaceConfiguration);
+        }
+
         test('Should retrieve package manager by ID string', () => {
             // Mock - Get registered package manager ID
             const managerId = envManagers.packageManagers[0].id;
@@ -798,6 +881,13 @@ suite('PythonPackageManagerApi Tests', () => {
         });
 
         test('Should share a project-independent package manager across projects', () => {
+            disposable.dispose();
+            disposable = envManagers.registerPackageManager({
+                name: 'project-independent-pkg-mgr',
+                manage: async () => undefined,
+                refresh: async () => undefined,
+                getPackages: async () => [],
+            });
             const project = {
                 name: 'project',
                 uri: Uri.file(path.join(process.cwd(), 'project')),
@@ -810,6 +900,104 @@ suite('PythonPackageManagerApi Tests', () => {
             } as WorkspaceConfiguration);
 
             assert.strictEqual(envManagers.getPackageManager(project.uri), registeredManager);
+        });
+
+        test('Should return a project-independent package manager without resolving projects', async () => {
+            disposable.dispose();
+            disposable = envManagers.registerPackageManager({
+                name: 'project-independent-pkg-mgr',
+                manage: async () => undefined,
+                refresh: async () => undefined,
+                getPackages: async () => [],
+            });
+            const project = {
+                name: 'project',
+                uri: Uri.file(path.join(process.cwd(), 'project-independent')),
+            } as PythonProject;
+            projects = [project];
+            const registeredManager = envManagers.packageManagers[0];
+            const provider = registerEnvironmentProvider(registeredManager.id, true);
+
+            const manager = await envManagers.resolvePackageManager(provider.environment);
+
+            assert.strictEqual(manager, registeredManager);
+            assert.ok(provider.getEnvironment.notCalled);
+
+            provider.disposable.dispose();
+        });
+
+        test('Should bind the provided project without inferring it from the environment', async () => {
+            const project = {
+                name: 'project',
+                uri: Uri.file(path.join(process.cwd(), 'explicit-project')),
+            } as PythonProject;
+            projectManager.setup((pm) => pm.get(typeMoq.It.isAny())).returns(() => project);
+            const packageProvider = registerProjectAwarePackageManager();
+            const environmentProvider = registerEnvironmentProvider(packageProvider.manager.id, false);
+            configureDefaultManagers(packageProvider.manager.id, environmentProvider.managerId);
+
+            const manager = await envManagers.resolvePackageManager(environmentProvider.environment, project);
+
+            assert.strictEqual(manager?.project, project);
+            assert.ok(packageProvider.createForProject.calledOnceWithExactly(project));
+            assert.ok(environmentProvider.getEnvironment.notCalled);
+
+            environmentProvider.disposable.dispose();
+        });
+
+        test('Should resolve a project-aware package manager for the unique project using an environment', async () => {
+            const project = {
+                name: 'project',
+                uri: Uri.file(path.join(process.cwd(), 'unique-project')),
+            } as PythonProject;
+            projects = [project];
+            projectManager.setup((pm) => pm.get(typeMoq.It.isAny())).returns(() => project);
+            const packageProvider = registerProjectAwarePackageManager();
+            const environmentProvider = registerEnvironmentProvider(packageProvider.manager.id, true);
+            configureDefaultManagers(packageProvider.manager.id, environmentProvider.managerId);
+
+            const manager = await envManagers.resolvePackageManager(environmentProvider.environment);
+
+            assert.ok(packageProvider.createForProject.calledOnceWithExactly(project));
+            assert.strictEqual(manager?.project, project);
+
+            environmentProvider.disposable.dispose();
+        });
+
+        test('Should not resolve a project-aware package manager without a matching project', async () => {
+            const packageProvider = registerProjectAwarePackageManager();
+            const environmentProvider = registerEnvironmentProvider(packageProvider.manager.id, false);
+
+            const manager = await envManagers.resolvePackageManager(environmentProvider.environment);
+
+            assert.strictEqual(manager, undefined);
+            assert.ok(packageProvider.createForProject.notCalled);
+
+            environmentProvider.disposable.dispose();
+        });
+
+        test('Should not choose a project-aware package manager when multiple projects use an environment', async () => {
+            disposable.dispose();
+            const firstProject = {
+                name: 'first',
+                uri: Uri.file(path.join(process.cwd(), 'ambiguous-first-project')),
+            } as PythonProject;
+            const secondProject = {
+                name: 'second',
+                uri: Uri.file(path.join(process.cwd(), 'ambiguous-second-project')),
+            } as PythonProject;
+            projects = [firstProject, secondProject];
+
+            const packageProvider = registerProjectAwarePackageManager();
+            const environmentProvider = registerEnvironmentProvider(packageProvider.manager.id, true);
+            configureDefaultManagers(packageProvider.manager.id, environmentProvider.managerId);
+
+            const manager = await envManagers.resolvePackageManager(environmentProvider.environment);
+
+            assert.strictEqual(manager, undefined);
+            assert.ok(packageProvider.createForProject.notCalled);
+
+            environmentProvider.disposable.dispose();
         });
 
         test('Should evict scoped package managers when their project is removed', async () => {

@@ -119,6 +119,22 @@ export interface EnvironmentManagers extends Disposable {
     getEnvironmentManager(scope: EnvironmentManagerScope): InternalEnvironmentManager | undefined;
     getPackageManager(scope: PackageManagerScope): InternalPackageManager | undefined;
 
+    /**
+     * Resolves the package manager for an environment and optional explicit project context.
+     *
+     * When a project is supplied, its configured project-scoped manager is returned directly.
+     * Without a project, project-independent providers are returned directly and project-aware
+     * providers are scoped only when exactly one tracked project currently uses the environment.
+     *
+     * @param environment The environment whose package manager should be resolved.
+     * @param project The project to bind to, when the caller has explicit project context.
+     * @returns The package manager, or undefined when project ownership is absent or ambiguous.
+     */
+    resolvePackageManager(
+        environment: PythonEnvironment,
+        project?: PythonProject,
+    ): Promise<InternalPackageManager | undefined>;
+
     managers: InternalEnvironmentManager[];
     packageManagers: InternalPackageManager[];
 
@@ -429,14 +445,14 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             const defaultPkgManagerId = getDefaultPkgManagerSetting(this.pm, context);
             const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
             if (defaultPkgManagerId) {
-                return this.getProjectPackageManager(this._packageManagers.get(defaultPkgManagerId), project);
+                return this.getOrCreateProjectScopedManager(this._packageManagers.get(defaultPkgManagerId), project);
             }
 
             if (defaultEnvManagerId) {
                 const preferredPkgManagerId =
                     this._environmentManagers.get(defaultEnvManagerId)?.preferredPackageManagerId;
                 if (preferredPkgManagerId) {
-                    return this.getProjectPackageManager(
+                    return this.getOrCreateProjectScopedManager(
                         this._packageManagers.get(preferredPkgManagerId),
                         project,
                     );
@@ -461,7 +477,45 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         return undefined;
     }
 
-    private getProjectPackageManager(
+    public async resolvePackageManager(
+        environment: PythonEnvironment,
+        project?: PythonProject,
+    ): Promise<InternalPackageManager | undefined> {
+        if (project) {
+            return this.getPackageManager(project.uri);
+        }
+
+        const manager = this.getPackageManager(environment);
+        if (!manager?.createForProject) {
+            return manager;
+        }
+
+        const projects = this.pm.getProjects();
+        const projectEnvironments = await Promise.all(
+            projects.map(async (project) => ({
+                project,
+                environment: await this.getEnvironment(project.uri),
+            })),
+        );
+        const matchingProjects = projectEnvironments.filter(({ environment: projectEnvironment }) =>
+            this.isSameEnvironment(environment, projectEnvironment),
+        );
+        if (matchingProjects.length !== 1) {
+            traceVerbose(
+                `Unable to resolve project-scoped package manager for environment ${environment.envId.id}: ` +
+                    `found ${matchingProjects.length} matching projects`,
+            );
+            return undefined;
+        }
+
+        const resolvedManager = this.getPackageManager(matchingProjects[0].project.uri);
+        if (resolvedManager?.createForProject && !resolvedManager.project) {
+            return undefined;
+        }
+        return resolvedManager;
+    }
+
+    private getOrCreateProjectScopedManager(
         manager: InternalPackageManager | undefined,
         project: PythonProject | undefined,
     ): InternalPackageManager | undefined {
@@ -472,7 +526,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         const key = `${manager.id}:${normalizePath(project.uri.fsPath)}`;
         let scopedManager = this._projectPackageManagers.get(key);
         if (!scopedManager) {
-            scopedManager = manager.createProjectScopedManager(project);
+            scopedManager = manager.createForProject?.(project);
             if (scopedManager) {
                 this._projectPackageManagers.set(key, scopedManager);
                 this.subscribeToPackageManagerEvents(manager, scopedManager);

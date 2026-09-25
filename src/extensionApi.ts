@@ -300,7 +300,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     async managePackages(context: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
         await waitForEnvManagerId([context.envId.managerId]);
-        const manager = this.envManagers.getPackageManager(context);
+        const manager =
+            (await this.envManagers.resolvePackageManager(context)) ?? this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
         }
@@ -308,7 +309,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     async refreshPackages(context: PythonEnvironment): Promise<void> {
         await waitForEnvManagerId([context.envId.managerId]);
-        const manager = this.envManagers.getPackageManager(context);
+        const manager =
+            (await this.envManagers.resolvePackageManager(context)) ?? this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
         }
@@ -316,7 +318,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     async getPackages(context: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         await waitForEnvManagerId([context.envId.managerId]);
-        const manager = this.envManagers.getPackageManager(context);
+        const manager =
+            (await this.envManagers.resolvePackageManager(context)) ?? this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.resolve(undefined);
         }

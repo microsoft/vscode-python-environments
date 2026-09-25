@@ -664,9 +664,6 @@ suite('handlePackageUninstall - unbound package manager', () => {
             getPackages: async () => undefined,
         };
         const packageManager = new InternalPackageManager('ms-python.python:poetry', rawManager as never);
-        const envManagerMock: Partial<EnvironmentManagers> = {
-            getPackageManager: () => packageManager,
-        };
         const provider = {
             name: 'poetry',
             preferredPackageManagerId: 'ms-python.python:poetry',
@@ -685,7 +682,7 @@ suite('handlePackageUninstall - unbound package manager', () => {
         };
         const context = new PackageTreeItem(pkg, envItem, packageManager);
 
-        await handlePackageUninstall(context, envManagerMock as EnvironmentManagers);
+        await handlePackageUninstall(context);
 
         assert.ok(showError.calledOnceWithExactly(new PackageManagerRequiresProjectError().message));
     });

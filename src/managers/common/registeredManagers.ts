@@ -212,6 +212,7 @@ function inferPackageManagementTrigger(
 
 export class InternalPackageManager implements PackageManager {
     private readonly relatedManagers: WeakSet<PackageManager>;
+    public readonly createForProject?: (project: PythonProject) => InternalPackageManager;
 
     public constructor(
         public readonly id: string,
@@ -221,6 +222,21 @@ export class InternalPackageManager implements PackageManager {
     ) {
         this.relatedManagers = relatedManagers ?? new WeakSet<PackageManager>();
         this.relatedManagers.add(manager);
+        const createForProject = manager.createForProject?.bind(manager);
+        if (createForProject) {
+            this.createForProject = (scopedProject) => {
+                const scopedManager = createForProject(scopedProject);
+                if (!scopedManager) {
+                    throw new Error(`Package manager ${this.id} did not create a manager for the requested project`);
+                }
+                return new InternalPackageManager(
+                    this.id,
+                    scopedManager,
+                    scopedProject,
+                    this.relatedManagers,
+                );
+            };
+        }
     }
 
     public get name(): string {
@@ -291,21 +307,12 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.onDidChangePackages;
     }
 
-    get supportsProjectBinding(): boolean {
-        return this.manager.createForProject !== undefined;
-    }
-
     wraps(other: PackageManager): boolean {
         return this.manager === other;
     }
 
     equals(other: PackageManager): boolean {
         return this.relatedManagers.has(other);
-    }
-
-    createProjectScopedManager(project: PythonProject): InternalPackageManager | undefined {
-        const manager = this.manager.createForProject?.(project);
-        return manager ? new InternalPackageManager(this.id, manager, project, this.relatedManagers) : undefined;
     }
 
     getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {

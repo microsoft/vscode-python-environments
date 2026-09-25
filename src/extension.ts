@@ -298,7 +298,9 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                   commands.registerCommand(
                       'python-envs.test.getDirectPackageNames',
                       async (environment: PythonEnvironment) => {
-                          const manager = envManagers.getPackageManager(environment);
+                          const manager =
+                              (await envManagers.resolvePackageManager(environment)) ??
+                              envManagers.getPackageManager(environment);
                           const names = await manager?.getDirectPackageNames?.(environment);
                           return names ? Array.from(names) : undefined;
                       },
@@ -378,10 +380,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             }
         }),
         commands.registerCommand('python-envs.uninstallPackage', async (context: unknown) => {
-            await handlePackageUninstall(context, envManagers);
+            await handlePackageUninstall(context);
         }),
         commands.registerCommand('python-envs.managePackageVersion', async (context: unknown) => {
-            await managePackageVersion(context, envManagers);
+            await managePackageVersion(context);
         }),
         commands.registerCommand('python-envs.set', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);

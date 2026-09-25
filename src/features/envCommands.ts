@@ -138,16 +138,16 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
     if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
         if (managers) {
-            const pkgManager = managers.getPackageManager(view.parent.project.uri);
+            const pkgManager = await managers.resolvePackageManager(view.environment, view.parent.project);
             if (pkgManager) {
                 await pkgManager.refresh(view.environment);
             }
         }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const envManager =
-            view.parent.kind === EnvTreeItemKind.environmentGroup ? view.parent.parent.manager : view.parent.manager;
-        const pkgManager = managers?.getPackageManager(envManager.preferredPackageManagerId);
+        const pkgManager =
+            (await managers?.resolvePackageManager(view.environment)) ??
+            managers?.getPackageManager(view.environment);
         if (pkgManager) {
             await pkgManager.refresh(view.environment);
         }
@@ -326,7 +326,7 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
     }
 }
 
-export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
+export async function handlePackageUninstall(context: unknown) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         if (context.pkg.isTransitive) {
             const confirm = await showInformationMessage(
@@ -344,10 +344,8 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
         }
         const moduleName = context.pkg.name;
         const environment = context.parent.environment;
-        const packageManager =
-            context instanceof ProjectPackage ? context.manager : em.getPackageManager(environment);
         try {
-            await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
+            await context.manager.manage(environment, { uninstall: [moduleName], install: [] });
         } catch (error) {
             if (error instanceof PackageManagerRequiresProjectError) {
                 await showErrorMessage(error.message);
@@ -364,16 +362,11 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
  * Manages package versions by allowing the user to select from available versions or enter a specific version.
  * If available versions can be fetched, a QuickPick is shown. Otherwise, an InputBox is used for free-text version entry.
  */
-export async function managePackageVersion(context: unknown, em: EnvironmentManagers) {
+export async function managePackageVersion(context: unknown) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const pkg = context.pkg;
         const environment = context.parent.environment;
-        const packageManager =
-            context instanceof ProjectPackage ? context.manager : em.getPackageManager(environment);
-
-        if (!packageManager) {
-            return;
-        }
+        const packageManager = context.manager;
 
         if (pkg.isTransitive) {
             const confirm = await showInformationMessage(
@@ -802,7 +795,7 @@ async function resolvePackageCommandOptions(
 
     if (e instanceof ProjectEnvironment) {
         const environment = e.environment;
-        const packageManager = em.getPackageManager(e.parent.project.uri);
+        const packageManager = await em.resolvePackageManager(environment, e.parent.project);
         if (packageManager) {
             return { environment, packageManager };
         }
@@ -810,7 +803,7 @@ async function resolvePackageCommandOptions(
 
     if (e instanceof PythonEnvTreeItem) {
         const environment = e.environment;
-        const packageManager = em.getPackageManager(environment);
+        const packageManager = (await em.resolvePackageManager(environment)) ?? em.getPackageManager(environment);
         if (packageManager) {
             return { environment, packageManager };
         }
