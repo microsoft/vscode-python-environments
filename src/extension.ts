@@ -89,7 +89,7 @@ import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHand
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
 import { TerminalEnvVarInjector } from './features/terminal/terminalEnvVarInjector';
 import { TerminalManager, TerminalManagerImpl } from './features/terminal/terminalManager';
-import { getEnvironmentForTerminal } from './features/terminal/utils';
+import { getEnvironmentForTerminal, migrateLegacyTerminalActivationSetting } from './features/terminal/utils';
 import { openSearchSettings } from './features/views/envManagerSearch';
 import { EnvManagerView } from './features/views/envManagersView';
 import { ProjectView } from './features/views/projectView';
@@ -182,6 +182,12 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         await migrateGlobalDefaultEnvManagerSetting();
     } catch (err) {
         traceError(`[migration] migrateGlobalDefaultEnvManagerSetting threw: ${err}`);
+    }
+
+    try {
+        await migrateLegacyTerminalActivationSetting();
+    } catch (err) {
+        traceError(`[migration] migrateLegacyTerminalActivationSetting threw: ${err}`);
     }
 
     const statusBar = new PythonStatusBarImpl();

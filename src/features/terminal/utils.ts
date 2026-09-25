@@ -379,6 +379,7 @@ export const ACT_TYPE_SHELL = 'shellStartup';
 export const ACT_TYPE_COMMAND = 'command';
 export const ACT_TYPE_OFF = 'off';
 export type AutoActivationType = 'off' | 'command' | 'shellStartup';
+
 /**
  * Determines the auto-activation type for Python environments in terminals.
  *
@@ -392,7 +393,7 @@ export type AutoActivationType = 'off' | 'command' | 'shellStartup';
  *    a. globalRemoteValue
  *    b. globalLocalValue
  *    c. globalValue
- * 2. python.terminal.activateEnvironment setting (if false, returns 'off' & sets autoActivationType to 'off')
+ * 2. python.terminal.activateEnvironment setting (if false, returns 'off')
  * 3. Default to 'command' if no setting is found
  *
  * @returns {AutoActivationType} The determined auto-activation type
@@ -420,13 +421,38 @@ export function getAutoActivationType(): AutoActivationType {
     const pythonConfig = getConfiguration('python');
     const pythonActivateSetting = pythonConfig.get<boolean | undefined>('terminal.activateEnvironment', undefined);
     if (pythonActivateSetting === false) {
-        // Set autoActivationType to 'off' if python.terminal.activateEnvironment is false
-        pyEnvsConfig.update('terminal.autoActivationType', ACT_TYPE_OFF);
         return ACT_TYPE_OFF;
     }
 
     // Default to 'command' if no settings are found or if pythonActivateSetting is true/undefined
     return ACT_TYPE_COMMAND;
+}
+
+/**
+ * Migrates the disabled legacy terminal activation setting to User settings.
+ *
+ * The migration is skipped when `python-envs.terminal.autoActivationType` is already set.
+ * The returned promise rejects if the setting cannot be updated.
+ */
+export async function migrateLegacyTerminalActivationSetting(): Promise<void> {
+    const pyEnvsConfig = getConfiguration('python-envs');
+    const pyEnvsActivationType = pyEnvsConfig.inspect<AutoActivationType>('terminal.autoActivationType');
+
+    if (pyEnvsActivationType) {
+        const activationType = pyEnvsActivationType as Record<string, unknown>;
+        if (
+            ('globalRemoteValue' in pyEnvsActivationType && activationType.globalRemoteValue !== undefined) ||
+            ('globalLocalValue' in pyEnvsActivationType && activationType.globalLocalValue !== undefined) ||
+            pyEnvsActivationType.globalValue !== undefined
+        ) {
+            return;
+        }
+    }
+
+    const pythonConfig = getConfiguration('python');
+    if (pythonConfig.get<boolean | undefined>('terminal.activateEnvironment', undefined) === false) {
+        await setAutoActivationType(ACT_TYPE_OFF);
+    }
 }
 
 export async function setAutoActivationType(value: AutoActivationType): Promise<void> {
