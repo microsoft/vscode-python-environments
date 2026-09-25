@@ -721,7 +721,14 @@ export interface PackageManager {
     /**
      * Creates a package manager bound to a Python project.
      *
-     * Project-independent package managers can omit this method.
+     * The extension uses the explicit project supplied by project-based callers. When a caller
+     * provides only an environment, the extension uses a project-bound manager only if exactly
+     * one tracked project uses that environment. The registered root manager may still receive
+     * environment-only operations when no project can be selected safely, so project-sensitive
+     * operations must handle an unbound manager without running in an arbitrary working directory.
+     *
+     * Project-independent package managers can omit this method. Implementations should keep
+     * project-specific caches and mutable state on the returned manager rather than the root.
      *
      * @param project - The project to bind to the package manager.
      * @returns A package manager that uses the project for project-sensitive operations.

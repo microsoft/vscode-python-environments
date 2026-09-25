@@ -1621,6 +1621,44 @@ Reports and changes the packages of an environment.
 | `formatInstallSpec(packageName, version)` | `(packageName: string, version: string) => string` | No | Formats a pinned specifier for this tool, for example `requests==2.31.0` for pip or `requests=2.31.0` for conda. Callers default to `name==version` when absent. |
 | `onDidChangePackages` | `Event<DidChangePackagesEventArgs>` | No | Fire when packages change. |
 
+##### Project-scoped package managers
+
+Implement `createForProject` when package operations depend on project files or
+the process working directory, as they do for tools such as Poetry. Callers that
+already have a `PythonProject` use that project directly. For environment-only
+operations, the extension selects a project-scoped manager only when exactly one
+tracked project uses the environment; it does not choose arbitrarily when no
+project or multiple projects match.
+
+Environment-only command and API paths may still use the originally registered
+manager as an unbound fallback, while package views can suppress operations when
+there is no unique project. Project-sensitive methods on the root manager must
+therefore fail clearly or report that data is unavailable rather than running
+from the extension host's working directory. Keep project-specific caches and
+mutable state on the manager returned by `createForProject`.
+
+```typescript
+class ProjectPackageManager implements PackageManager {
+    readonly name = 'project-pm';
+
+    constructor(private readonly project?: PythonProject) {}
+
+    createForProject(project: PythonProject): PackageManager {
+        return new ProjectPackageManager(project);
+    }
+
+    async manage(
+        environment: PythonEnvironment,
+        options: PackageManagementOptions,
+    ): Promise<void> {
+        if (!this.project) {
+            throw new Error('Package management requires a Python project.');
+        }
+        await runPackageCommand(options, { cwd: this.project.uri.fsPath });
+    }
+}
+```
+
 ```typescript
 class MyPackageManager implements PackageManager {
     readonly name = 'my-pm';
