@@ -9,6 +9,10 @@ resources:
       type: git
       name: 1ESPipelineTemplates/MicroBuildTemplate
       ref: refs/tags/release
+    - repository: templates
+      type: git
+      name: DevDiv/Pylance-Eng
+      ref: refs/heads/main
 
 parameters:
   - name: quality
@@ -31,6 +35,10 @@ variables:
     value: '@vscode/python-environments'
   - name: PackageDir
     value: api
+  - name: NodeVersion
+    value: '22.21.1'
+  - name: AZURE_ARTIFACTS_FEED
+    value: 'https://devdiv.pkgs.visualstudio.com/DevDiv/_packaging/Pylance_PublicPackages/npm/registry/'
   - name: npmTag
     ${{ if eq(parameters.quality, 'preview') }}:
       value: next
@@ -66,10 +74,11 @@ extends:
                   targetPath: $(Build.ArtifactStagingDirectory)
                   artifactName: npm-package
             steps:
-              - task: NodeTool@0
-                inputs:
-                  versionSpec: '22.21.1'
-                displayName: Select Node version
+              - template: azure-pipelines/extension/templates/steps/setup.yml@templates
+                parameters:
+                  installPython: false
+                  customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
+                  nodeVersion: $(NodeVersion)
 
               - script: npm install
                 workingDirectory: $(Build.SourcesDirectory)/api
