@@ -63,3 +63,41 @@ jobs:
           file-pattern: 'api/CHANGELOG.md'
           skip-label: 'skip api changelog'
           failure-message: 'The public API (${prereq-pattern}) was changed without a changelog entry in ${file-pattern} (the ${skip-label} label can be used to pass this check)'
+
+      - name: 'Public API changes require reference doc updates'
+        uses: brettcannon/check-for-changed-files@d85c64d17b3c1d0ac57c9cc46ea39399b0d6fa71 # v1.2.2
+        with:
+          prereq-pattern: |
+            src/api.ts
+            src/types.ts
+            src/publicErrors.ts
+          file-pattern: 'docs/README.md'
+          skip-label: 'skip api docs'
+          failure-message: 'The public API (${prereq-pattern}) was changed without updating the reference docs in ${file-pattern} (the ${skip-label} label can be used to pass this check)'
+
+  api-docs-coverage:
+    name: 'Verify API docs symbol coverage'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22.21.1'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install api package dependencies
+        working-directory: api
+        run: npm ci
+
+      - name: Run docs-coverage tests
+        working-directory: api
+        run: npm run test:docs-coverage
+
+      - name: Verify every exported symbol is documented
+        run: node api/scripts/verify-docs-coverage.cjs
