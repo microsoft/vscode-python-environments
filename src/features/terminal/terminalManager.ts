@@ -68,6 +68,7 @@ export class TerminalManagerImpl implements TerminalManager {
     private disposables: Disposable[] = [];
     private skipActivationOnOpen = new Set<Terminal>();
     private shellSetup: Map<string, boolean> = new Map<string, boolean>();
+    private pendingTerminalEnvironments = new WeakMap<Terminal, PythonEnvironment>();
 
     private onTerminalOpenedEmitter = new EventEmitter<Terminal>();
     private onTerminalOpened = this.onTerminalOpenedEmitter.event;
@@ -99,7 +100,8 @@ export class TerminalManagerImpl implements TerminalManager {
                 if (this.skipActivationOnOpen.has(t) || shouldSkipTerminalActivation(t)) {
                     return;
                 }
-                let env = this.ta.getEnvironment(t);
+                let env = this.pendingTerminalEnvironments.get(t) ?? this.ta.getEnvironment(t);
+                this.pendingTerminalEnvironments.delete(t);
                 if (!env) {
                     const api = await getPythonApi();
                     env = await getEnvironmentForTerminal(api, t);
@@ -296,6 +298,9 @@ export class TerminalManagerImpl implements TerminalManager {
             name,
             env: envVars,
         });
+        if (autoActType === ACT_TYPE_SHELL) {
+            this.pendingTerminalEnvironments.set(newTerminal, environment);
+        }
 
         if (autoActType === ACT_TYPE_COMMAND) {
             if (options.disableActivation) {

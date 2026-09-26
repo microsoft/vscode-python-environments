@@ -14,6 +14,7 @@ import {
     clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
+    createTerminalCommand,
     removeEnvironmentCommand,
     removePythonProject,
     revealEnvInManagerView,
@@ -26,7 +27,12 @@ import * as shellProviders from '../../features/terminal/shells/providers';
 import { ShellStartupScriptProvider } from '../../features/terminal/shells/startupProvider';
 import { TerminalManager } from '../../features/terminal/terminalManager';
 import { EnvManagerView } from '../../features/views/envManagersView';
-import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
+import {
+    EnvManagerTreeItem,
+    ProjectEnvironment,
+    ProjectItem,
+    PythonEnvTreeItem,
+} from '../../features/views/treeViewItems';
 import type { EnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
@@ -92,6 +98,104 @@ suite('Environment removal command ownership', () => {
         );
         assert.ok(getEnvironmentManager.calledOnceWithExactly(environment));
     });
+});
+
+suite('Create Terminal Command Tests', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    function createEnvironmentItem(environment: PythonEnvironment): PythonEnvTreeItem {
+        const manager = {
+            id: environment.envId.managerId,
+            name: 'venv',
+            displayName: 'Venv',
+        } as InternalEnvironmentManager;
+        return new PythonEnvTreeItem(environment, new EnvManagerTreeItem(manager));
+    }
+
+    function createTerminalManager() {
+        const terminal = { show: sinon.stub() } as unknown as Terminal;
+        const create = sinon.stub().resolves(terminal);
+        return { terminal, create, manager: { create } as unknown as TerminalManager };
+    }
+
+    test('creates a terminal for the clicked environment without a project', async () => {
+        const environment = createMockPythonEnvironment({
+            managerId: 'ms-python.python:venv',
+            envPath: path.join(process.cwd(), '.venv', 'python'),
+        });
+        const getEnvironment = sinon.stub().resolves(undefined);
+        const api = {
+            getPythonProjects: sinon.stub().returns([]),
+            getEnvironment,
+        } as unknown as PythonEnvironmentApi;
+        const terminalManager = createTerminalManager();
+
+        const result = await createTerminalCommand(createEnvironmentItem(environment), api, terminalManager.manager);
+
+        assert.strictEqual(result, terminalManager.terminal);
+        sinon.assert.calledOnceWithExactly(terminalManager.create, environment, { cwd: undefined });
+        sinon.assert.calledOnce(terminalManager.terminal.show as sinon.SinonStub);
+        sinon.assert.notCalled(getEnvironment);
+    });
+
+    test('does not create a terminal when project selection is cancelled', async () => {
+        const environment = createMockPythonEnvironment({
+            managerId: 'ms-python.python:venv',
+            envPath: path.join(process.cwd(), '.venv', 'python'),
+        });
+        const projects: PythonProject[] = [
+            { name: 'project-one', uri: Uri.file(path.join(process.cwd(), 'project-one')) },
+            { name: 'project-two', uri: Uri.file(path.join(process.cwd(), 'project-two')) },
+        ];
+        const api = {
+            getPythonProjects: sinon.stub().returns(projects),
+        } as unknown as PythonEnvironmentApi;
+        const terminalManager = createTerminalManager();
+        sinon.stub(projectApi, 'pickProject').resolves(undefined);
+
+        const result = await createTerminalCommand(createEnvironmentItem(environment), api, terminalManager.manager);
+
+        assert.strictEqual(result, undefined);
+        sinon.assert.notCalled(terminalManager.create);
+    });
+
+    for (const projectEnvironment of [
+        undefined,
+        createMockPythonEnvironment({
+            name: 'project-environment',
+            managerId: 'ms-python.python:venv',
+            envPath: path.join(process.cwd(), 'project-environment', 'python'),
+        }),
+    ]) {
+        const projectEnvironmentDescription = projectEnvironment ? 'a different environment' : 'no environment';
+
+        test(`creates a terminal for the clicked environment when the project has ${projectEnvironmentDescription}`, async () => {
+            const environment = createMockPythonEnvironment({
+                name: 'clicked-environment',
+                managerId: 'ms-python.python:venv',
+                envPath: path.join(process.cwd(), 'clicked-environment', 'python'),
+            });
+            const project: PythonProject = {
+                name: 'project',
+                uri: Uri.file(process.cwd()),
+            };
+            const getEnvironment = sinon.stub().resolves(projectEnvironment);
+            const api = {
+                getPythonProjects: sinon.stub().returns([project]),
+                getEnvironment,
+            } as unknown as PythonEnvironmentApi;
+            const terminalManager = createTerminalManager();
+
+            const result = await createTerminalCommand(createEnvironmentItem(environment), api, terminalManager.manager);
+
+            assert.strictEqual(result, terminalManager.terminal);
+            sinon.assert.calledOnceWithExactly(terminalManager.create, environment, { cwd: project.uri.fsPath });
+            sinon.assert.calledOnce(terminalManager.terminal.show as sinon.SinonStub);
+            sinon.assert.notCalled(getEnvironment);
+        });
+    }
 });
 
 suite('Create Any Environment Command Tests', () => {

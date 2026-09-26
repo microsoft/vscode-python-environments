@@ -814,6 +814,16 @@ export async function createTerminalCommand(
     tm: TerminalManager,
 ): Promise<Terminal | undefined> {
     const pythonProjects = api.getPythonProjects();
+    if (context instanceof PythonEnvTreeItem) {
+        const pw = await pickProject(pythonProjects);
+        if (pythonProjects.length > 0 && !pw) {
+            return undefined;
+        }
+        const cwd = pw ? await findParentIfFile(pw.uri.fsPath) : undefined;
+        const terminal = await tm.create(context.environment, { cwd });
+        terminal.show();
+        return terminal;
+    }
     // If no context is provided, or there are multiple projects, prompt the user to select a project for the terminal's cwd
     if (context === undefined || pythonProjects.length > 0) {
         const pw = await pickProject(pythonProjects);
@@ -845,15 +855,6 @@ export async function createTerminalCommand(
         const env = await api.getEnvironment(undefined);
         if (env) {
             const terminal = await tm.create(env, { cwd: undefined });
-            terminal.show();
-            return terminal;
-        }
-    } else if (context instanceof PythonEnvTreeItem) {
-        const view = context as PythonEnvTreeItem;
-        const pw = await pickProject(pythonProjects);
-        if (pw) {
-            const cwd = await findParentIfFile(pw.uri.fsPath);
-            const terminal = await tm.create(view.environment, { cwd });
             terminal.show();
             return terminal;
         }

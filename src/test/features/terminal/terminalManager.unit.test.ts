@@ -18,9 +18,10 @@ import {
     Uri,
     WorkspaceConfiguration,
 } from 'vscode';
-import { PythonEnvironment } from '../../../api';
+import { PythonEnvironment, PythonEnvironmentApi } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
+import * as extensionApi from '../../../extensionApi';
 import * as activationUtils from '../../../features/common/activation';
 import * as shellDetector from '../../../features/common/shellDetector';
 import * as shellUtils from '../../../features/terminal/shells/common/shellUtils';
@@ -44,6 +45,7 @@ class TestTerminalActivation implements TerminalActivationInternal {
     public callOrder: string[] = [];
     public activateCalls = 0;
     public deactivateCalls = 0;
+    public activatedEnvironment: PythonEnvironment | undefined;
 
     private onDidChangeEmitter = new EventEmitter<DidChangeTerminalActivationStateEvent>();
     public onDidChangeTerminalActivationState: Event<DidChangeTerminalActivationStateEvent> =
@@ -53,8 +55,9 @@ class TestTerminalActivation implements TerminalActivationInternal {
         return false;
     }
 
-    async activate(_terminal: Terminal, _environment: PythonEnvironment): Promise<void> {
+    async activate(_terminal: Terminal, environment: PythonEnvironment): Promise<void> {
         this.activateCalls += 1;
+        this.activatedEnvironment = environment;
         this.callOrder.push('activate');
     }
 
@@ -80,6 +83,7 @@ suite('TerminalManager - create()', () => {
     let mockGetAutoActivationType: sinon.SinonStub;
     let terminalManager: TerminalManagerImpl;
     let mockTerminal: Partial<Terminal> & { show: sinon.SinonStub };
+    let openTerminal: (terminal: Terminal) => unknown;
 
     const createMockEnvironment = (): PythonEnvironment => ({
         envId: { id: 'test-env-id', managerId: 'test-manager' },
@@ -115,7 +119,10 @@ suite('TerminalManager - create()', () => {
         sinon.stub(shellDetector, 'identifyTerminalShell').returns('bash');
 
         sinon.stub(windowApis, 'createTerminal').returns(mockTerminal as Terminal);
-        sinon.stub(windowApis, 'onDidOpenTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidOpenTerminal').callsFake((listener) => {
+            openTerminal = listener;
+            return new Disposable(() => {});
+        });
         sinon.stub(windowApis, 'onDidCloseTerminal').returns(new Disposable(() => {}));
         sinon.stub(windowApis, 'onDidChangeWindowState').returns(new Disposable(() => {}));
         sinon.stub(windowApis, 'terminals').returns([]);
@@ -175,6 +182,28 @@ suite('TerminalManager - create()', () => {
         const { callOrder } = terminalActivation;
         assert.strictEqual(callOrder.includes('show'), false, 'show() deferred to caller');
         assert.strictEqual(callOrder.includes('activate'), false, 'No command activation for shell startup mode');
+    });
+
+    test('ACT_TYPE_SHELL: command fallback activates the environment requested during creation', async () => {
+        mockGetAutoActivationType.returns(terminalUtils.ACT_TYPE_SHELL);
+        terminalManager = createTerminalManager();
+        const requestedEnvironment = createMockEnvironment();
+        const projectEnvironment = {
+            ...createMockEnvironment(),
+            envId: { id: 'project-env-id', managerId: 'test-manager' },
+        };
+        const cwd = Uri.file(process.cwd()).fsPath;
+        Object.defineProperty(mockTerminal, 'creationOptions', { value: { cwd } });
+        sinon.stub(extensionApi, 'getPythonApi').resolves({
+            getPythonProjects: () => [{ name: 'Project', uri: Uri.file(cwd) }],
+            getEnvironment: async () => projectEnvironment,
+        } as unknown as PythonEnvironmentApi);
+
+        const terminal = await terminalManager.create(requestedEnvironment, { cwd });
+        openTerminal(terminal);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(terminalActivation.activatedEnvironment, requestedEnvironment);
     });
 
     test('ACT_TYPE_OFF: does not call show() since create() returns immediately and caller handles visibility', async () => {
