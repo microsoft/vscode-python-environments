@@ -45,12 +45,14 @@ function getDefaultPackageWatchTargets(env: PythonEnvironment): RelativePattern[
  * @param env - The Python environment to watch.
  * @param packageManager - The package manager to call refresh on when changes occur.
  * @param log - Logger for diagnostic messages.
+ * @param resolvePackageManager - Resolves the current package manager before each refresh.
  * @returns A disposable that removes the watcher when disposed.
  */
 export function watchPackageChangesForEnvironment(
     env: PythonEnvironment,
     packageManager: PackageManager,
     log: LogOutputChannel,
+    resolvePackageManager: () => PackageManager | undefined = () => packageManager,
 ): Disposable {
     const watchTargets = [
         ...getDefaultPackageWatchTargets(env),
@@ -63,7 +65,12 @@ export function watchPackageChangesForEnvironment(
 
     const debouncedRefresh = createSimpleDebounce(500, () => {
         log.debug(`Package change detected for environment ${env.envId.id}, refreshing packages.`);
-        void packageManager.refresh(env).catch((ex) => {
+        const currentPackageManager = resolvePackageManager();
+        if (!currentPackageManager) {
+            log.debug(`No current package manager found for environment ${env.envId.id}`);
+            return;
+        }
+        void currentPackageManager.refresh(env).catch((ex) => {
             log.error(
                 `Failed to refresh packages for environment ${env.envId.id}: ${ex instanceof Error ? ex.message : String(ex)}`,
             );
@@ -153,7 +160,9 @@ export function registerPackageWatchers(
             return;
         }
 
-        const watcherKey = `${environment.envId.managerId}:${environment.envId.id}:${selectedPackageManager.id}`;
+        const packageManagerKey =
+            `${selectedPackageManager.id}:${selectedPackageManager.project?.uri.toString() ?? ''}`;
+        const watcherKey = `${environment.envId.managerId}:${environment.envId.id}:${packageManagerKey}`;
         if (activeWatcherByConsumer.get(consumer) === watcherKey) {
             return;
         }
@@ -164,8 +173,24 @@ export function registerPackageWatchers(
         if (sharedWatcher) {
             sharedWatcher.references += 1;
         } else {
+            const resolvePackageManager = () => {
+                const currentPackageManager =
+                    envManagers.getPackageManager(packageManagerContext) ?? envManagers.getPackageManager(environment);
+                if (
+                    selectedPackageManager.project &&
+                    currentPackageManager?.project?.uri.toString() !== selectedPackageManager.project.uri.toString()
+                ) {
+                    return undefined;
+                }
+                return currentPackageManager;
+            };
             sharedWatchers.set(watcherKey, {
-                disposable: watchPackageChangesForEnvironment(environment, selectedPackageManager, log),
+                disposable: watchPackageChangesForEnvironment(
+                    environment,
+                    selectedPackageManager,
+                    log,
+                    resolvePackageManager,
+                ),
                 references: 1,
             });
         }
@@ -186,7 +211,22 @@ export function registerPackageWatchers(
     const terminalActivationDisposable = terminalActivation.onDidChangeTerminalActivationState((changes) => {
         if (changes.activated) {
             if (!closedTerminals.has(changes.terminal)) {
-                watchEnvironment(changes.terminal, changes.environment, changes.environment);
+                const projectScope = Array.from(activeEnvironmentByScope.values()).find(
+                    ({ scope, environment }) =>
+                        scope &&
+                        environment.envId.id === changes.environment.envId.id &&
+                        environment.envId.managerId === changes.environment.envId.managerId,
+                )?.scope;
+                const managerContext = projectScope ?? changes.environment;
+                const packageManager = envManagers.getPackageManager(managerContext);
+                if (!projectScope && packageManager?.createForProject) {
+                    releaseConsumer(changes.terminal);
+                    log.debug(
+                        `Skipping unscoped package watcher for project-aware manager ${packageManager.id}`,
+                    );
+                    return;
+                }
+                watchEnvironment(changes.terminal, managerContext, changes.environment);
             }
         } else {
             releaseConsumer(changes.terminal);
