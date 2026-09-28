@@ -128,14 +128,6 @@ export interface EnvironmentManagers extends Disposable {
     getPackageManager(scope: PackageManagerScope): InternalPackageManager | undefined;
 
     /**
-     * Returns the configured package manager for an explicit tracked project.
-     *
-     * @param project The project whose package manager should be returned.
-     * @returns The shared or project-scoped package manager.
-     */
-    getPackageManagerForProject(project: PythonProject): InternalPackageManager | undefined;
-
-    /**
      * Resolves a package manager for an environment using last-known project selections.
      *
      * @param environment The environment whose package manager should be resolved.
@@ -451,23 +443,13 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         if (context === undefined || context instanceof Uri) {
             const project = context ? this.pm.get(context) : undefined;
-            const defaultPkgManagerId = getDefaultPkgManagerSetting(this.pm, context);
-            const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
-            if (defaultPkgManagerId) {
-                return project
-                    ? this.projectPackageManagers.getOrCreate(this._packageManagers.get(defaultPkgManagerId), project)
-                    : this._packageManagers.get(defaultPkgManagerId);
-            }
-
-            if (defaultEnvManagerId) {
-                const preferredPkgManagerId =
-                    this._environmentManagers.get(defaultEnvManagerId)?.preferredPackageManagerId;
-                if (preferredPkgManagerId) {
-                    const manager = this._packageManagers.get(preferredPkgManagerId);
-                    return project ? this.projectPackageManagers.getOrCreate(manager, project) : manager;
-                }
-            }
-            return undefined;
+            const defaultPackageManagerId = getDefaultPkgManagerSetting(this.pm, context);
+            const defaultEnvironmentManagerId = getDefaultEnvManagerSetting(this.pm, context);
+            const packageManagerId =
+                defaultPackageManagerId ||
+                this._environmentManagers.get(defaultEnvironmentManagerId)?.preferredPackageManagerId;
+            const manager = packageManagerId ? this._packageManagers.get(packageManagerId) : undefined;
+            return project ? this.projectPackageManagers.getOrCreate(manager, project) : manager;
         }
 
         if (typeof context === 'string') {
@@ -484,15 +466,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
 
         return undefined;
-    }
-
-    public getPackageManagerForProject(project: PythonProject): InternalPackageManager | undefined {
-        const canonicalProject = this.pm.get(project.uri);
-        if (canonicalProject !== project) {
-            traceVerbose(`Unable to resolve package manager for untracked project ${project.uri.fsPath}`);
-            return undefined;
-        }
-        return this.getPackageManager(canonicalProject.uri);
     }
 
     public resolvePackageManagerForEnvironment(
@@ -517,7 +490,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return { kind: 'projectRequired' };
         }
 
-        const scopedManager = this.getPackageManagerForProject(matchingProjects[0]);
+        const scopedManager = this.getPackageManager(matchingProjects[0].uri);
         return scopedManager
             ? { kind: 'resolved', manager: scopedManager }
             : { kind: 'notFound' };

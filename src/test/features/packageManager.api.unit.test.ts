@@ -952,7 +952,7 @@ suite('PythonPackageManagerApi Tests', () => {
             const environmentProvider = registerEnvironmentProvider(packageProvider.manager.id, false);
             configureDefaultManagers(packageProvider.manager.id, environmentProvider.managerId);
 
-            const manager = envManagers.getPackageManagerForProject(project);
+            const manager = envManagers.getPackageManager(project.uri);
 
             assert.strictEqual(manager?.project, project);
             assert.ok(packageProvider.createForProject.calledOnceWithExactly(project));
@@ -1065,10 +1065,8 @@ suite('PythonPackageManagerApi Tests', () => {
             const eventDisposable = envManagers.onDidChangePackages((event) => events.push(event));
 
             const original = envManagers.getPackageManager(projectUri);
-            const originalProject = currentProject;
             currentProject = { name: 'replacement', uri: projectUri } as PythonProject;
             projectChangesEmitter.fire([currentProject]);
-            assert.strictEqual(envManagers.getPackageManagerForProject(originalProject), undefined);
             const replacement = envManagers.getPackageManager(projectUri);
 
             assert.notStrictEqual(original, replacement);

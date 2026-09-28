@@ -138,7 +138,7 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
     if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
         if (managers) {
-            const pkgManager = managers.getPackageManagerForProject(view.parent.project);
+            const pkgManager = managers.getPackageManager(view.parent.project.uri);
             if (pkgManager) {
                 await pkgManager.refresh(view.environment);
             }
@@ -342,15 +342,7 @@ export async function handlePackageUninstall(context: unknown) {
         }
         const moduleName = context.pkg.name;
         const environment = context.parent.environment;
-        try {
-            await context.manager.manage(environment, { uninstall: [moduleName], install: [] });
-        } catch (error) {
-            if (error instanceof PackageManagerRequiresProjectError) {
-                await showErrorMessage(error.message);
-                return;
-            }
-            throw error;
-        }
+        await context.manager.manage(environment, { uninstall: [moduleName], install: [] });
         return;
     }
     traceError(`Invalid context for uninstall command: ${typeof context}`);
@@ -434,18 +426,10 @@ export async function managePackageVersion(context: unknown) {
             return;
         }
 
-        try {
-            await packageManager.manage(environment, {
-                install: [packageManager.formatInstallSpec(pkg.name, version)],
-                uninstall: [],
-            });
-        } catch (error) {
-            if (error instanceof PackageManagerRequiresProjectError) {
-                await showErrorMessage(error.message);
-                return;
-            }
-            throw error;
-        }
+        await packageManager.manage(environment, {
+            install: [packageManager.formatInstallSpec(pkg.name, version)],
+            uninstall: [],
+        });
     } else {
         traceError(`Invalid context for manage package version command: ${typeof context}`);
     }
@@ -793,7 +777,7 @@ async function resolvePackageCommandOptions(
 
     if (e instanceof ProjectEnvironment) {
         const environment = e.environment;
-        const packageManager = em.getPackageManagerForProject(e.parent.project);
+        const packageManager = em.getPackageManager(e.parent.project.uri);
         if (packageManager) {
             return { environment, packageManager };
         }
@@ -802,13 +786,11 @@ async function resolvePackageCommandOptions(
     if (e instanceof PythonEnvTreeItem) {
         const environment = e.environment;
         const resolution = em.resolvePackageManagerForEnvironment(environment);
-        switch (resolution.kind) {
-            case 'resolved':
-                return { environment, packageManager: resolution.manager };
-            case 'projectRequired':
-                throw new PackageManagerRequiresProjectError();
-            case 'notFound':
-                break;
+        if (resolution.manager) {
+            return { environment, packageManager: resolution.manager };
+        }
+        if (resolution.kind === 'projectRequired') {
+            throw new PackageManagerRequiresProjectError();
         }
     }
 
