@@ -382,6 +382,9 @@ export namespace UvInstallStrings {
     );
     export const clickToInstallPython = l10n.t('No Python found, click to install');
     export const selectPythonVersion = l10n.t('Select Python version to install');
+    export const installUvForVersionLookupPrompt = l10n.t(
+        'uv is required to view and install available Python versions. Install uv now? This will download and run an installer from https://astral.sh.',
+    );
     export const installed = l10n.t('installed');
     export const fetchingVersions = l10n.t('Fetching available Python versions...');
     export const failedToFetchVersions = l10n.t('Failed to fetch available Python versions');
