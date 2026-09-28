@@ -2,6 +2,7 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
+import { Uri } from 'vscode';
 import { EnvironmentManager } from '../../../api';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import { getNamedCondaPythonInfo, getPrefixesCondaPythonInfo } from '../../../managers/conda/condaUtils';
@@ -30,6 +31,7 @@ suite('Conda Python executable path construction', () => {
         const executable = path.posix.join(prefix, 'bin', 'python');
         const info = await getNamedCondaPythonInfo('myenv', prefix, executable, '3.12.0', '/usr/bin/conda', mockManager);
 
+        assert.strictEqual(info.environmentPath.fsPath, Uri.file(executable).fsPath);
         assert.ok(
             info.execInfo.run.executable.includes(path.join('bin', 'python')) ||
                 info.execInfo.run.executable.endsWith('python'),
@@ -44,6 +46,7 @@ suite('Conda Python executable path construction', () => {
         const executable = path.posix.join(prefix, 'bin', 'python');
         const info = await getPrefixesCondaPythonInfo(prefix, executable, '3.12.0', '/usr/bin/conda', mockManager);
 
+        assert.strictEqual(info.environmentPath.fsPath, Uri.file(executable).fsPath);
         assert.ok(
             info.execInfo.run.executable.includes(path.join('bin', 'python')) ||
                 info.execInfo.run.executable.endsWith('python'),
@@ -58,6 +61,7 @@ suite('Conda Python executable path construction', () => {
         const executable = path.win32.join(prefix, 'python.exe');
         const info = await getNamedCondaPythonInfo('myenv', prefix, executable, '3.12.0', 'C:\\conda\\conda.exe', mockManager);
 
+        assert.strictEqual(info.environmentPath.fsPath, Uri.file(executable).fsPath);
         assert.ok(
             info.execInfo.run.executable.endsWith('python.exe'),
             `executable should end with python.exe, got: ${info.execInfo.run.executable}`,

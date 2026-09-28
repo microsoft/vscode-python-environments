@@ -80,7 +80,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
             try {
                 const commandOptions = {
                     pythonExecutable: 'conda',
-                    condaEnvironmentPath: environment.environmentPath.fsPath,
+                    condaEnvironmentPath: environment.sysPrefix,
                     log: this.log,
                 };
 
@@ -172,7 +172,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
     private async fetchPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
         const listCmd = new CondaListCommand({
             pythonExecutable: 'conda',
-            condaEnvironmentPath: environment.environmentPath.fsPath,
+            condaEnvironmentPath: environment.sysPrefix,
             log: this.log,
         });
         try {

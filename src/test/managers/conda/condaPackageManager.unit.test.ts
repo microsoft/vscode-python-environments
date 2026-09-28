@@ -60,6 +60,34 @@ suite('CondaPackageManager', () => {
         assert.ok(logError.calledOnceWithExactly('Error parsing installed Conda packages', parseError));
     });
 
+    test('uses sysPrefix for Conda package commands', async () => {
+        const prefix = Uri.file('environment').fsPath;
+        const executable = Uri.joinPath(Uri.file(prefix), 'bin', 'python').fsPath;
+        const environment = {
+            envId: { id: 'test-environment', managerId: 'test-manager' },
+            environmentPath: Uri.file(executable),
+            sysPrefix: prefix,
+        } as PythonEnvironment;
+        const manager = new CondaPackageManager(
+            { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
+            { error: sinon.stub() } as unknown as LogOutputChannel,
+        );
+        let installPrefix: string | undefined;
+        let listPrefix: string | undefined;
+        sinon.stub(CondaInstallCommand.prototype, 'execute').callsFake(async function (this: CondaInstallCommand) {
+            installPrefix = (this as unknown as { condaEnvironmentPath: string }).condaEnvironmentPath;
+        });
+        sinon.stub(CondaListCommand.prototype, 'execute').callsFake(async function (this: CondaListCommand) {
+            listPrefix = (this as unknown as { condaEnvironmentPath: string }).condaEnvironmentPath;
+            return [];
+        });
+
+        await manager.manage(environment, { install: ['requests'], runHeadless: true });
+
+        assert.strictEqual(installPrefix, prefix);
+        assert.strictEqual(listPrefix, prefix);
+    });
+
     test('propagates package version lookup failures', async () => {
         const environment = {
             envId: { id: 'test-environment', managerId: 'test-manager' },

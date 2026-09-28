@@ -381,7 +381,7 @@ export async function nativeToPythonEnv(
         shortDisplayName: displayName,
         displayPath: info.prefix,
         version: info.version,
-        environmentPath: Uri.file(info.prefix),
+        environmentPath: Uri.file(info.executable),
         description: undefined,
         tooltip: info.prefix,
         execInfo: {

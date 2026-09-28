@@ -248,7 +248,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 // If the environment is inside the workspace, add a .gitignore file
                 try {
                     const projectUris = this.api.getPythonProjects().map((p) => p.uri.fsPath);
-                    const envPath = result.environmentPath?.fsPath;
+                    const envPath = result.sysPrefix;
                     if (envPath && projectUris.some((root) => envPath.startsWith(root))) {
                         const gitignorePath = path.join(envPath, '.gitignore');
                         await fs.writeFile(gitignorePath, '*\n', { flag: 'w' });
@@ -394,7 +394,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 // Notify user if CONDA_PREFIX is set and they're trying to select a different environment
                 if (process.env.CONDA_PREFIX && checkedEnv) {
                     const condaPrefixPath = process.env.CONDA_PREFIX;
-                    const selectedPath = checkedEnv.environmentPath.fsPath;
+                    const selectedPath = checkedEnv.sysPrefix;
                     // Only show notification if they selected a different environment
                     if (condaPrefixPath !== selectedPath) {
                         showInformationMessage(CondaStrings.condaCondaPrefixActive);

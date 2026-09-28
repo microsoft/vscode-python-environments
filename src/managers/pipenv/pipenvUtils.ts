@@ -105,7 +105,8 @@ export async function getPipenv(): Promise<string | undefined> {
     }
 }
 
-async function nativeToPythonEnv(
+/** Converts native finder data to a Pipenv environment. @internal Exported for testing. */
+export async function nativeToPythonEnv(
     info: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
@@ -139,7 +140,7 @@ async function nativeToPythonEnv(
         shortDisplayName: displayName,
         displayPath: info.prefix,
         version: info.version,
-        environmentPath: Uri.file(info.prefix),
+        environmentPath: Uri.file(info.executable),
         description: undefined,
         tooltip: info.prefix,
         execInfo: {

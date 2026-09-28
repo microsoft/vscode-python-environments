@@ -331,7 +331,7 @@ export async function getNamedCondaPythonInfo(
 
     return {
         name: name,
-        environmentPath: Uri.file(prefix),
+        environmentPath: Uri.file(executable),
         displayName: `${name} (${sv})`,
         shortDisplayName: `${name}:${sv}`,
         displayPath: prefix,
@@ -376,7 +376,7 @@ export async function getPrefixesCondaPythonInfo(
     const basename = path.basename(prefix);
     return {
         name: basename,
-        environmentPath: Uri.file(prefix),
+        environmentPath: Uri.file(executable),
         displayName: `${basename} (${sv})`,
         shortDisplayName: `${basename}:${sv}`,
         displayPath: prefix,
@@ -749,7 +749,9 @@ export function nonWindowsGenerateConfig(
 function getCondaWithoutPython(name: string, prefix: string, conda: string): PythonEnvironmentInfo {
     return {
         name: name,
-        environmentPath: Uri.file(prefix),
+        environmentPath: Uri.file(
+            isWindows() ? path.join(prefix, 'python.exe') : path.join(prefix, 'bin', 'python'),
+        ),
         displayName: `${name} (no-python)`,
         shortDisplayName: `${name} (no-python)`,
         displayPath: prefix,
@@ -765,7 +767,8 @@ function getCondaWithoutPython(name: string, prefix: string, conda: string): Pyt
     };
 }
 
-async function nativeToPythonEnv(
+/** Converts native finder data to a Conda environment. @internal Exported for testing. */
+export async function nativeToPythonEnv(
     e: NativeEnvInfo,
     api: PythonEnvironmentApi,
     manager: EnvironmentManager,
@@ -777,10 +780,14 @@ async function nativeToPythonEnv(
         traceWarn('nativeToPythonEnv received null/undefined NativeEnvInfo');
         return undefined;
     }
-    if (!(e.prefix && e.executable && e.version)) {
+    if (!e.prefix) {
+        traceWarn('Ignoring Conda environment without a prefix');
+        return undefined;
+    }
+    if (!(e.executable && e.version)) {
         let name = e.name;
         const environment = api.createPythonEnvironmentItem(
-            getCondaWithoutPython(name ?? '', e.prefix ?? '', conda),
+            getCondaWithoutPython(name ?? '', e.prefix, conda),
             manager,
         );
         log.info(`Found a No-Python conda environment: ${e.executable ?? e.prefix ?? 'conda-no-python'}`);
@@ -1224,11 +1231,11 @@ export async function quickCreateConda(
 }
 
 export async function deleteCondaEnvironment(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {
-    let args = ['env', 'remove', '--yes', '--prefix', environment.environmentPath.fsPath];
+    let args = ['env', 'remove', '--yes', '--prefix', environment.sysPrefix];
     return await withProgress(
         {
             location: ProgressLocation.Notification,
-            title: l10n.t('Deleting conda environment: {0}', environment.environmentPath.fsPath),
+            title: l10n.t('Deleting conda environment: {0}', environment.sysPrefix),
         },
         async () => {
             try {
