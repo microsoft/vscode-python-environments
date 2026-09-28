@@ -77,6 +77,7 @@ suite('PythonEnvironmentApiImpl - createEnvironment', () => {
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
         const mockEnvManagers = {
             onDidChangeActiveEnvironment: new EventEmitter().event,
+            onDidChangePackageProviderPackages: new EventEmitter().event,
             getEnvironmentManager: sinon.stub().returns({
                 id: 'ms-python.python:venv',
                 supportsCreate: true,
@@ -110,10 +111,22 @@ suite('PythonEnvironmentApiImpl - createEnvironment', () => {
         const create = sinon.stub();
         const api = createApi(create);
 
-        for (const name of ['   ', '.', '..', '../outside', '..\\outside', 'nested/name', 'nested\\name']) {
+        for (const name of [
+            '   ',
+            '.',
+            '..',
+            '../outside',
+            '..\\outside',
+            'nested/name',
+            'nested\\name',
+            'python:3.12',
+            'CON',
+            'env.',
+            'env ',
+        ]) {
             await assert.rejects(
                 api.createEnvironment(Uri.file('workspace'), { name }),
-                /must be a non-empty path segment/,
+                /must be a valid portable path segment/,
             );
         }
 

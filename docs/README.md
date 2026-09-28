@@ -274,9 +274,9 @@ applies to.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `name` | `string` | No | Non-empty path segment to use as the new environment's name. Directory separators, `.` and `..` are rejected. When supplied, the manager uses that name without prompting for another. When omitted, the manager may prompt for a name or choose a default. |
-| `quickCreate` | `boolean` | No | `true` creates without any prompts. `false` means the user explicitly declined quick create, so prompts are allowed. `undefined` leaves the decision to the manager, which may offer quick create. |
-| `additionalPackages` | `string[]` | No | Packages to install in addition to whatever the manager installs by default. |
+| `name` | `string` | `false` | Portable path segment to use as the new environment's name. Directory separators, control characters, Windows-reserved filename characters (such as `:` and `?`) and device names (such as `CON` and `NUL`), trailing periods or spaces, `.` and `..` are rejected. When supplied, the manager uses that name without prompting for another. When omitted, the manager may prompt for a name or choose a default. |
+| `quickCreate` | `boolean` | `false` | `true` creates without any prompts. `false` means the user explicitly declined quick create, so prompts are allowed. `undefined` leaves the decision to the manager, which may offer quick create. |
+| `additionalPackages` | `string[]` | `false` | Packages to install in addition to whatever the manager installs by default. |
 
 ```typescript
 const env = await api.createEnvironment(projectUri, {

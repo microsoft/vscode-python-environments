@@ -985,9 +985,10 @@ export type PackageManagementOptions = PackageManagementInteractionOptions &
  */
 export interface CreateEnvironmentOptions {
     /**
-     * Non-empty path segment to use as the new environment's name. Directory
-     * separators, `.` and `..` are not allowed. When omitted, the environment manager
-     * may prompt for a name or choose a default.
+     * Portable path segment to use as the new environment's name. Directory separators,
+     * control characters, Windows-reserved characters and device names, trailing periods
+     * or spaces, `.` and `..` are not allowed. When omitted, the environment manager may
+     * prompt for a name or choose a default.
      */
     name?: string;
     /**

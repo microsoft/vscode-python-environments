@@ -40,7 +40,7 @@ import { traceError, traceInfo } from './common/logging';
 import { pickEnvironmentManager } from './common/pickers/managers';
 import { timeout } from './common/utils/asyncUtils';
 import { createDeferred } from './common/utils/deferred';
-import { checkUri } from './common/utils/pathUtils';
+import { checkUri, isValidPortablePathSegment } from './common/utils/pathUtils';
 import { handlePythonPath } from './common/utils/pythonPath';
 import type { EnvironmentManagers } from './features/envManagers';
 import type { ProjectCreators } from './features/creators/projectCreators';
@@ -157,16 +157,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         scope: CreateEnvironmentScope,
         options: CreateEnvironmentOptions | undefined,
     ): Promise<PythonEnvironment | undefined> {
-        if (
-            options?.name !== undefined &&
-            (options.name.trim().length === 0 ||
-                options.name === '.' ||
-                options.name === '..' ||
-                options.name.includes('/') ||
-                options.name.includes('\\') ||
-                options.name.includes('\0'))
-        ) {
-            throw new Error('Environment name must be a non-empty path segment');
+        if (options?.name !== undefined && !isValidPortablePathSegment(options.name)) {
+            throw new Error('Environment name must be a valid portable path segment');
         }
         if (scope === 'global' || (!Array.isArray(scope) && scope instanceof Uri)) {
             await waitForEnvManager(scope === 'global' ? undefined : [scope]);
