@@ -87,7 +87,7 @@ export function isSameOrParentPath(parentPath: string, candidatePath: string): b
     );
 }
 
-function isReservedWindowsDeviceName(value: string): boolean {
+function matchesWindowsReservedDeviceName(value: string): boolean {
     const deviceBaseName = value.split('.')[0];
     return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(deviceBaseName);
 }
@@ -106,7 +106,7 @@ export function isValidPortablePathSegment(value: string): boolean {
         value !== '..' &&
         !/[<>:"/\\|?*\u0000-\u001f]/.test(value) &&
         !/[. ]$/.test(value) &&
-        !isReservedWindowsDeviceName(value)
+        !matchesWindowsReservedDeviceName(value)
     );
 }
 
@@ -122,7 +122,7 @@ export function isValidPortablePathSegment(value: string): boolean {
  * @returns `true` on Windows when `value` resolves to a reserved device name.
  */
 export function isWindowsReservedDeviceName(value: string): boolean {
-    return isWindows() && isReservedWindowsDeviceName(value);
+    return isWindows() && matchesWindowsReservedDeviceName(value);
 }
 
 export function getResourceUri(resourcePath: string, root?: string): Uri | undefined {
