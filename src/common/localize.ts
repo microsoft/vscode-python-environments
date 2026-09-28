@@ -376,7 +376,7 @@ export namespace UvInstallStrings {
     export const clickToInstallPython = l10n.t('No Python found, click to install');
     export const selectPythonVersion = l10n.t('Select Python version to install');
     export const installUvForVersionLookupPrompt = l10n.t(
-        'uv is required to view and install available Python versions. Install uv now? This will download and run an installer from https://astral.sh.',
+        'The Python Environments extension uses uv to view and install available Python versions. Install uv now? This will download and run an installer from https://astral.sh. Alternatively, cancel and install Python yourself.',
     );
     export const installed = l10n.t('installed');
     export const fetchingVersions = l10n.t('Fetching available Python versions...');
