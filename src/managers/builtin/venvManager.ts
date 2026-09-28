@@ -334,6 +334,7 @@ export class VenvManager implements EnvironmentManager {
                         this.globalEnv,
                         venvRoot,
                         options?.additionalPackages,
+                        undefined,
                         options?.name,
                     );
                 }
