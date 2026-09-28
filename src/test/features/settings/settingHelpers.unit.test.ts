@@ -9,6 +9,8 @@ import * as sender from '../../../common/telemetry/sender';
 import * as workspaceApis from '../../../common/workspace.apis';
 import {
     addPythonProjectSetting,
+    getDefaultEnvManagerSetting,
+    getDefaultPkgManagerSetting,
     getExactPythonProjectSetting,
     migrateGlobalDefaultEnvManagerSetting,
     registerInlineScriptPythonProjectSetting,
@@ -34,6 +36,65 @@ import { MockWorkspaceConfiguration } from '../../mocks/mockWorkspaceConfig';
 function getTestWorkspacePath(): string {
     return process.platform === 'win32' ? 'C:\\workspace' : '/workspace';
 }
+
+suite('Setting Helpers - Optional Project Managers', () => {
+    const VENV_MANAGER_ID = 'ms-python.python:venv';
+    const PIP_MANAGER_ID = 'ms-python.python:pip';
+    const workspacePath = getTestWorkspacePath();
+    const workspaceUri = Uri.file(workspacePath);
+    const projectUri = Uri.joinPath(workspaceUri, 'backend');
+    const workspaceFolder: WorkspaceFolder = {
+        uri: workspaceUri,
+        name: 'workspace',
+        index: 0,
+    };
+    const project = {
+        name: 'backend',
+        uri: projectUri,
+    };
+    const projectManager = {
+        get: (uri: Uri) => (uri.fsPath === projectUri.fsPath ? project : undefined),
+    } as unknown as PythonProjectManager;
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    function createProjectConfig(projectSettings: PythonProjectSettings): MockWorkspaceConfiguration {
+        const mockConfig = new MockWorkspaceConfiguration();
+        (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
+            if (key === 'pythonProjects') {
+                return [projectSettings] as T;
+            }
+            if (key === 'defaultEnvManager') {
+                return VENV_MANAGER_ID as T;
+            }
+            if (key === 'defaultPackageManager') {
+                return PIP_MANAGER_ID as T;
+            }
+            return defaultValue;
+        };
+        return mockConfig;
+    }
+
+    test('uses default managers when a pythonProjects entry only specifies path', () => {
+        sinon.stub(workspaceApis, 'getConfiguration').returns(createProjectConfig({ path: 'backend' }));
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+
+        assert.strictEqual(getDefaultEnvManagerSetting(projectManager, projectUri), VENV_MANAGER_ID);
+        assert.strictEqual(getDefaultPkgManagerSetting(projectManager, projectUri), PIP_MANAGER_ID);
+    });
+
+    test('uses default managers when a pythonProjects entry has empty manager values', () => {
+        sinon.stub(workspaceApis, 'getConfiguration').returns(
+            createProjectConfig({ path: 'backend', envManager: '', packageManager: '' }),
+        );
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+
+        assert.strictEqual(getDefaultEnvManagerSetting(projectManager, projectUri), VENV_MANAGER_ID);
+        assert.strictEqual(getDefaultPkgManagerSetting(projectManager, projectUri), PIP_MANAGER_ID);
+    });
+});
 
 /**
  * These tests verify that manager edits without a project do not write settings

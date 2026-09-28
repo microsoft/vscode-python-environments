@@ -37,8 +37,8 @@ export interface PythonProjectManager extends Disposable {
 
 export interface PythonProjectSettings {
     path: string;
-    envManager: string;
-    packageManager: string;
+    envManager?: string;
+    packageManager?: string;
     workspace?: string;
     _inlineScriptRegistration?: InlineScriptProjectRegistrationMarker;
 }

@@ -55,7 +55,8 @@ try {
         testRoot,
     );
 
-    const typescriptCli = path.join(packageRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+    const packageRequire = createRequire(path.join(packageRoot, 'package.json'));
+    const typescriptCli = packageRequire.resolve('typescript/bin/tsc');
     const fixtureRoot = path.join(packageRoot, 'test');
 
     for (const consumer of [

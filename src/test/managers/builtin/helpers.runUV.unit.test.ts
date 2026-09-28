@@ -1,4 +1,5 @@
 import assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import { CancellationError, CancellationTokenSource, LogOutputChannel } from 'vscode';
 import * as childProcessApis from '../../../common/childProcess.apis';
@@ -97,6 +98,21 @@ suite('Helpers - runUV', () => {
         await resultPromise;
 
         assert.ok(spawnStub.calledWith('uv', ['pip', 'list'], { cwd }));
+    });
+
+    test('spawns the resolved workspace uv executable instead of relying on PATH', async () => {
+        const executable = path.join(path.sep, 'workspace', '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        const mockProcess = new MockChildProcess(executable, ['pip', 'list']);
+        spawnStub.withArgs(executable, ['pip', 'list'], { cwd: undefined }).returns(mockProcess);
+
+        const resultPromise = runUV(['pip', 'list'], undefined, mockLog, undefined, undefined, executable);
+        setTimeout(() => {
+            mockProcess.emit('exit', 0, null);
+            (mockProcess as unknown as { emit: (event: string) => void }).emit('close');
+        }, 10);
+
+        await resultPromise;
+        sinon.assert.calledWith(spawnStub, executable, ['pip', 'list']);
     });
 
     test('should work without logger', async () => {

@@ -111,6 +111,7 @@ export class UvAvailableVersionsCommand extends AvailableVersionsCommand {
             this.log,
             executeArgs.cancellationToken,
             this.timeout,
+            this.uvExecutable,
         );
         return this.parseVersions(parseVersionsJson(output, 'uv'), executeArgs.includePrerelease);
     }

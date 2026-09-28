@@ -25,6 +25,10 @@ export function getWorkspaceFolders(): readonly WorkspaceFolder[] | undefined {
     return workspace.workspaceFolders;
 }
 
+export function isWorkspaceTrusted(): boolean {
+    return workspace.isTrusted;
+}
+
 export function getWorkspaceFile(): Uri | undefined {
     return workspace.workspaceFile;
 }

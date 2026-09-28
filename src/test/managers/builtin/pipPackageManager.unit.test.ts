@@ -195,6 +195,7 @@ suite('PipPackageManager', () => {
         const manager = createManager();
         const environment = createEnvironment();
         sinon.stub(helpers, 'shouldUseUv').resolves(true);
+        sinon.stub(helpers, 'getUvExecutable').resolves('uv');
         const runPython = sinon.stub(helpers, 'runPython');
         sinon.stub(helpers, 'runUV').resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
 

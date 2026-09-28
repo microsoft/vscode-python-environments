@@ -89,7 +89,11 @@ suite('getShellActivationCommands', () => {
             const pwshActivation = result.shellActivation.get(ShellConstants.PWSH);
 
             assert.ok(pwshActivation, 'PowerShell activation should be defined');
-            assert.strictEqual(pwshActivation.length, 1, 'Should have only 1 command: activate (no Set-ExecutionPolicy)');
+            assert.strictEqual(
+                pwshActivation.length,
+                1,
+                'Should have only 1 command: activate (no Set-ExecutionPolicy)',
+            );
             assert.strictEqual(pwshActivation[0].executable, '&');
             assert.ok(pwshActivation[0].args);
             assert.ok(
@@ -106,7 +110,11 @@ suite('getShellActivationCommands', () => {
             const pwshActivation = result.shellActivation.get(ShellConstants.PWSH);
 
             assert.ok(pwshActivation, 'PowerShell activation should be defined');
-            assert.strictEqual(pwshActivation.length, 1, 'Should have only 1 command: activate (no Set-ExecutionPolicy)');
+            assert.strictEqual(
+                pwshActivation.length,
+                1,
+                'Should have only 1 command: activate (no Set-ExecutionPolicy)',
+            );
             assert.strictEqual(pwshActivation[0].executable, '&');
             assert.ok(pwshActivation[0].args);
             assert.ok(
@@ -131,6 +139,7 @@ suite('getShellActivationCommands', () => {
     suite('Other shells are not affected by execution policy change', () => {
         test('Bash activation does not include Set-ExecutionPolicy', async () => {
             isWindowsStub.returns(false);
+            await fs.writeFile(path.join(tmpDir, 'activate'), '');
 
             const result = await getShellActivationCommands(tmpDir);
             const bashActivation = result.shellActivation.get(ShellConstants.BASH);
@@ -156,6 +165,7 @@ suite('getShellActivationCommands', () => {
     suite('Windows unknown shell fallback', () => {
         test('Windows unknown shell uses activate without Set-ExecutionPolicy', async () => {
             isWindowsStub.returns(true);
+            await fs.writeFile(path.join(tmpDir, 'activate'), '');
 
             const result = await getShellActivationCommands(tmpDir);
             const unknownActivation = result.shellActivation.get('unknown');
@@ -163,6 +173,54 @@ suite('getShellActivationCommands', () => {
             assert.ok(unknownActivation, 'Unknown shell activation should be defined');
             assert.strictEqual(unknownActivation.length, 1);
             assert.ok(unknownActivation[0].executable.endsWith('activate'));
+        });
+    });
+
+    suite('No activation without activation scripts', () => {
+        test('No POSIX shell activation when bin has no activate script (e.g. uv python toolchain)', async () => {
+            isWindowsStub.returns(false);
+            await fs.writeFile(path.join(tmpDir, 'python3'), '');
+
+            const result = await getShellActivationCommands(tmpDir);
+
+            for (const shell of [
+                'unknown',
+                ShellConstants.SH,
+                ShellConstants.BASH,
+                ShellConstants.GITBASH,
+                ShellConstants.ZSH,
+                ShellConstants.KSH,
+            ]) {
+                assert.strictEqual(result.shellActivation.get(shell), undefined, `${shell} should not be activated`);
+                assert.strictEqual(
+                    result.shellDeactivation.get(shell),
+                    undefined,
+                    `${shell} should not be deactivated`,
+                );
+            }
+            assert.strictEqual(result.shellActivation.size, 0);
+        });
+
+        test('No Windows unknown shell activation when Scripts has no activate script', async () => {
+            isWindowsStub.returns(true);
+
+            const result = await getShellActivationCommands(tmpDir);
+
+            assert.strictEqual(result.shellActivation.get('unknown'), undefined);
+            assert.strictEqual(result.shellActivation.size, 0);
+        });
+
+        test('POSIX shells are activated when the activate script exists', async () => {
+            isWindowsStub.returns(false);
+            await fs.writeFile(path.join(tmpDir, 'activate'), '');
+
+            const result = await getShellActivationCommands(tmpDir);
+
+            for (const shell of [ShellConstants.SH, ShellConstants.BASH, ShellConstants.ZSH]) {
+                assert.deepStrictEqual(result.shellActivation.get(shell), [
+                    { executable: 'source', args: [path.join(tmpDir, 'activate')] },
+                ]);
+            }
         });
     });
 });

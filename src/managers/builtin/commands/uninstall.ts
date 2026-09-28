@@ -36,6 +36,6 @@ export class UvUninstallCommand extends UninstallCommand {
     }
 
     async execute(executeArgs: UninstallExecuteArgs): Promise<void> {
-        await runUV(this.buildCommand(executeArgs), undefined, this.log, executeArgs.cancellationToken, this.timeout);
+        await runUV(this.buildCommand(executeArgs), undefined, this.log, executeArgs.cancellationToken, this.timeout, this.uvExecutable);
     }
 }

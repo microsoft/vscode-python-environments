@@ -61,6 +61,7 @@ export class UvListCommand extends ListCommand {
             this.log,
             executeArgs?.cancellationToken,
             this.timeout,
+            this.uvExecutable,
         );
         let json: unknown;
         try {
