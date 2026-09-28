@@ -31,7 +31,6 @@ import type {
     InternalEnvironmentManager,
     InternalPackageManager,
 } from '../managers/common/registeredManagers';
-import { PackageManagerRequiresProjectError } from '../managers/common/errors';
 import {
     removePythonProjectSetting,
     setEnvironmentManager,
@@ -145,7 +144,7 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
         }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const pkgManager = managers?.resolvePackageManagerForEnvironment(view.environment).manager;
+        const pkgManager = managers?.getPackageManager(view.environment);
         if (pkgManager) {
             await pkgManager.refresh(view.environment);
         }
@@ -785,12 +784,9 @@ async function resolvePackageCommandOptions(
 
     if (e instanceof PythonEnvTreeItem) {
         const environment = e.environment;
-        const resolution = em.resolvePackageManagerForEnvironment(environment);
-        if (resolution.manager) {
-            return { environment, packageManager: resolution.manager };
-        }
-        if (resolution.kind === 'projectRequired') {
-            throw new PackageManagerRequiresProjectError();
+        const packageManager = em.getPackageManager(environment);
+        if (packageManager) {
+            return { environment, packageManager };
         }
     }
 

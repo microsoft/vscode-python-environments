@@ -87,11 +87,6 @@ export interface InternalDidChangeEnvironmentsEventArgs {
     changes: DidChangeEnvironmentsEventArgs;
 }
 
-export type PackageManagerResolution =
-    | { kind: 'resolved'; manager: InternalPackageManager }
-    | { kind: 'projectRequired'; manager?: never }
-    | { kind: 'notFound'; manager?: never };
-
 export interface EnvironmentManagers extends Disposable {
     registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable;
     registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable;
@@ -126,14 +121,6 @@ export interface EnvironmentManagers extends Disposable {
 
     getEnvironmentManager(scope: EnvironmentManagerScope): InternalEnvironmentManager | undefined;
     getPackageManager(scope: PackageManagerScope): InternalPackageManager | undefined;
-
-    /**
-     * Resolves a package manager for an environment using last-known project selections.
-     *
-     * @param environment The environment whose package manager should be resolved.
-     * @returns A resolved manager or the reason resolution was not possible.
-     */
-    resolvePackageManagerForEnvironment(environment: PythonEnvironment): PackageManagerResolution;
 
     managers: InternalEnvironmentManager[];
     packageManagers: InternalPackageManager[];
@@ -458,42 +445,32 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         if ('pkgId' in context) {
             return this._packageManagers.get(context.pkgId.managerId);
-        } else {
-            const id = this._environmentManagers.get(context.envId.managerId)?.preferredPackageManagerId;
-            if (id) {
-                return this._packageManagers.get(id);
-            }
         }
 
-        return undefined;
+        const preferredId = this._environmentManagers.get(context.envId.managerId)?.preferredPackageManagerId;
+        const manager = preferredId ? this._packageManagers.get(preferredId) : undefined;
+        if (!manager?.createForProject) {
+            return manager;
+        }
+        // The preferred manager is project-aware (e.g. Poetry). Bind it to the single tracked
+        // project that uses this environment; without a unique project there is no working
+        // directory to run in, so no manager is returned.
+        const project = this.findUniqueProjectForEnvironment(context);
+        return project ? this.getPackageManager(project.uri) : undefined;
     }
 
-    public resolvePackageManagerForEnvironment(
-        environment: PythonEnvironment,
-    ): PackageManagerResolution {
-        const manager = this.getPackageManager(environment);
-        if (!manager) {
-            return { kind: 'notFound' };
-        }
-        if (!manager.createForProject) {
-            return { kind: 'resolved', manager };
-        }
-
-        const matchingProjects = this.pm.getProjects().filter((project) =>
-            this.isSameEnvironment(environment, this.getLastKnownEnvironment(project.uri)),
-        );
+    private findUniqueProjectForEnvironment(environment: PythonEnvironment): PythonProject | undefined {
+        const matchingProjects = this.pm
+            .getProjects()
+            .filter((project) => this.isSameEnvironment(environment, this.getLastKnownEnvironment(project.uri)));
         if (matchingProjects.length !== 1) {
             traceVerbose(
-                `Unable to resolve project-scoped package manager for environment ${environment.envId.id}: ` +
+                `Unable to infer a unique project for environment ${environment.envId.id}: ` +
                     `found ${matchingProjects.length} matching projects`,
             );
-            return { kind: 'projectRequired' };
+            return undefined;
         }
-
-        const scopedManager = this.getPackageManager(matchingProjects[0].uri);
-        return scopedManager
-            ? { kind: 'resolved', manager: scopedManager }
-            : { kind: 'notFound' };
+        return matchingProjects[0];
     }
 
     private subscribeToPackageManagerEvents(manager: InternalPackageManager): Disposable {

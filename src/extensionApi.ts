@@ -45,8 +45,7 @@ import { handlePythonPath } from './common/utils/pythonPath';
 import type { EnvironmentManagers } from './features/envManagers';
 import type { ProjectCreators } from './features/creators/projectCreators';
 import type { PythonProjectManager } from './features/projectManager';
-import { PackageManagerRequiresProjectError } from './managers/common/errors';
-import type { InternalEnvironmentManager, InternalPackageManager } from './managers/common/registeredManagers';
+import type { InternalEnvironmentManager } from './managers/common/registeredManagers';
 import { PythonEnvironmentImpl, PythonPackageImpl } from './managers/common/models';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './features/common/managerReady';
 import { EnvVarManager } from './features/execution/envVariableManager';
@@ -301,32 +300,28 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
     async managePackages(context: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
         await waitForEnvManagerId([context.envId.managerId]);
-        const manager = this.requirePackageManagerForEnvironment(context);
+        const manager = this.envManagers.getPackageManager(context);
+        if (!manager) {
+            return Promise.reject(new Error('No package manager found'));
+        }
         return manager.manage(context, options);
     }
     async refreshPackages(context: PythonEnvironment): Promise<void> {
         await waitForEnvManagerId([context.envId.managerId]);
-        const manager = this.requirePackageManagerForEnvironment(context);
+        const manager = this.envManagers.getPackageManager(context);
+        if (!manager) {
+            return Promise.reject(new Error('No package manager found'));
+        }
         return manager.refresh(context);
     }
     async getPackages(context: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         await waitForEnvManagerId([context.envId.managerId]);
-        const { manager } = this.envManagers.resolvePackageManagerForEnvironment(context);
-        return manager?.getPackages(context, options);
-    }
-
-    private requirePackageManagerForEnvironment(context: PythonEnvironment): InternalPackageManager {
-        const resolution = this.envManagers.resolvePackageManagerForEnvironment(context);
-        switch (resolution.kind) {
-            case 'resolved':
-                return resolution.manager;
-            case 'projectRequired':
-                throw new PackageManagerRequiresProjectError();
-            case 'notFound':
-                throw new Error('No package manager found');
+        const manager = this.envManagers.getPackageManager(context);
+        if (!manager) {
+            return Promise.resolve(undefined);
         }
+        return manager.getPackages(context, options);
     }
-
     getPackageAvailableVersions(
         context: PythonEnvironment,
         packageName: string,

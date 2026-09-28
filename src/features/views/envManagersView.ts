@@ -242,8 +242,8 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
 
         if (element.kind === EnvTreeItemKind.environment) {
             const pythonEnvItem = element as PythonEnvTreeItem;
-            const environment = pythonEnvItem.environment;
-            const { manager: pkgManager } = this.providers.resolvePackageManagerForEnvironment(environment);
+            const { environment } = pythonEnvItem;
+            const pkgManager = this.providers.getPackageManager(environment);
             const parent = element as PythonEnvTreeItem;
             const views: EnvTreeItem[] = [];
 

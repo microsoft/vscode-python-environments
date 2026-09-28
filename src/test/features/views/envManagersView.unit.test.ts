@@ -57,8 +57,8 @@ suite('EnvManagerView.reveal Tests', () => {
         envManagers.setup((e) => e.onDidChangePackages).returns(() => onDidChangePackagesEmitter.event);
         envManagers.setup((e) => e.onDidChangePackageManager).returns(() => onDidChangePackageManagerEmitter.event);
         envManagers
-            .setup((e) => e.resolvePackageManagerForEnvironment(typeMoq.It.isAny()))
-            .returns(() => ({ kind: 'notFound' }));
+            .setup((e) => e.getPackageManager(typeMoq.It.isAny()))
+            .returns(() => undefined);
         envManagers
             .setup((e) => e.onDidChangeProjectPackageManager)
             .returns(() => onDidChangeProjectPackageManagerEmitter.event);

@@ -2,13 +2,11 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventEmitter, Uri } from 'vscode';
 import {
-    isPackageManagerRequiresProjectError,
     PythonEnvironment,
     PythonProject,
 } from '../api';
 import * as managerReady from '../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
-import type { PackageManagerResolution } from '../features/envManagers';
 import type { PythonProjectManager } from '../features/projectManager';
 import type { InternalPackageManager } from '../managers/common/registeredManagers';
 
@@ -172,7 +170,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
     });
 });
 
-suite('PythonEnvironmentApiImpl - project-aware package resolution', () => {
+suite('PythonEnvironmentApiImpl - package resolution', () => {
     setup(() => {
         sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
     });
@@ -181,16 +179,16 @@ suite('PythonEnvironmentApiImpl - project-aware package resolution', () => {
         sinon.restore();
     });
 
-    function createApi(resolution: PackageManagerResolution): {
+    function createApi(manager: InternalPackageManager | undefined): {
         api: PythonEnvironmentApiImpl;
-        resolvePackageManager: sinon.SinonStub;
+        getPackageManager: sinon.SinonStub;
     } {
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
-        const resolvePackageManager = sinon.stub().returns(resolution);
+        const getPackageManager = sinon.stub().returns(manager);
         const envManagers = {
             onDidChangeActiveEnvironment: new EventEmitter().event,
             onDidChangePackageProviderPackages: new EventEmitter().event,
-            resolvePackageManagerForEnvironment: resolvePackageManager,
+            getPackageManager,
         } as unknown as ApiArgs[0];
         const projectManager = {
             getProjects: () => [],
@@ -204,7 +202,7 @@ suite('PythonEnvironmentApiImpl - project-aware package resolution', () => {
                 {} as ApiArgs[3],
                 { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4],
             ),
-            resolvePackageManager,
+            getPackageManager,
         };
     }
 
@@ -212,36 +210,27 @@ suite('PythonEnvironmentApiImpl - project-aware package resolution', () => {
         envId: { id: 'environment', managerId: 'environment-manager' },
     } as PythonEnvironment;
 
-    test('rejects mutations and refreshes when a project-aware manager is unresolved', async () => {
-        const { api } = createApi({ kind: 'projectRequired' });
+    test('rejects mutations and refreshes when no package manager resolves', async () => {
+        const { api } = createApi(undefined);
 
-        await assert.rejects(
-            api.managePackages(environment, { install: ['example'] }),
-            isPackageManagerRequiresProjectError,
-        );
-        await assert.rejects(api.refreshPackages(environment), isPackageManagerRequiresProjectError);
+        await assert.rejects(api.managePackages(environment, { install: ['example'] }), /No package manager found/);
+        await assert.rejects(api.refreshPackages(environment), /No package manager found/);
     });
 
-    test('returns undefined for reads when a project-aware manager is unresolved', async () => {
-        const { api } = createApi({ kind: 'projectRequired' });
+    test('returns undefined for reads when no package manager resolves', async () => {
+        const { api } = createApi(undefined);
 
         assert.strictEqual(await api.getPackages(environment), undefined);
     });
 
-    test('uses the resolved manager without a second provider lookup', async () => {
+    test('delegates to the resolved manager', async () => {
         const manage = sinon.stub().resolves();
         const manager = { manage } as unknown as InternalPackageManager;
-        const { api, resolvePackageManager } = createApi({ kind: 'resolved', manager });
+        const { api, getPackageManager } = createApi(manager);
 
         await api.managePackages(environment, { install: ['example'] });
 
-        assert.ok(resolvePackageManager.calledOnceWithExactly(environment));
+        assert.ok(getPackageManager.calledWithExactly(environment));
         assert.ok(manage.calledOnceWithExactly(environment, { install: ['example'] }));
-    });
-
-    test('preserves the no-package-manager failure', async () => {
-        const { api } = createApi({ kind: 'notFound' });
-
-        await assert.rejects(api.refreshPackages(environment), /No package manager found/);
     });
 });

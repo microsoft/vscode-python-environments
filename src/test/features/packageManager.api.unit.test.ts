@@ -93,6 +93,9 @@ suite('PythonPackageManagerApi Tests', () => {
         onDidChangePackagesEmitter = new EventEmitter<DidChangePackagesEventArgs>();
         packageManager = typeMoq.Mock.ofType<PackageManager>();
         packageManager.setup((pm) => pm.name).returns(() => 'test-pkg-mgr');
+        // The default mock is a project-independent manager; typemoq otherwise fabricates a
+        // truthy createForProject, which would make it look project-aware.
+        packageManager.setup((pm) => pm.createForProject).returns(() => undefined);
         packageManager.setup((pm) => pm.displayName).returns(() => 'Test Package Manager');
         packageManager.setup((pm) => pm.description).returns(() => 'Test package manager description');
         packageManager.setup((pm) => pm.onDidChangePackages).returns(() => onDidChangePackagesEmitter.event);
@@ -837,10 +840,9 @@ suite('PythonPackageManagerApi Tests', () => {
         test('Should report when no package manager can be resolved for an environment', () => {
             disposable.dispose();
 
-            const resolution = envManagers.resolvePackageManagerForEnvironment(environment.object);
+            const manager = envManagers.getPackageManager(environment.object);
 
-            assert.strictEqual(resolution.kind, 'notFound');
-            assert.strictEqual(resolution.manager, undefined);
+            assert.strictEqual(manager, undefined);
         });
 
         test('Should cache project-bound package managers by project', () => {
@@ -932,10 +934,9 @@ suite('PythonPackageManagerApi Tests', () => {
             const registeredManager = envManagers.packageManagers[0];
             const provider = registerEnvironmentProvider(registeredManager.id, true);
 
-            const resolution = envManagers.resolvePackageManagerForEnvironment(provider.environment);
+            const manager = envManagers.getPackageManager(provider.environment);
 
-            assert.strictEqual(resolution.kind, 'resolved');
-            assert.strictEqual(resolution.manager, registeredManager);
+            assert.strictEqual(manager, registeredManager);
             assert.ok(provider.getEnvironment.notCalled);
             assert.ok(provider.getLastKnownEnvironment.notCalled);
 
@@ -973,11 +974,10 @@ suite('PythonPackageManagerApi Tests', () => {
             const environmentProvider = registerEnvironmentProvider(packageProvider.manager.id, true);
             configureDefaultManagers(packageProvider.manager.id, environmentProvider.managerId);
 
-            const resolution = envManagers.resolvePackageManagerForEnvironment(environmentProvider.environment);
+            const manager = envManagers.getPackageManager(environmentProvider.environment);
 
             assert.ok(packageProvider.createForProject.calledOnceWithExactly(project));
-            assert.strictEqual(resolution.kind, 'resolved');
-            assert.strictEqual(resolution.manager?.project, project);
+            assert.strictEqual(manager?.project, project);
             assert.strictEqual(environmentProvider.getLastKnownEnvironment.callCount, 1);
             assert.ok(environmentProvider.getEnvironment.notCalled);
 
@@ -988,10 +988,9 @@ suite('PythonPackageManagerApi Tests', () => {
             const packageProvider = registerProjectAwarePackageManager();
             const environmentProvider = registerEnvironmentProvider(packageProvider.manager.id, false);
 
-            const resolution = envManagers.resolvePackageManagerForEnvironment(environmentProvider.environment);
+            const manager = envManagers.getPackageManager(environmentProvider.environment);
 
-            assert.strictEqual(resolution.kind, 'projectRequired');
-            assert.strictEqual(resolution.manager, undefined);
+            assert.strictEqual(manager, undefined);
             assert.ok(packageProvider.createForProject.notCalled);
             assert.ok(environmentProvider.getEnvironment.notCalled);
 
@@ -1014,10 +1013,9 @@ suite('PythonPackageManagerApi Tests', () => {
             const environmentProvider = registerEnvironmentProvider(packageProvider.manager.id, true);
             configureDefaultManagers(packageProvider.manager.id, environmentProvider.managerId);
 
-            const resolution = envManagers.resolvePackageManagerForEnvironment(environmentProvider.environment);
+            const manager = envManagers.getPackageManager(environmentProvider.environment);
 
-            assert.strictEqual(resolution.kind, 'projectRequired');
-            assert.strictEqual(resolution.manager, undefined);
+            assert.strictEqual(manager, undefined);
             assert.ok(packageProvider.createForProject.notCalled);
             assert.strictEqual(environmentProvider.getLastKnownEnvironment.callCount, 2);
             assert.ok(environmentProvider.getEnvironment.notCalled);

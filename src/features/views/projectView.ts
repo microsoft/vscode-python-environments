@@ -242,9 +242,7 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             const parent = environmentItem.parent;
             const uri = parent.id === 'global' ? undefined : parent.project.uri;
             const environment = environmentItem.environment;
-            const pkgManager = uri
-                ? this.envManagers.getPackageManager(uri)
-                : this.envManagers.resolvePackageManagerForEnvironment(environment).manager;
+            const pkgManager = this.envManagers.getPackageManager(uri ?? environment);
 
             if (!pkgManager) {
                 return [new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackageManager)];

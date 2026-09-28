@@ -793,8 +793,9 @@ getPackages(
 
 **Returns** `Promise<Package[] | undefined>`. `undefined` means the manager
 could not produce a list - for example no package manager is associated with
-the environment or a project-aware manager cannot identify one unique project -
-which is different from an empty array meaning "nothing installed".
+the environment, or a project-aware manager cannot identify one unique project
+for the environment - which is different from an empty array meaning "nothing
+installed".
 
 ```typescript
 const packages = await api.getPackages(env);
@@ -819,8 +820,9 @@ refreshPackages(environment: PythonEnvironment): Promise<void>;
 
 **Returns** `Promise<void>`. Changes surface through
 [`onDidChangePackages`](#ondidchangepackages). Rejects with
-`PackageManagerRequiresProjectError` when a project-aware manager cannot identify
-one unique project for the environment.
+`No package manager found` when no package manager can be resolved for the
+environment - including when a project-aware manager cannot identify one unique
+project.
 
 ```typescript
 // Packages were installed outside the extension - re-read the list.
@@ -845,8 +847,9 @@ managePackages(
 | `options` | [`PackageManagementOptions`](#packagemanagementoptions) | Yes | Must specify `install`, `uninstall`, or both. Also carries `upgrade`, `showSkipOption`, and `runHeadless`. |
 
 **Returns** `Promise<void>`, resolving when the operation finishes. Rejects with
-`PackageManagerRequiresProjectError` when a project-aware manager cannot identify
-one unique project for the environment, or if the underlying tool fails.
+`No package manager found` when no package manager can be resolved for the
+environment - including when a project-aware manager cannot identify one unique
+project - or if the underlying tool fails.
 
 ```typescript
 await api.managePackages(env, {
@@ -975,30 +978,6 @@ context.subscriptions.push(
 ```
 
 ### Package errors
-
-#### `PackageManagerRequiresProjectError`
-
-Thrown by environment-only package mutations and refreshes when the selected
-package manager is project-aware but the environment does not identify exactly
-one tracked project. Its `code` is the stable
-`'PackageManagerRequiresProject'` discriminator.
-
-Use `isPackageManagerRequiresProjectError(error)` instead of `instanceof` when
-the error may cross extension bundle boundaries:
-
-```typescript
-import { isPackageManagerRequiresProjectError } from '@vscode/python-environments';
-
-try {
-    await api.refreshPackages(env);
-} catch (error) {
-    if (isPackageManagerRequiresProjectError(error)) {
-        // Ask the user to open or select the intended Python project.
-    } else {
-        throw error;
-    }
-}
-```
 
 #### `PackageVersionLookupNotSupportedError`
 
@@ -1659,10 +1638,10 @@ tracked project uses the environment; it does not choose arbitrarily when no
 project or multiple projects match.
 
 Environment-only paths never use a project-aware provider as an unbound
-fallback. When no unique project can be inferred, package reads return
-`undefined`, package views suppress those operations, and package mutations or
-refreshes reject with `PackageManagerRequiresProjectError`. Keep
-project-specific caches and mutable state on the manager returned by
+fallback. When no unique project can be inferred, `getPackageManager` returns no
+manager, so package reads return `undefined`, package views suppress those
+operations, and package mutations or refreshes reject with `No package manager
+found`. Keep project-specific caches and mutable state on the manager returned by
 `createForProject`, and implement `dispose` when that manager owns resources.
 
 When a scoped manager fires `onDidChangePackages`, the event's `manager` must be
