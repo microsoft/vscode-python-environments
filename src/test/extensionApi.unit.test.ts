@@ -210,11 +210,18 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
         envId: { id: 'environment', managerId: 'environment-manager' },
     } as PythonEnvironment;
 
+    function expectNoPackageManagerError(error: unknown): true {
+        assert.ok(error instanceof Error, 'Expected an Error');
+        assert.strictEqual(error.name, 'Error');
+        assert.strictEqual(error.message, 'No package manager found');
+        return true;
+    }
+
     test('rejects mutations and refreshes when no package manager resolves', async () => {
         const { api } = createApi(undefined);
 
-        await assert.rejects(api.managePackages(environment, { install: ['example'] }), /No package manager found/);
-        await assert.rejects(api.refreshPackages(environment), /No package manager found/);
+        await assert.rejects(api.managePackages(environment, { install: ['example'] }), expectNoPackageManagerError);
+        await assert.rejects(api.refreshPackages(environment), expectNoPackageManagerError);
     });
 
     test('returns undefined for reads when no package manager resolves', async () => {

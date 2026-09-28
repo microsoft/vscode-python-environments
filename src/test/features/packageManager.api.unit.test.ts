@@ -1074,7 +1074,12 @@ suite('PythonPackageManagerApi Tests', () => {
             assert.ok(scopedDisposers[1].notCalled);
             await assert.rejects(
                 () => original!.manage(environment.object, { install: ['example'] }),
-                /Package manager .* has been disposed/,
+                (error: unknown) => {
+                    assert.ok(error instanceof Error, 'Expected an Error');
+                    assert.strictEqual(error.name, 'Error');
+                    assert.strictEqual(error.message, `Package manager ${original!.id} has been disposed`);
+                    return true;
+                },
             );
 
             const packageChange = {

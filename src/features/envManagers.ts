@@ -428,33 +428,32 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return undefined;
         }
 
-        if (context === undefined || context instanceof Uri) {
-            const project = context ? this.pm.get(context) : undefined;
-            const defaultPackageManagerId = getDefaultPkgManagerSetting(this.pm, context);
-            const defaultEnvironmentManagerId = getDefaultEnvManagerSetting(this.pm, context);
-            const packageManagerId =
-                defaultPackageManagerId ||
-                this._environmentManagers.get(defaultEnvironmentManagerId)?.preferredPackageManagerId;
-            const manager = packageManagerId ? this._packageManagers.get(packageManagerId) : undefined;
-            return project ? this.projectPackageManagers.getOrCreate(manager, project) : manager;
-        }
-
+        // Direct lookups by manager id or package identity.
         if (typeof context === 'string') {
             return this._packageManagers.get(context);
         }
-
-        if ('pkgId' in context) {
+        if (context !== undefined && 'pkgId' in context) {
             return this._packageManagers.get(context.pkgId.managerId);
         }
 
-        const preferredId = this._environmentManagers.get(context.envId.managerId)?.preferredPackageManagerId;
-        const manager = preferredId ? this._packageManagers.get(preferredId) : undefined;
+        // Project or global scope: resolve the configured manager and scope it to the project.
+        if (context === undefined || context instanceof Uri) {
+            const project = context ? this.pm.get(context) : undefined;
+            const managerId =
+                getDefaultPkgManagerSetting(this.pm, context) ||
+                this._environmentManagers.get(getDefaultEnvManagerSetting(this.pm, context))?.preferredPackageManagerId;
+            const manager = managerId ? this._packageManagers.get(managerId) : undefined;
+            return project ? this.projectPackageManagers.getOrCreate(manager, project) : manager;
+        }
+
+        // Environment scope: use the environment manager's preferred package manager. A
+        // project-aware manager (e.g. Poetry) is bound to the single tracked project that uses
+        // this environment; without a unique project there is no working directory to run in.
+        const managerId = this._environmentManagers.get(context.envId.managerId)?.preferredPackageManagerId;
+        const manager = managerId ? this._packageManagers.get(managerId) : undefined;
         if (!manager?.createForProject) {
             return manager;
         }
-        // The preferred manager is project-aware (e.g. Poetry). Bind it to the single tracked
-        // project that uses this environment; without a unique project there is no working
-        // directory to run in, so no manager is returned.
         const project = this.findUniqueProjectForEnvironment(context);
         return project ? this.getPackageManager(project.uri) : undefined;
     }
