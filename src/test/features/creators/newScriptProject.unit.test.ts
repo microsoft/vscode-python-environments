@@ -1,6 +1,5 @@
 import assert from 'assert';
-import fsExtra from 'fs-extra';
-import * as fs from 'fs-extra';
+import fsExtra, * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
@@ -66,9 +65,7 @@ suite('newInlineScriptTemplate / NewScriptProject', () => {
         const templateFile = path.resolve(
             path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'newInlineScriptTemplate', 'script.py'),
         );
-        const showTextDocumentStub = sinon
-            .stub(windowApis, 'showTextDocument')
-            .resolves({} as TextEditor);
+        const showTextDocumentStub = sinon.stub(windowApis, 'showTextDocument').resolves({} as TextEditor);
         // Resolve existence by the requested path (the template exists, the new
         // script does not) so the fixture does not depend on probe call order.
         sinon.stub(fsExtra, 'pathExists').callsFake(async (checkedPath) => {
@@ -147,11 +144,7 @@ suite('newInlineScriptTemplate / NewScriptProject', () => {
                 );
             }
             for (const validName of ['console.py', 'com10.py', 'lpt10.py']) {
-                assert.strictEqual(
-                    await validateInput(validName),
-                    null,
-                    `${validName} should remain valid on Windows`,
-                );
+                assert.strictEqual(await validateInput(validName), null, `${validName} should remain valid on Windows`);
             }
             return undefined;
         });
@@ -248,11 +241,7 @@ suite('newInlineScriptTemplate / NewScriptProject', () => {
         const scriptFileName = 'quick_script.py';
         const rootUri = Uri.file(tmpDir);
         const scriptDestination = path.resolve(rootUri.fsPath, scriptFileName);
-        const expectedTemplatePath = path.join(
-            NEW_PROJECT_TEMPLATES_FOLDER,
-            'newInlineScriptTemplate',
-            'script.py',
-        );
+        const expectedTemplatePath = path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'newInlineScriptTemplate', 'script.py');
         const addStub = sinon.stub().resolves();
         const projectManager = { add: addStub } as unknown as PythonProjectManager;
         const creator = new NewScriptProject(projectManager);
@@ -292,11 +281,7 @@ suite('newInlineScriptTemplate / NewScriptProject', () => {
         assert.ok(
             instructionsStub.calledOnceWithExactly(
                 rootUri.fsPath,
-                path.join(
-                    NEW_PROJECT_TEMPLATES_FOLDER,
-                    'copilot-instructions-text',
-                    'script-copilot-instructions.md',
-                ),
+                path.join(NEW_PROJECT_TEMPLATES_FOLDER, 'copilot-instructions-text', 'script-copilot-instructions.md'),
                 [{ searchValue: '<script_name>', replaceValue: scriptFileName }],
             ),
             'quick create should retain Copilot-instruction handling',
@@ -513,7 +498,11 @@ suite('newInlineScriptTemplate / NewScriptProject', () => {
         await Promise.resolve();
 
         assert.strictEqual(createSettled, false, 'create should remain pending while project registration is pending');
-        assert.strictEqual(showTextDocumentStub.called, false, 'the script must not open before registration completes');
+        assert.strictEqual(
+            showTextDocumentStub.called,
+            false,
+            'the script must not open before registration completes',
+        );
         assert.strictEqual(promptStub.called, false);
 
         releaseRegistration();
