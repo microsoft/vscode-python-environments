@@ -345,12 +345,26 @@ suite('Auto Find Project tests', () => {
             setupEnvironments(new Map([[root, envPrefix]]), SYSTEM_MANAGER_ID);
             findFilesStub.resolves([
                 Uri.file(path.join(root, 'app', 'pyproject.toml')),
-                Uri.file(path.join(envPrefix, 'lib', 'pkg', 'setup.py')),
+                Uri.file(path.join(envPrefix, 'lib', 'site-packages', 'pkg', 'setup.py')),
             ]);
             projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
 
             const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
             assert.deepStrictEqual(names(await autoFindProjects.create()), ['app']);
+        });
+
+        test('Keeps project examples inside a system-managed Python installation', async () => {
+            const pythonPrefix = path.join(root, 'python');
+            setupEnvironments(new Map([[root, pythonPrefix]]), SYSTEM_MANAGER_ID);
+            findFilesStub.resolves([
+                Uri.file(path.join(pythonPrefix, 'examples', 'pyproject.toml')),
+                Uri.file(path.join(pythonPrefix, 'lib', 'site-packages', 'pkg', 'setup.py')),
+                Uri.file(path.join(pythonPrefix, 'lib', 'dist-packages', 'pkg2', 'pyproject.toml')),
+            ]);
+            projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+            const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+            assert.deepStrictEqual(names(await autoFindProjects.create()), ['examples']);
         });
 
         test('Keeps workspace projects when a selected prefix contains or equals the workspace', async () => {
@@ -378,6 +392,20 @@ suite('Auto Find Project tests', () => {
 
             const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
             assert.deepStrictEqual(names(await autoFindProjects.create()), ['app', 'nested']);
+        });
+
+        test('Still excludes packages outside a nested workspace under the selected prefix', async () => {
+            const envPrefix = path.join(root, 'custom-env');
+            const nested = path.join(envPrefix, 'docs');
+            setupEnvironments(new Map([[root, envPrefix], [nested, undefined]]));
+            findFilesStub.resolves([
+                Uri.file(path.join(nested, 'pyproject.toml')),
+                Uri.file(path.join(envPrefix, 'lib', 'site-packages', 'pkg', 'setup.py')),
+            ]);
+            projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+            const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+            assert.deepStrictEqual(names(await autoFindProjects.create()), ['docs']);
         });
 
         test('Applies each workspace folder selected environment prefix independently', async () => {

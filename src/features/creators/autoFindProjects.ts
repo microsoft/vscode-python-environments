@@ -1,6 +1,7 @@
 import * as path from 'path';
-import { Uri } from 'vscode';
+import { Uri, WorkspaceFolder } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
+import { SYSTEM_MANAGER_ID } from '../../common/constants';
 import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo, traceWarn } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
@@ -11,6 +12,8 @@ import {
     PythonProjectsImpl,
 } from '../projectManager';
 import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
+
+type SelectedEnvironmentPrefix = { prefix: string; managerId: string };
 
 function getUniqueUri(uris: Uri[]): {
     label: string;
@@ -67,11 +70,10 @@ export class AutoFindProjects implements PythonProjectCreator {
     ) {}
 
     /**
-     * Returns prefixes of selected environments inside a workspace, without containing any workspace folder.
+     * Returns selected environment prefixes inside an open workspace folder.
      * Lookup failures are logged and skipped.
      */
-    private async getSelectedEnvironmentPrefixes(): Promise<string[]> {
-        const folders = getWorkspaceFolders() ?? [];
+    private async getSelectedEnvironmentPrefixes(folders: readonly WorkspaceFolder[]): Promise<SelectedEnvironmentPrefix[]> {
         const prefixes = await Promise.all(
             folders.map(async (folder) => {
                 try {
@@ -79,9 +81,8 @@ export class AutoFindProjects implements PythonProjectCreator {
                     const prefix = environment?.sysPrefix;
                     return prefix &&
                         path.isAbsolute(prefix) &&
-                        folders.some((workspaceFolder) => isSameOrParentPath(workspaceFolder.uri.fsPath, prefix)) &&
-                        !folders.some((workspaceFolder) => isSameOrParentPath(prefix, workspaceFolder.uri.fsPath))
-                        ? prefix
+                        folders.some((workspaceFolder) => isSameOrParentPath(workspaceFolder.uri.fsPath, prefix))
+                        ? { prefix, managerId: environment.envId.managerId }
                         : undefined;
                 } catch (ex) {
                     traceWarn(`Auto Find: failed to get environment for ${folder.uri.fsPath}`, ex);
@@ -89,14 +90,31 @@ export class AutoFindProjects implements PythonProjectCreator {
                 }
             }),
         );
-        return prefixes.filter((prefix): prefix is string => !!prefix);
+        return prefixes.filter((prefix): prefix is SelectedEnvironmentPrefix => !!prefix);
     }
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
         const found = await findFiles('**/{pyproject.toml,setup.py}', '**/.venv/**');
         // Exclude markers inside selected environments (e.g. installed packages in a custom-named venv).
-        const prefixes = found && found.length > 0 ? await this.getSelectedEnvironmentPrefixes() : [];
-        const files = found?.filter((uri) => !prefixes.some((prefix) => isSameOrParentPath(prefix, uri.fsPath)));
+        const folders = found && found.length > 0 ? getWorkspaceFolders() ?? [] : [];
+        const prefixes = await this.getSelectedEnvironmentPrefixes(folders);
+        const files = found?.filter(
+            (uri) =>
+                !prefixes.some(
+                    ({ prefix, managerId }) =>
+                        isSameOrParentPath(prefix, uri.fsPath) &&
+                        (managerId !== SYSTEM_MANAGER_ID ||
+                            path
+                                .relative(prefix, uri.fsPath)
+                                .split(path.sep)
+                                .some((part) => ['site-packages', 'dist-packages'].includes(normalizePath(part)))) &&
+                        !folders.some(
+                            (folder) =>
+                                isSameOrParentPath(prefix, folder.uri.fsPath) &&
+                                isSameOrParentPath(folder.uri.fsPath, uri.fsPath),
+                        ),
+                ),
+        );
         if (!files || files.length === 0) {
             setImmediate(() => {
                 showErrorMessage('No projects found');
