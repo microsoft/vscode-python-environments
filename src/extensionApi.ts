@@ -301,7 +301,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
 
     async managePackages(context: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
-        const environment = await selectPackageManagementEnvironment(this, this.envManagers, context, options);
+        const environment = await selectPackageManagementEnvironment(this.envManagers, context, options);
         if (!environment) {
             return;
         }

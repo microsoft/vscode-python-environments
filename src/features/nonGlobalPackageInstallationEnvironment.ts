@@ -1,25 +1,33 @@
 import { l10n } from 'vscode';
-import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi } from '../api';
+import { GetEnvironmentsScope, PackageManagementOptions, PythonEnvironment } from '../api';
 import { VENV_MANAGER_ID } from '../common/constants';
 import { pickEnvironmentFrom } from '../common/pickers/environments';
 import { showInformationMessage } from '../common/window.apis';
+import { waitForAllEnvManagers } from './common/managerReady';
 import type { EnvironmentManagers } from './envManagers';
 
 function hasSameEnvironmentId(first: PythonEnvironment, second: PythonEnvironment): boolean {
     return first.envId.managerId === second.envId.managerId && first.envId.id === second.envId.id;
 }
 
+async function getEnvironments(
+    envManagers: EnvironmentManagers,
+    scope: Extract<GetEnvironmentsScope, 'all' | 'global'>,
+): Promise<PythonEnvironment[]> {
+    await waitForAllEnvManagers();
+    const environments = await Promise.all(envManagers.managers.map((manager) => manager.getEnvironments(scope)));
+    return environments.flat();
+}
+
 /**
  * Offers alternatives when package installation targets a global environment.
  *
- * @param api Python environment API used to enumerate environments.
  * @param envManagers Registered environment managers used to create a venv.
  * @param environment Original package installation target.
  * @param options Requested package operation.
  * @returns The selected installation target, or `undefined` when the operation is canceled.
  */
 export async function selectPackageManagementEnvironment(
-    api: PythonEnvironmentApi,
     envManagers: EnvironmentManagers,
     environment: PythonEnvironment,
     options: PackageManagementOptions,
@@ -29,7 +37,7 @@ export async function selectPackageManagementEnvironment(
         return environment;
     }
 
-    const globalEnvironments = await api.getEnvironments('global');
+    const globalEnvironments = await getEnvironments(envManagers, 'global');
     if (!globalEnvironments.some((globalEnvironment) => hasSameEnvironmentId(environment, globalEnvironment))) {
         return environment;
     }
@@ -53,7 +61,7 @@ export async function selectPackageManagementEnvironment(
     }
 
     if (choice === useExisting) {
-        const environments = await api.getEnvironments('all');
+        const environments = await getEnvironments(envManagers, 'all');
         const virtualEnvironments = environments.filter(
             (candidate) =>
                 !globalEnvironments.some((globalEnvironment) =>

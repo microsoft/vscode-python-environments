@@ -181,16 +181,18 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
 
     function createApi(manager: InternalPackageManager | undefined): {
         api: PythonEnvironmentApiImpl;
+        environmentManagers: InternalEnvironmentManager[];
         getEnvironmentManager: sinon.SinonStub;
         getPackageManager: sinon.SinonStub;
     } {
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
+        const environmentManagers: InternalEnvironmentManager[] = [];
         const getEnvironmentManager = sinon.stub();
         const getPackageManager = sinon.stub().returns(manager);
         const envManagers = {
             onDidChangeActiveEnvironment: new EventEmitter().event,
             onDidChangePackageProviderPackages: new EventEmitter().event,
-            managers: [],
+            managers: environmentManagers,
             getEnvironmentManager,
             getPackageManager,
         } as unknown as ApiArgs[0];
@@ -206,6 +208,7 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
                 {} as ApiArgs[3],
                 { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4],
             ),
+            environmentManagers,
             getEnvironmentManager,
             getPackageManager,
         };
@@ -214,6 +217,16 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
     const environment = {
         envId: { id: 'environment', managerId: 'environment-manager' },
     } as PythonEnvironment;
+
+    function createDiscoveryManager(
+        globalEnvironments: PythonEnvironment[],
+        allEnvironments: PythonEnvironment[] = globalEnvironments,
+    ): InternalEnvironmentManager {
+        const getEnvironments = sinon.stub();
+        getEnvironments.withArgs('global').resolves(globalEnvironments);
+        getEnvironments.withArgs('all').resolves(allEnvironments);
+        return { getEnvironments } as unknown as InternalEnvironmentManager;
+    }
 
     function expectNoPackageManagerError(error: unknown): true {
         assert.ok(error instanceof Error, 'Expected an Error');
@@ -253,8 +266,8 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
         const manage = sinon.stub().resolves();
         const create = sinon.stub().resolves(createdEnvironment);
         const manager = { manage } as unknown as InternalPackageManager;
-        const { api, getEnvironmentManager, getPackageManager } = createApi(manager);
-        sinon.stub(api, 'getEnvironments').withArgs('global').resolves([environment]);
+        const { api, environmentManagers, getEnvironmentManager, getPackageManager } = createApi(manager);
+        environmentManagers.push(createDiscoveryManager([environment]));
         getEnvironmentManager
             .withArgs('ms-python.python:venv')
             .returns({ supportsCreate: true, create } as unknown as InternalEnvironmentManager);
@@ -273,10 +286,8 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
         } as PythonEnvironment;
         const manage = sinon.stub().resolves();
         const manager = { manage } as unknown as InternalPackageManager;
-        const { api, getPackageManager } = createApi(manager);
-        const getEnvironments = sinon.stub(api, 'getEnvironments');
-        getEnvironments.withArgs('global').resolves([environment]);
-        getEnvironments.withArgs('all').resolves([environment, selectedEnvironment]);
+        const { api, environmentManagers, getPackageManager } = createApi(manager);
+        environmentManagers.push(createDiscoveryManager([environment], [environment, selectedEnvironment]));
         sinon.stub(windowApis, 'showInformationMessage').resolves('Use Existing Virtual Environment');
         const pickEnvironment = sinon
             .stub(environmentPickers, 'pickEnvironmentFrom')
@@ -292,8 +303,8 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
     test('continues with the global environment when requested', async () => {
         const manage = sinon.stub().resolves();
         const manager = { manage } as unknown as InternalPackageManager;
-        const { api } = createApi(manager);
-        sinon.stub(api, 'getEnvironments').withArgs('global').resolves([environment]);
+        const { api, environmentManagers } = createApi(manager);
+        environmentManagers.push(createDiscoveryManager([environment]));
         sinon.stub(windowApis, 'showInformationMessage').resolves('Continue Globally');
 
         await api.managePackages(environment, { install: ['example'] });
@@ -304,8 +315,8 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
     test('cancels package management when the global environment prompt is dismissed', async () => {
         const manage = sinon.stub().resolves();
         const manager = { manage } as unknown as InternalPackageManager;
-        const { api, getPackageManager } = createApi(manager);
-        sinon.stub(api, 'getEnvironments').withArgs('global').resolves([environment]);
+        const { api, environmentManagers, getPackageManager } = createApi(manager);
+        environmentManagers.push(createDiscoveryManager([environment]));
         sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
 
         await api.managePackages(environment, { install: ['example'] });
@@ -317,8 +328,9 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
     test('does not prompt for headless or uninstall-only package management', async () => {
         const manage = sinon.stub().resolves();
         const manager = { manage } as unknown as InternalPackageManager;
-        const { api } = createApi(manager);
-        const getEnvironments = sinon.stub(api, 'getEnvironments');
+        const { api, environmentManagers } = createApi(manager);
+        const getEnvironments = sinon.stub().resolves([environment]);
+        environmentManagers.push({ getEnvironments } as unknown as InternalEnvironmentManager);
         const showInformationMessage = sinon.stub(windowApis, 'showInformationMessage');
 
         await api.managePackages(environment, { install: ['example'], runHeadless: true });

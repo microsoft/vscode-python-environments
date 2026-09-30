@@ -376,7 +376,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await handlePackageUninstall(context);
         }),
         commands.registerCommand('python-envs.managePackageVersion', async (context: unknown) => {
-            await managePackageVersion(context, api, envManagers);
+            await managePackageVersion(context, envManagers);
         }),
         commands.registerCommand('python-envs.set', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);
