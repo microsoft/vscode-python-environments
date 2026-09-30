@@ -83,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.12', '3.14']
+        python-version: ['3.10', '3.12', '3.14', '3.15-dev']
 
     steps:
       - name: Checkout
@@ -170,7 +170,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.12', '3.14']
+        python-version: ['3.10', '3.12', '3.14', '3.15-dev']
 
     steps:
       - name: Checkout
@@ -260,7 +260,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.12', '3.14']
+        python-version: ['3.10', '3.12', '3.14', '3.15-dev']
 
     steps:
       - name: Checkout
