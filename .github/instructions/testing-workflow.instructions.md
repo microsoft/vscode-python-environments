@@ -19,6 +19,7 @@ This guide covers the full testing lifecycle:
 ## Learnings
 
 - Pip commands that return JSON must pass `--disable-pip-version-check`; the process helper combines stderr with stdout, so update notices can otherwise make valid JSON unparseable (1).
+- When a view subscribes to a newly added provider event, TypeMoq-based view tests must return a real `EventEmitter.event`; an unstubbed event yields an undefined disposable and fails during teardown (1).
 
 ### When to Use This Guide
 

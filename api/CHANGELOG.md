@@ -5,6 +5,17 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0]
+
+### Added
+
+- Added the optional `PackageManager.createForProject` factory for package managers whose operations depend on the calling Python project. Explicit project contexts are used directly; environment-only operations use a scoped manager only when exactly one tracked project matches.
+- Added optional `PackageManager.dispose` support for releasing resources owned by project-scoped package managers.
+
+### Changed
+
+- Environment-only package operations no longer fall back to an unbound project-aware package manager. When no unique project can be inferred, package reads return `undefined` and mutations and refreshes reject with `No package manager found`.
+
 ## [1.4.0]
 
 ### Changed

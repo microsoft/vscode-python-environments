@@ -4,8 +4,15 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { Disposable, EventEmitter, LogOutputChannel, RelativePattern, Terminal, Uri } from 'vscode';
-import { DidChangeEnvironmentEventArgs, PackageManager, PythonEnvironment, PythonEnvironmentId } from '../../../api';
+import {
+    DidChangeEnvironmentEventArgs,
+    PackageManager,
+    PythonEnvironment,
+    PythonEnvironmentId,
+    PythonProject,
+} from '../../../api';
 import * as windowApis from '../../../common/window.apis';
+import * as workspaceFsApis from '../../../common/workspace.fs.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import type { EnvironmentManagers } from '../../../features/envManagers';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
@@ -35,6 +42,7 @@ suite('Package Watcher', () => {
             debug: sandbox.stub(),
         };
         createFileSystemWatcherStub = sandbox.stub(workspaceApis, 'createFileSystemWatcher');
+        sandbox.stub(workspaceFsApis, 'pathExists').resolves(true);
         sandbox.stub(workspaceApis, 'getConfiguration').returns({
             get: (_key: string, defaultValue?: unknown) => defaultValue ?? true,
         } as ReturnType<typeof workspaceApis.getConfiguration>);
@@ -294,6 +302,60 @@ suite('Package Watcher', () => {
             clock.restore();
         });
 
+        test('should not refresh packages when the environment executable was deleted', async () => {
+            const clock = sandbox.useFakeTimers();
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+            (workspaceFsApis.pathExists as sinon.SinonStub).resolves(false);
+
+            const env = createMockEnvironment();
+            const packageManager = createMockPackageManager();
+
+            watchPackageChangesForEnvironment(
+                env,
+                packageManager as PackageManager,
+                mockLogOutputChannel as LogOutputChannel,
+            );
+
+            mockWatcher._deleteEmitter.fire(Uri.file('/path/to/pkg.dist-info/METADATA'));
+            await clock.tickAsync(600);
+
+            assert.strictEqual(
+                (packageManager.refresh as sinon.SinonStub).callCount,
+                0,
+                'Should not refresh packages for a deleted environment',
+            );
+
+            clock.restore();
+        });
+
+        test('should refresh packages when a deleted environment executable reappears', async () => {
+            const clock = sandbox.useFakeTimers();
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+            (workspaceFsApis.pathExists as sinon.SinonStub).onFirstCall().resolves(false).resolves(true);
+
+            const env = createMockEnvironment();
+            const packageManager = createMockPackageManager();
+
+            watchPackageChangesForEnvironment(
+                env,
+                packageManager as PackageManager,
+                mockLogOutputChannel as LogOutputChannel,
+            );
+
+            mockWatcher._deleteEmitter.fire(Uri.file('/path/to/pkg.dist-info/METADATA'));
+            await clock.tickAsync(1_200);
+
+            assert.strictEqual(
+                (packageManager.refresh as sinon.SinonStub).callCount,
+                1,
+                'Should refresh packages after the environment is recreated',
+            );
+
+            clock.restore();
+        });
+
         test('should debounce multiple rapid file events', () => {
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
@@ -406,6 +468,36 @@ suite('Package Watcher', () => {
             assert.ok((mockWatcher.dispose as sinon.SinonStub).called, 'Should dispose watcher after the final scope');
         });
 
+        test('should use separate watchers for project-bound package managers', () => {
+            createFileSystemWatcherStub.returns(createMockWatcher());
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const firstScope = Uri.file('workspace-one');
+            const secondScope = Uri.file('workspace-two');
+            const firstPackageManager = new InternalPackageManager(
+                'poetry',
+                createMockPackageManager() as PackageManager,
+                { name: 'first', uri: firstScope } as PythonProject,
+            );
+            const secondPackageManager = new InternalPackageManager(
+                'poetry',
+                createMockPackageManager() as PackageManager,
+                { name: 'second', uri: secondScope } as PythonProject,
+            );
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox
+                    .stub()
+                    .callsFake((scope) => (scope === firstScope ? firstPackageManager : secondPackageManager)),
+            } as unknown as EnvironmentManagers;
+            const env = createMockEnvironment();
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            environmentChanges.fire({ uri: firstScope, new: env, old: undefined });
+            environmentChanges.fire({ uri: secondScope, new: env, old: undefined });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+        });
+
         test('should stop watching an environment when the active environment changes', () => {
             const firstWatcher = createMockWatcher();
             const secondWatcher = createMockWatcher();
@@ -492,7 +584,9 @@ suite('Package Watcher', () => {
             const terminal = { name: 'terminal' } as Terminal;
             const envManagers = {
                 onDidChangeActiveEnvironment: environmentChanges.event,
-                getPackageManager: sandbox.stub().callsFake((context) => (context === env ? packageManager : undefined)),
+                getPackageManager: sandbox
+                    .stub()
+                    .callsFake((context) => (context === env ? packageManager : undefined)),
             } as unknown as EnvironmentManagers;
 
             registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
@@ -500,6 +594,61 @@ suite('Package Watcher', () => {
 
             assert.ok((envManagers.getPackageManager as sinon.SinonStub).calledWith(env));
             assert.strictEqual(createFileSystemWatcherStub.callCount, 1);
+        });
+
+        test('should reuse a project-scoped watcher for terminal activation', () => {
+            createFileSystemWatcherStub.returns(createMockWatcher());
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const scope = Uri.file('workspace');
+            const project = { name: 'project', uri: scope } as PythonProject;
+            const rootManager = new InternalPackageManager('poetry', {
+                ...createMockPackageManager(),
+                createForProject: () => createMockPackageManager() as PackageManager,
+            } as PackageManager);
+            const scopedManager = new InternalPackageManager(
+                'poetry',
+                createMockPackageManager() as PackageManager,
+                project,
+            );
+            const env = createMockEnvironment();
+            const terminal = { name: 'terminal' } as Terminal;
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox
+                    .stub()
+                    .callsFake((context) => (context instanceof Uri ? scopedManager : rootManager)),
+            } as unknown as EnvironmentManagers;
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            environmentChanges.fire({ uri: scope, new: env, old: undefined });
+            terminalActivationChanges.fire({ terminal, environment: env, activated: true });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 1);
+            assert.ok((envManagers.getPackageManager as sinon.SinonStub).calledWith(scope));
+        });
+
+        test('should skip terminal-only watchers for project-aware package managers', () => {
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const packageManager = new InternalPackageManager('poetry', {
+                ...createMockPackageManager(),
+                createForProject: () => createMockPackageManager() as PackageManager,
+            } as PackageManager);
+            const env = createMockEnvironment();
+            const terminal = { name: 'terminal' } as Terminal;
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox.stub().returns(packageManager),
+            } as unknown as EnvironmentManagers;
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            terminalActivationChanges.fire({ terminal, environment: env, activated: true });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 0);
+            assert.ok(
+                (mockLogOutputChannel.debug as sinon.SinonStub).calledWith(
+                    'Skipping unscoped package watcher for project-aware manager poetry',
+                ),
+            );
         });
 
         test('should release a terminal environment watcher when the terminal closes', () => {
@@ -573,10 +722,16 @@ suite('Package Watcher', () => {
                 configurationChanges.event(listener),
             );
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
-            const firstPackageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
-            const secondPackageManager = new InternalPackageManager(
-                'conda',
+            const project = { name: 'project', uri: Uri.file('workspace') } as PythonProject;
+            const firstPackageManager = new InternalPackageManager(
+                'first',
                 createMockPackageManager() as PackageManager,
+                project,
+            );
+            const secondPackageManager = new InternalPackageManager(
+                'second',
+                createMockPackageManager() as PackageManager,
+                project,
             );
             let selectedPackageManager = firstPackageManager;
             const envManagers = {
@@ -597,6 +752,51 @@ suite('Package Watcher', () => {
             assert.ok(!(secondWatcher.dispose as sinon.SinonStub).called);
             assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
             configurationChanges.dispose();
+        });
+
+        test('should resolve the current scoped manager when refreshing', async () => {
+            const clock = sandbox.useFakeTimers();
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+            const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            const project = { name: 'project', uri: Uri.file('workspace') } as PythonProject;
+            const firstProvider = createMockPackageManager();
+            const secondProvider = createMockPackageManager();
+            const firstManager = new InternalPackageManager(
+                'poetry',
+                firstProvider as PackageManager,
+                project,
+            );
+            const secondManager = new InternalPackageManager(
+                'poetry',
+                secondProvider as PackageManager,
+                { name: 'replacement', uri: project.uri } as PythonProject,
+            );
+            const rootProvider = createMockPackageManager();
+            const rootManager = new InternalPackageManager('poetry', rootProvider as PackageManager);
+            let selectedManager = firstManager;
+            const envManagers = {
+                onDidChangeActiveEnvironment: environmentChanges.event,
+                getPackageManager: sandbox.stub().callsFake(() => selectedManager),
+            } as unknown as EnvironmentManagers;
+            const env = createMockEnvironment();
+
+            registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+            environmentChanges.fire({ uri: project.uri, new: env, old: undefined });
+
+            selectedManager = secondManager;
+            mockWatcher._changeEmitter.fire(Uri.file('replacement.dist-info'));
+            await clock.tickAsync(600);
+
+            assert.ok((firstProvider.refresh as sinon.SinonStub).notCalled);
+            assert.ok((secondProvider.refresh as sinon.SinonStub).calledOnceWithExactly(env));
+
+            selectedManager = rootManager;
+            mockWatcher._changeEmitter.fire(Uri.file('removed.dist-info'));
+            await clock.tickAsync(600);
+
+            assert.ok((secondProvider.refresh as sinon.SinonStub).calledOnce);
+            assert.ok((rootProvider.refresh as sinon.SinonStub).notCalled);
         });
     });
 });

@@ -86,6 +86,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             this._onDidChangePythonProjects,
             this._onDidChangePackages,
             this._onDidChangeEnvironmentVariables,
+            this.envManagers.onDidChangePackageProviderPackages((e) => this._onDidChangePackages.fire(e)),
             this.envManagers.onDidChangeActiveEnvironment((e) => {
                 this._onDidChangeEnvironment.fire(e);
                 const location = e.uri?.fsPath ?? 'global';
@@ -295,12 +296,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
 
     registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable {
-        const disposables: Disposable[] = [];
-        disposables.push(this.envManagers.registerPackageManager(manager, options));
-        if (manager.onDidChangePackages) {
-            disposables.push(manager.onDidChangePackages((e) => this._onDidChangePackages.fire(e)));
-        }
-        return new Disposable(() => disposables.forEach((d) => d.dispose()));
+        return this.envManagers.registerPackageManager(manager, options);
     }
     async managePackages(context: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
         await waitForEnvManagerId([context.envId.managerId]);
