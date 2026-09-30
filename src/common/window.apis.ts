@@ -361,12 +361,9 @@ export function showWarningMessage<T extends MessageItem>(
     options: MessageOptions,
     ...items: T[]
 ): Thenable<T | undefined>;
-export function showWarningMessage<T extends MessageItem>(
-    message: string,
-    options: MessageOptions,
-    ...items: T[]
-): Thenable<T | undefined> {
-    return window.showWarningMessage(message, options, ...items);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Forward all VS Code overloads unchanged; the public overloads above check callers.
+export function showWarningMessage(message: string, ...args: any[]): Thenable<string | MessageItem | undefined> {
+    return window.showWarningMessage(message, ...args);
 }
 
 export function showInputBox(options?: InputBoxOptions, token?: CancellationToken): Thenable<string | undefined> {

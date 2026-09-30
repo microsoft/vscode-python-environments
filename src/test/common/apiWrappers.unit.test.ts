@@ -1,5 +1,5 @@
 import assert from 'node:assert';
-import { anything, reset, verify, when } from 'ts-mockito';
+import { reset, verify, when } from 'ts-mockito';
 import { Disposable, MessageItem, MessageOptions, TextDocument, WindowState } from 'vscode';
 import { executeCommand, registerCommand } from '../../common/command.api';
 import { onDidChangeWindowState, showWarningMessage } from '../../common/window.apis';
@@ -67,9 +67,10 @@ suite('Typed API wrappers', () => {
     });
 
     test('shows a warning without actions', async () => {
-        when(window.showWarningMessage('warning', anything())).thenReturn(Promise.resolve(undefined));
+        when(window.showWarningMessage('warning')).thenReturn(Promise.resolve(undefined));
 
         assert.strictEqual(await showWarningMessage('warning'), undefined);
+        verify(window.showWarningMessage('warning')).once();
     });
 
     test('preserves string warning actions without options', async () => {
