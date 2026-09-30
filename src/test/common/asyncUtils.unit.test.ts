@@ -45,6 +45,14 @@ suite('timeout', () => {
         await clock.tickAsync(100);
         source.dispose();
     });
+
+    test('rejects when given an already cancelled token', async () => {
+        const source = new CancellationTokenSource();
+        source.cancel();
+
+        await assert.rejects(timeout(100, source.token), (error: unknown) => error instanceof CancellationError);
+        source.dispose();
+    });
 });
 
 suite('safeRegister', () => {

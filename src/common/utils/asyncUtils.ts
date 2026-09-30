@@ -23,6 +23,11 @@ export function timeout(milliseconds: number, token?: CancellationToken): Cancel
     }
 
     return new Promise<void>((resolve, reject) => {
+        if (token.isCancellationRequested) {
+            reject(new CancellationError());
+            return;
+        }
+
         const handle = setTimeout(() => {
             disposable.dispose();
             resolve();
