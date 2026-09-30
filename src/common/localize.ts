@@ -298,6 +298,13 @@ export namespace ActivationStrings {
     export const envFileInjectionDisabled = l10n.t(
         'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
     );
+    export const enableForWorkspace = l10n.t('Enable for Workspace');
+    export const enableForFolder = l10n.t('Enable for Folder');
+    export const envFileInjectionDisabledForFolder = (name: string) =>
+        l10n.t(
+            'An environment file is configured for folder "{0}" but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
+            name,
+        );
 }
 
 export namespace UvInstallStrings {
