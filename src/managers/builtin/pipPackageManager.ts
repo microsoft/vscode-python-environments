@@ -23,9 +23,11 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { SYSTEM_MANAGER_ID } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
+import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import { PythonVersion } from '../../common/pythonVersion';
-import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
@@ -47,6 +49,58 @@ import {
 } from './commands/index';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
+
+function hasSameEnvironmentId(first: PythonEnvironment, second: PythonEnvironment): boolean {
+    return first.envId.managerId === second.envId.managerId && first.envId.id === second.envId.id;
+}
+
+async function offerNonGlobalInstallationEnvironment(
+    api: PythonEnvironmentApi,
+    venv: VenvManager,
+    environment: PythonEnvironment,
+    options: PackageManagementOptions,
+    resolvedInstallPackages: readonly string[],
+): Promise<PythonEnvironment> {
+    if (
+        options.runHeadless ||
+        environment.envId.managerId !== SYSTEM_MANAGER_ID ||
+        resolvedInstallPackages.length === 0
+    ) {
+        return environment;
+    }
+
+    const createNew = l10n.t('Create New Virtual Environment');
+    const useExisting = l10n.t('Use Existing Virtual Environment');
+    const continueGlobally = l10n.t('Continue Globally');
+    const choice = await showInformationMessage(
+        l10n.t('You are installing packages into a global Python environment. Where would you like to install them?'),
+        createNew,
+        useExisting,
+        continueGlobally,
+    );
+
+    if (choice === createNew) {
+        const created = await venv.create('global', {
+            quickCreate: true,
+        });
+        return created ?? environment;
+    }
+
+    if (choice === useExisting) {
+        const [environments, globalEnvironments] = await Promise.all([
+            api.getEnvironments('all'),
+            api.getEnvironments('global'),
+        ]);
+        const virtualEnvironments = environments.filter(
+            (environment) =>
+                !globalEnvironments.some((globalEnvironment) => hasSameEnvironmentId(environment, globalEnvironment)),
+        );
+        const selected = await pickEnvironmentFrom(virtualEnvironments);
+        return selected ?? environment;
+    }
+
+    return environment;
+}
 
 export class PipPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -72,6 +126,10 @@ export class PipPackageManager implements PackageManager, Disposable {
     readonly iconPath?: IconPath;
 
     async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        if (PythonVersion.tryParse(environment.version)?.major === 2) {
+            throw new Error('Python 2.* is not supported (deprecated)');
+        }
+
         let toInstall: string[] = [...(options.install ?? [])];
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
@@ -89,8 +147,20 @@ export class PipPackageManager implements PackageManager, Disposable {
             }
         }
 
-        if (PythonVersion.tryParse(environment.version)?.major === 2) {
-            throw new Error('Python 2.* is not supported (deprecated)');
+        const installationEnvironment = await offerNonGlobalInstallationEnvironment(
+            this.api,
+            this.venv,
+            environment,
+            options,
+            toInstall,
+        );
+        if (!hasSameEnvironmentId(installationEnvironment, environment)) {
+            // Call API again to manage packages using the environments' prefered method
+            return await this.api.managePackages(installationEnvironment, {
+                ...options,
+                install: toInstall,
+                uninstall: toUninstall,
+            });
         }
 
         const execute = async (token?: CancellationToken): Promise<void> => {
@@ -254,10 +324,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async getPackageAvailableVersions(
-        environment: PythonEnvironment,
-        packageName: string,
-    ): Promise<Pep440Version[]> {
+    async getPackageAvailableVersions(environment: PythonEnvironment, packageName: string): Promise<Pep440Version[]> {
         const pythonExecutable = environment.execInfo?.run?.executable;
         if (!pythonExecutable) {
             throw new Error(`Python executable is unavailable for environment: ${environment.envId.id}`);

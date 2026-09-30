@@ -1,12 +1,12 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import {
+    Memento,
     ProgressLocation,
     QuickInputButtons,
     TaskExecution,
     TaskRevealKind,
     Terminal,
-    Memento,
     Uri,
     l10n,
     workspace,
@@ -21,24 +21,21 @@ import {
     PythonProjectCreatorOptions,
     isPackageVersionLookupNotSupportedError,
 } from '../api';
+import {
+    InlineScriptEnvironmentModifiedError,
+    InlineScriptPackagesNotManagedError,
+} from '../common/inlineScript/errors';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
-import { InlineScriptEnvironmentModifiedError, InlineScriptPackagesNotManagedError } from '../common/inlineScript/errors';
 import * as persistentState from '../common/persistentState';
+import type { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import type { ProjectCreators } from './creators/projectCreators';
 import type { EnvironmentManagers } from './envManagers';
 import type { PythonProjectManager } from './projectManager';
-import type {
-    InternalEnvironmentManager,
-    InternalPackageManager,
-} from '../managers/common/registeredManagers';
-import {
-    removePythonProjectSetting,
-    setEnvironmentManager,
-    setPackageManager,
-} from './settings/settingHelpers';
+import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
 import { valid as pep440Valid } from '@renovatebot/pep440';
 import { executeCommand } from '../common/command.api';
+import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { clipboardWriteText } from '../common/env.apis';
 import { Pickers } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
@@ -62,7 +59,6 @@ import {
     showWarningMessage,
     withProgress,
 } from '../common/window.apis';
-import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import * as shellProviders from './terminal/shells/providers';
@@ -311,11 +307,11 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
     } else if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
         const inlineScript = view.environment.envId.managerId === INLINE_SCRIPT_MANAGER_ID;
-        const manager = managers.getEnvironmentManager(
-            inlineScript ? view.environment : view.parent.project.uri,
-        );
+        const manager = managers.getEnvironmentManager(inlineScript ? view.environment : view.parent.project.uri);
         if (inlineScript && !manager) {
-            throw new Error(l10n.t('The inline-script environment manager is not available to delete this environment.'));
+            throw new Error(
+                l10n.t('The inline-script environment manager is not available to delete this environment.'),
+            );
         }
         await manager?.remove(view.environment);
     } else {
@@ -380,7 +376,10 @@ export async function managePackageVersion(context: unknown) {
         let availableVersions: Pep440Version[] | undefined;
         try {
             availableVersions = await withProgress(
-                { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
+                {
+                    location: ProgressLocation.Window,
+                    title: l10n.t('Fetching available versions for {0}...', pkg.name),
+                },
                 () => packageManager.getPackageAvailableVersions(environment, pkg.name, { errorMode: 'throw' }),
             );
         } catch (error) {
@@ -717,13 +716,13 @@ export async function clearEnvironmentCachesCommand(
     await shellProviders.clearShellProfileCache(startupProviders);
 }
 
-export async function clearScriptEnvironmentCacheCommand(
-    em: EnvironmentManagers,
-): Promise<void> {
+export async function clearScriptEnvironmentCacheCommand(em: EnvironmentManagers): Promise<void> {
     const manager = em.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID);
     if (!manager || !manager.supportsClearCache()) {
         throw new Error(
-            l10n.t('Inline-script environment cache is unavailable because the inline-script manager is not registered.'),
+            l10n.t(
+                'Inline-script environment cache is unavailable because the inline-script manager is not registered.',
+            ),
         );
     }
 
