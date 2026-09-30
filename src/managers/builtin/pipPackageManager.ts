@@ -23,7 +23,6 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { SYSTEM_MANAGER_ID } from '../../common/constants';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import { PythonVersion } from '../../common/pythonVersion';
@@ -60,12 +59,13 @@ async function offerNonGlobalInstallationEnvironment(
     environment: PythonEnvironment,
     options: PackageManagementOptions,
     resolvedInstallPackages: readonly string[],
-): Promise<PythonEnvironment> {
-    if (
-        options.runHeadless ||
-        environment.envId.managerId !== SYSTEM_MANAGER_ID ||
-        resolvedInstallPackages.length === 0
-    ) {
+): Promise<PythonEnvironment | undefined> {
+    if (options.runHeadless || resolvedInstallPackages.length === 0) {
+        return environment;
+    }
+
+    const globalEnvironments = await api.getEnvironments('global');
+    if (!globalEnvironments.some((globalEnvironment) => hasSameEnvironmentId(environment, globalEnvironment))) {
         return environment;
     }
 
@@ -80,26 +80,21 @@ async function offerNonGlobalInstallationEnvironment(
     );
 
     if (choice === createNew) {
-        const created = await venv.create('global', {
+        return venv.create('global', {
             quickCreate: true,
         });
-        return created ?? environment;
     }
 
     if (choice === useExisting) {
-        const [environments, globalEnvironments] = await Promise.all([
-            api.getEnvironments('all'),
-            api.getEnvironments('global'),
-        ]);
+        const environments = await api.getEnvironments('all');
         const virtualEnvironments = environments.filter(
             (environment) =>
                 !globalEnvironments.some((globalEnvironment) => hasSameEnvironmentId(environment, globalEnvironment)),
         );
-        const selected = await pickEnvironmentFrom(virtualEnvironments);
-        return selected ?? environment;
+        return pickEnvironmentFrom(virtualEnvironments);
     }
 
-    return environment;
+    return choice === continueGlobally ? environment : undefined;
 }
 
 export class PipPackageManager implements PackageManager, Disposable {
@@ -154,6 +149,9 @@ export class PipPackageManager implements PackageManager, Disposable {
             options,
             toInstall,
         );
+        if (!installationEnvironment) {
+            return;
+        }
         if (!hasSameEnvironmentId(installationEnvironment, environment)) {
             // Call API again to manage packages using the environments' prefered method
             return await this.api.managePackages(installationEnvironment, {

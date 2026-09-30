@@ -230,12 +230,16 @@ suite('PipPackageManager', () => {
         assert.strictEqual(shouldUseUvStub.callCount, 0);
     });
 
-    test('quick creates a virtual environment instead of installing globally', async () => {
-        const environment = createSystemEnvironment();
+    test('quick creates a virtual environment for a non-system global environment', async () => {
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), 'pyenv-python'),
+            managerId: 'ms-python.python:pyenv',
+        });
         const createdEnvironment = createEnvironment();
         const createVenvStub = sinon.stub().resolves(createdEnvironment);
         const managePackagesStub = sinon.stub().resolves();
         const api = {
+            getEnvironments: sinon.stub().withArgs('global').resolves([environment]),
             managePackages: managePackagesStub,
         } as unknown as PythonEnvironmentApi;
         const manager = new PipPackageManager(
@@ -299,7 +303,7 @@ suite('PipPackageManager', () => {
     test('continues installing into the global environment when requested', async () => {
         const environment = createSystemEnvironment();
         const manager = new PipPackageManager(
-            {} as PythonEnvironmentApi,
+            { getEnvironments: sinon.stub().resolves([environment]) } as unknown as PythonEnvironmentApi,
             createMockLogOutputChannel(),
             {} as VenvManager,
         );
@@ -312,20 +316,19 @@ suite('PipPackageManager', () => {
         assert.ok(runPythonStub.calledOnce);
     });
 
-    test('continues installing into the global environment when the prompt is dismissed', async () => {
+    test('cancels installation when the global environment prompt is dismissed', async () => {
         const environment = createSystemEnvironment();
         const manager = new PipPackageManager(
-            {} as PythonEnvironmentApi,
+            { getEnvironments: sinon.stub().resolves([environment]) } as unknown as PythonEnvironmentApi,
             createMockLogOutputChannel(),
             {} as VenvManager,
         );
         sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
-        stubPackageManagementExecution();
-        const runPythonStub = sinon.stub(helpers, 'runPython').resolves('');
+        const shouldUseUvStub = sinon.stub(helpers, 'shouldUseUv');
 
         await manager.manage(environment, { install: ['flask'] });
 
-        assert.ok(runPythonStub.calledOnce);
+        assert.ok(shouldUseUvStub.notCalled);
     });
 
     test('does not prompt for headless global installations', async () => {
