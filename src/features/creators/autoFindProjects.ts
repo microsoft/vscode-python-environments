@@ -2,14 +2,15 @@ import * as path from 'path';
 import { Uri } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { ProjectCreatorString } from '../../common/localize';
-import { traceInfo } from '../../common/logging';
+import { traceInfo, traceWarn } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
-import { findFiles } from '../../common/workspace.apis';
+import { findFiles, getWorkspaceFolders } from '../../common/workspace.apis';
+import type { EnvironmentManagers } from '../envManagers';
 import {
     PythonProjectManager,
     PythonProjectsImpl,
 } from '../projectManager';
-import { normalizePath } from '../../common/utils/pathUtils';
+import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
 
 function getUniqueUri(uris: Uri[]): {
     label: string;
@@ -60,10 +61,35 @@ export class AutoFindProjects implements PythonProjectCreator {
 
     supportsQuickCreate = true;
 
-    constructor(private readonly pm: PythonProjectManager) {}
+    constructor(
+        private readonly pm: PythonProjectManager,
+        private readonly envManagers: EnvironmentManagers,
+    ) {}
+
+    /**
+     * Returns the `sysPrefix` of the environment selected for each open workspace folder.
+     * Only non-empty absolute prefixes are returned; lookup failures are logged and skipped.
+     */
+    private async getSelectedEnvironmentPrefixes(): Promise<string[]> {
+        const prefixes = await Promise.all(
+            (getWorkspaceFolders() ?? []).map(async (folder) => {
+                try {
+                    const prefix = (await this.envManagers.getEnvironment(folder.uri))?.sysPrefix;
+                    return prefix && path.isAbsolute(prefix) ? prefix : undefined;
+                } catch (ex) {
+                    traceWarn(`Auto Find: failed to get environment for ${folder.uri.fsPath}`, ex);
+                    return undefined;
+                }
+            }),
+        );
+        return prefixes.filter((prefix): prefix is string => !!prefix);
+    }
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
-        const files = await findFiles('**/{pyproject.toml,setup.py}', '**/.venv/**');
+        const found = await findFiles('**/{pyproject.toml,setup.py}', '**/.venv/**');
+        // Exclude markers inside selected environments (e.g. installed packages in a custom-named venv).
+        const prefixes = found && found.length > 0 ? await this.getSelectedEnvironmentPrefixes() : [];
+        const files = found?.filter((uri) => !prefixes.some((prefix) => isSameOrParentPath(prefix, uri.fsPath)));
         if (!files || files.length === 0) {
             setImmediate(() => {
                 showErrorMessage('No projects found');
