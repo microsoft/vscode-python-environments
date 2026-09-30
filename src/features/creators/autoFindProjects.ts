@@ -1,7 +1,6 @@
 import * as path from 'path';
 import { Uri, WorkspaceFolder } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
-import { SYSTEM_MANAGER_ID } from '../../common/constants';
 import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo, traceWarn } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
@@ -12,8 +11,6 @@ import {
     PythonProjectsImpl,
 } from '../projectManager';
 import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
-
-type SelectedEnvironmentPrefix = { prefix: string; managerId: string };
 
 function getUniqueUri(uris: Uri[]): {
     label: string;
@@ -73,7 +70,7 @@ export class AutoFindProjects implements PythonProjectCreator {
      * Returns selected environment prefixes inside an open workspace folder.
      * Lookup failures are logged and skipped.
      */
-    private async getSelectedEnvironmentPrefixes(folders: readonly WorkspaceFolder[]): Promise<SelectedEnvironmentPrefix[]> {
+    private async getSelectedEnvironmentPrefixes(folders: readonly WorkspaceFolder[]): Promise<string[]> {
         const prefixes = await Promise.all(
             folders.map(async (folder) => {
                 try {
@@ -82,7 +79,7 @@ export class AutoFindProjects implements PythonProjectCreator {
                     return prefix &&
                         path.isAbsolute(prefix) &&
                         folders.some((workspaceFolder) => isSameOrParentPath(workspaceFolder.uri.fsPath, prefix))
-                        ? { prefix, managerId: environment.envId.managerId }
+                        ? prefix
                         : undefined;
                 } catch (ex) {
                     traceWarn(`Auto Find: failed to get environment for ${folder.uri.fsPath}`, ex);
@@ -90,7 +87,7 @@ export class AutoFindProjects implements PythonProjectCreator {
                 }
             }),
         );
-        return prefixes.filter((prefix): prefix is SelectedEnvironmentPrefix => !!prefix);
+        return prefixes.filter((prefix): prefix is string => !!prefix);
     }
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
@@ -101,13 +98,8 @@ export class AutoFindProjects implements PythonProjectCreator {
         const files = found?.filter(
             (uri) =>
                 !prefixes.some(
-                    ({ prefix, managerId }) =>
+                    (prefix) =>
                         isSameOrParentPath(prefix, uri.fsPath) &&
-                        (managerId !== SYSTEM_MANAGER_ID ||
-                            path
-                                .relative(prefix, uri.fsPath)
-                                .split(path.sep)
-                                .some((part) => ['site-packages', 'dist-packages'].includes(normalizePath(part)))) &&
                         !folders.some(
                             (folder) =>
                                 isSameOrParentPath(prefix, folder.uri.fsPath) &&
