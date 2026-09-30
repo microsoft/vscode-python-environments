@@ -365,6 +365,21 @@ suite('Auto Find Project tests', () => {
             assert.deepStrictEqual(names(await autoFindProjects.create()), ['app', path.basename(root2)]);
         });
 
+        test('Keeps a nested workspace root selected as the parent workspace environment prefix', async () => {
+            const nested = path.join(root, 'nested');
+            const nestedEnv = path.join(nested, 'custom-env');
+            setupEnvironments(new Map([[root, nested], [nested, nestedEnv]]));
+            findFilesStub.resolves([
+                Uri.file(path.join(root, 'app', 'setup.py')),
+                Uri.file(path.join(nested, 'pyproject.toml')),
+                Uri.file(path.join(nestedEnv, 'lib', 'pkg', 'setup.py')),
+            ]);
+            projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+            const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+            assert.deepStrictEqual(names(await autoFindProjects.create()), ['app', 'nested']);
+        });
+
         test('Applies each workspace folder selected environment prefix independently', async () => {
             const env1 = path.join(root, 'env-one');
             const env2 = path.join(root2, 'env-two');

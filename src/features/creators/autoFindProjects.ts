@@ -67,19 +67,20 @@ export class AutoFindProjects implements PythonProjectCreator {
     ) {}
 
     /**
-     * Returns prefixes of selected environments strictly inside their workspace folders.
+     * Returns prefixes of selected environments inside a workspace, without containing any workspace folder.
      * Lookup failures are logged and skipped.
      */
     private async getSelectedEnvironmentPrefixes(): Promise<string[]> {
+        const folders = getWorkspaceFolders() ?? [];
         const prefixes = await Promise.all(
-            (getWorkspaceFolders() ?? []).map(async (folder) => {
+            folders.map(async (folder) => {
                 try {
                     const environment = await this.envManagers.getEnvironment(folder.uri);
                     const prefix = environment?.sysPrefix;
                     return prefix &&
                         path.isAbsolute(prefix) &&
                         isSameOrParentPath(folder.uri.fsPath, prefix) &&
-                        !isSameOrParentPath(prefix, folder.uri.fsPath)
+                        !folders.some((workspaceFolder) => isSameOrParentPath(prefix, workspaceFolder.uri.fsPath))
                         ? prefix
                         : undefined;
                 } catch (ex) {
