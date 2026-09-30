@@ -1,7 +1,6 @@
 import * as path from 'path';
 import { Uri } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
-import { SYSTEM_MANAGER_ID } from '../../common/constants';
 import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo, traceWarn } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
@@ -68,7 +67,7 @@ export class AutoFindProjects implements PythonProjectCreator {
     ) {}
 
     /**
-     * Returns workspace-local prefixes of selected non-system environments.
+     * Returns prefixes of selected environments strictly inside their workspace folders.
      * Lookup failures are logged and skipped.
      */
     private async getSelectedEnvironmentPrefixes(): Promise<string[]> {
@@ -77,8 +76,7 @@ export class AutoFindProjects implements PythonProjectCreator {
                 try {
                     const environment = await this.envManagers.getEnvironment(folder.uri);
                     const prefix = environment?.sysPrefix;
-                    return environment?.envId.managerId !== SYSTEM_MANAGER_ID &&
-                        prefix &&
+                    return prefix &&
                         path.isAbsolute(prefix) &&
                         isSameOrParentPath(folder.uri.fsPath, prefix) &&
                         !isSameOrParentPath(prefix, folder.uri.fsPath)

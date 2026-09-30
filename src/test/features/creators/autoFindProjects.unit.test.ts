@@ -329,19 +329,28 @@ suite('Auto Find Project tests', () => {
         });
 
         test('Keeps workspace projects when the selected system Python prefix contains the workspace', async () => {
-            setupEnvironments(
-                new Map([[root, broadPrefix], [root2, path.join(root2, 'embedded-python')]]),
-                SYSTEM_MANAGER_ID,
-            );
+            setupEnvironments(new Map([[root, broadPrefix]]), SYSTEM_MANAGER_ID);
             findFilesStub.resolves([
                 Uri.file(path.join(root, 'pyproject.toml')),
                 Uri.file(path.join(root, 'app', 'setup.py')),
-                Uri.file(path.join(root2, 'embedded-python', 'setup.py')),
             ]);
             projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
 
             const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
-            assert.deepStrictEqual(names(await autoFindProjects.create()), ['app', 'embedded-python', path.basename(root)]);
+            assert.deepStrictEqual(names(await autoFindProjects.create()), ['app', path.basename(root)]);
+        });
+
+        test('Excludes a workspace-local virtual environment resolved by the system manager', async () => {
+            const envPrefix = path.join(root, 'custom-env');
+            setupEnvironments(new Map([[root, envPrefix]]), SYSTEM_MANAGER_ID);
+            findFilesStub.resolves([
+                Uri.file(path.join(root, 'app', 'pyproject.toml')),
+                Uri.file(path.join(envPrefix, 'lib', 'pkg', 'setup.py')),
+            ]);
+            projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+            const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+            assert.deepStrictEqual(names(await autoFindProjects.create()), ['app']);
         });
 
         test('Keeps workspace projects when a selected prefix contains or equals the workspace', async () => {
