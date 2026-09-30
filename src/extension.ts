@@ -220,7 +220,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(
         projectCreators,
         projectCreators.registerPythonProjectCreator(new ExistingProjects(projectManager)),
-        projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
+        projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager, envManagers)),
         projectCreators.registerPythonProjectCreator(new NewPackageProject(envManagers, projectManager)),
         projectCreators.registerPythonProjectCreator(new NewScriptProject(projectManager)),
     );
