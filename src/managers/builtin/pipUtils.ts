@@ -214,8 +214,7 @@ async function selectWorkspaceOrCommon(
             } else {
                 return undefined;
             }
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (ex: any) {
+        } catch (ex) {
             if (ex === QuickInputButtons.Back) {
                 return selectWorkspaceOrCommon(installableResult, common, showSkipOption, installed);
             }
