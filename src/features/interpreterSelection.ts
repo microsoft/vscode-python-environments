@@ -536,28 +536,19 @@ function getProjectSpecificEnvManager(projectManager: PythonProjectManager, scop
  * `python.defaultInterpreterPath` may be configured as a relative path (e.g. `.venv/bin/python`).
  * The native finder resolves relative paths against its own working directory, which is unrelated
  * to the workspace and can produce malformed paths (including a duplicated workspace segment).
- * To avoid this, relative paths are resolved against the workspace folder. The workspace folder is
- * looked up from the scope, falling back to the single open workspace folder when needed.
+ * To avoid this, relative paths are resolved against the workspace folder identified by the scope.
+ * Global relative paths are left unchanged because there is no workspace context to resolve against.
  *
  * @param interpreterPath - The interpreter path after variable substitution.
  * @param scope - The workspace folder URI, or undefined for global scope.
  * @returns An absolute interpreter path when possible, otherwise the input unchanged.
  */
 function toAbsoluteInterpreterPath(interpreterPath: string, scope: Uri | undefined): string {
-    if (path.isAbsolute(interpreterPath)) {
+    if (path.isAbsolute(interpreterPath) || !scope) {
         return interpreterPath;
     }
-    let workspaceFolder = scope ? getWorkspaceFolder(scope) : undefined;
-    if (!workspaceFolder) {
-        const folders = getWorkspaceFolders();
-        if (folders && folders.length === 1) {
-            workspaceFolder = folders[0];
-        }
-    }
-    if (workspaceFolder) {
-        return path.resolve(workspaceFolder.uri.fsPath, interpreterPath);
-    }
-    return interpreterPath;
+    const workspaceFolder = getWorkspaceFolder(scope);
+    return path.resolve(workspaceFolder?.uri.fsPath ?? scope.fsPath, interpreterPath);
 }
 
 /**

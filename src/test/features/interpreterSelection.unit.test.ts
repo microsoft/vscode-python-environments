@@ -313,10 +313,9 @@ suite('Interpreter Selection - Priority Chain', () => {
             );
         });
 
-        test('should resolve a relative defaultInterpreterPath via single-folder fallback', async () => {
-            // When the owning workspace folder can't be determined (getWorkspaceFolder returns
-            // undefined, e.g. drive-letter casing on Windows) but a single folder is open, the
-            // relative path should still be resolved against that folder.
+        test('should resolve a relative defaultInterpreterPath from its scope when folder lookup fails', async () => {
+            // The scope already identifies the workspace folder, so drive-letter casing must not
+            // prevent relative path resolution when getWorkspaceFolder returns undefined.
             const workspaceUri = Uri.file(path.resolve('/test/workspace'));
             const absoluteInterpreterPath = path.resolve(workspaceUri.fsPath, '.venv/bin/python');
             const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
@@ -354,12 +353,11 @@ suite('Interpreter Selection - Priority Chain', () => {
             assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(absoluteInterpreterPath));
         });
 
-        test('should not make a relative defaultInterpreterPath absolute with multiple folders open', async () => {
-            // With multiple folders open and no determinable owning folder, the single-folder
-            // fallback must not apply, so the relative path is passed through unchanged.
+        test('should resolve a relative defaultInterpreterPath from its scope with multiple folders open', async () => {
             const workspaceUri = Uri.file(path.resolve('/test/workspace'));
             const otherUri = Uri.file(path.resolve('/test/other'));
             const relativeInterpreterPath = './.venv/bin/python';
+            const absoluteInterpreterPath = path.resolve(workspaceUri.fsPath, relativeInterpreterPath);
 
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(undefined);
@@ -374,11 +372,16 @@ suite('Interpreter Selection - Priority Chain', () => {
                 return undefined;
             });
             mockNativeFinder.resolve.resolves({
-                executable: relativeInterpreterPath,
+                executable: absoluteInterpreterPath,
                 version: '3.11.0',
-                prefix: '.venv',
+                prefix: path.dirname(path.dirname(absoluteInterpreterPath)),
             });
-            mockApi.resolveEnvironment.resolves(mockVenvEnv);
+            mockApi.resolveEnvironment.resolves({
+                ...mockVenvEnv,
+                displayPath: absoluteInterpreterPath,
+                environmentPath: Uri.file(absoluteInterpreterPath),
+                execInfo: { run: { executable: absoluteInterpreterPath } },
+            });
 
             await resolveEnvironmentByPriority(
                 workspaceUri,
@@ -388,7 +391,7 @@ suite('Interpreter Selection - Priority Chain', () => {
                 mockApi as unknown as PythonEnvironmentApi,
             );
 
-            assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(relativeInterpreterPath));
+            assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(absoluteInterpreterPath));
         });
 
         test('should pass an absolute defaultInterpreterPath to the native finder unchanged', async () => {
@@ -1343,6 +1346,36 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
         assert.ok(result.environment);
         assert.strictEqual(result.environment.displayPath, userPyenvPath);
         assert.strictEqual(result.environment.execInfo?.run?.executable, userPyenvPath);
+    });
+
+    test('should not resolve a global relative defaultInterpreterPath against the open workspace', async () => {
+        const relativeInterpreterPath = path.join('.venv', process.platform === 'win32' ? 'Scripts' : 'bin', 'python');
+        const workspaceFolder = {
+            name: 'workspace',
+            uri: Uri.file(path.resolve('/test/workspace')),
+        } as WorkspaceFolder;
+
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+            if (section === 'python' && key === 'defaultInterpreterPath') {
+                return relativeInterpreterPath;
+            }
+            return undefined;
+        });
+        mockNativeFinder.resolve.resolves({
+            executable: relativeInterpreterPath,
+            version: '3.11.0',
+            prefix: '.venv',
+        });
+        mockApi.resolveEnvironment.resolves(mockSystemEnv);
+
+        await resolveGlobalEnvironmentByPriority(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+        assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(relativeInterpreterPath));
     });
 
     test('should use original user path for global scope even when nativeFinder resolves to different executable', async () => {
