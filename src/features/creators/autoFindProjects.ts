@@ -79,7 +79,7 @@ export class AutoFindProjects implements PythonProjectCreator {
                     const prefix = environment?.sysPrefix;
                     return prefix &&
                         path.isAbsolute(prefix) &&
-                        isSameOrParentPath(folder.uri.fsPath, prefix) &&
+                        folders.some((workspaceFolder) => isSameOrParentPath(workspaceFolder.uri.fsPath, prefix)) &&
                         !folders.some((workspaceFolder) => isSameOrParentPath(prefix, workspaceFolder.uri.fsPath))
                         ? prefix
                         : undefined;

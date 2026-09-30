@@ -404,6 +404,20 @@ suite('Auto Find Project tests', () => {
             envManagers.verify((em) => em.getEnvironment(typmoq.It.isAny()), typmoq.Times.exactly(2));
         });
 
+        test('Excludes a selected environment inside a different workspace folder', async () => {
+            const envPrefix = path.join(root2, 'shared-env');
+            setupEnvironments(new Map([[root, envPrefix], [root2, undefined]]));
+            findFilesStub.resolves([
+                Uri.file(path.join(root, 'app', 'pyproject.toml')),
+                Uri.file(path.join(root2, 'other', 'pyproject.toml')),
+                Uri.file(path.join(envPrefix, 'lib', 'pkg', 'setup.py')),
+            ]);
+            projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+            const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+            assert.deepStrictEqual(names(await autoFindProjects.create()), ['app', 'other']);
+        });
+
         test('Missing, relative, or failed environment lookups preserve existing behavior', async () => {
             const root3 = Uri.file(path.join(path.parse(root).root, 'usr', 'home', 'root3')).fsPath;
             setupEnvironments(
