@@ -2,9 +2,11 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
 import {
+    ConfigurationTarget,
     Disposable,
     Event,
     GlobalEnvironmentVariableCollection,
@@ -13,7 +15,8 @@ import {
     WorkspaceFolder,
     workspace,
 } from 'vscode';
-import { Common } from '../../common/localize';
+import { ActivationStrings, Common } from '../../common/localize';
+import * as logging from '../../common/logging';
 import * as persistentState from '../../common/persistentState';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
@@ -59,7 +62,7 @@ suite('TerminalEnvVarInjector', () => {
     let getConfigurationStub: sinon.SinonStub;
     let workspaceFoldersValue: readonly WorkspaceFolder[] | undefined;
 
-    const testWorkspacePath = '/test/workspace';
+    const testWorkspacePath = path.resolve('test', 'workspace');
     const testWorkspaceFolder = createMockWorkspaceFolder(testWorkspacePath, 'test', 0);
 
     setup(() => {
@@ -318,6 +321,8 @@ suite('TerminalEnvVarInjector', () => {
         let envChangeCallback: ((args: { uri?: Uri; changeType: number }) => void) | undefined;
         let mockState: { get: sinon.SinonStub; set: sinon.SinonStub; clear: sinon.SinonStub };
         let showInfoMessageStub: sinon.SinonStub;
+        let updateConfigStub: sinon.SinonStub;
+        let getWorkspaceFileStub: sinon.SinonStub;
 
         setup(() => {
             mockState = {
@@ -327,6 +332,8 @@ suite('TerminalEnvVarInjector', () => {
             };
             sinon.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
             showInfoMessageStub = sinon.stub(windowApis, 'showInformationMessage');
+            updateConfigStub = sinon.stub().resolves();
+            getWorkspaceFileStub = sinon.stub(workspaceApis, 'getWorkspaceFile').returns(undefined);
 
             // Capture the onDidChangeEnvironmentVariables listener
             envVarManager.reset();
@@ -345,7 +352,7 @@ suite('TerminalEnvVarInjector', () => {
             sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(testWorkspaceFolder);
         });
 
-        test('should show notification with Don\'t Show Again button when env file configured but injection disabled', async () => {
+        test('should offer workspace enablement and persistent dismissal when injection is disabled', async () => {
             getConfigurationStub.returns(
                 createMockConfig({ useEnvFile: false, envFilePath: '${workspaceFolder}/.env' }) as WorkspaceConfiguration,
             );
@@ -360,10 +367,87 @@ suite('TerminalEnvVarInjector', () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
 
             assert.ok(showInfoMessageStub.calledOnce, 'Should show notification');
-            assert.ok(
-                showInfoMessageStub.calledWith(sinon.match.string, Common.dontShowAgain),
-                'Should include Don\'t Show Again button',
+            sinon.assert.calledOnceWithExactly(
+                showInfoMessageStub,
+                ActivationStrings.envFileInjectionDisabled,
+                ActivationStrings.enableForWorkspace,
+                Common.dontShowAgain,
             );
+            sinon.assert.notCalled(mockState.set);
+        });
+
+        for (const folderScope of [false, true]) {
+            test(`should enable injection only at ${folderScope ? 'folder' : 'workspace'} scope`, async () => {
+                const config = {
+                    ...createMockConfig({ useEnvFile: false, envFilePath: '${workspaceFolder}/.env' }),
+                    update: updateConfigStub,
+                };
+                getConfigurationStub.returns(config);
+                if (folderScope) {
+                    getWorkspaceFileStub.returns(Uri.file(path.resolve('test.code-workspace')));
+                }
+                showInfoMessageStub.resolves(
+                    folderScope ? ActivationStrings.enableForFolder : ActivationStrings.enableForWorkspace,
+                );
+                injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+                assert.ok(envChangeCallback);
+                envChangeCallback({ uri: testWorkspaceFolder.uri, changeType: 1 });
+                await new Promise<void>((resolve) => setImmediate(resolve));
+
+                sinon.assert.calledOnceWithExactly(
+                    updateConfigStub,
+                    'terminal.useEnvFile',
+                    true,
+                    folderScope ? ConfigurationTarget.WorkspaceFolder : ConfigurationTarget.Workspace,
+                );
+                sinon.assert.calledWith(getConfigurationStub, 'python', testWorkspaceFolder.uri);
+                sinon.assert.calledOnceWithExactly(
+                    showInfoMessageStub,
+                    folderScope
+                        ? ActivationStrings.envFileInjectionDisabledForFolder(testWorkspaceFolder.name)
+                        : ActivationStrings.envFileInjectionDisabled,
+                    folderScope ? ActivationStrings.enableForFolder : ActivationStrings.enableForWorkspace,
+                    Common.dontShowAgain,
+                );
+                sinon.assert.notCalled(mockState.set);
+            });
+        }
+
+        test('should not change settings or repeat the reminder after dismissal, including concurrent events', async () => {
+            getConfigurationStub.returns({
+                ...createMockConfig({ useEnvFile: false, envFilePath: '${workspaceFolder}/.env' }),
+                update: updateConfigStub,
+            });
+            showInfoMessageStub.resolves(undefined);
+            injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            assert.ok(envChangeCallback);
+            envChangeCallback({ uri: testWorkspaceFolder.uri, changeType: 1 });
+            envChangeCallback({ uri: testWorkspaceFolder.uri, changeType: 1 });
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            envChangeCallback({ uri: testWorkspaceFolder.uri, changeType: 1 });
+            await new Promise<void>((resolve) => setImmediate(resolve));
+
+            sinon.assert.calledOnce(showInfoMessageStub);
+            sinon.assert.notCalled(updateConfigStub);
+            sinon.assert.notCalled(mockState.set);
+        });
+
+        test('should log failed setting updates without suppressing future sessions', async () => {
+            const error = new Error('Settings are read-only');
+            const traceErrorStub = sinon.stub(logging, 'traceError');
+            updateConfigStub.rejects(error);
+            getConfigurationStub.returns({
+                ...createMockConfig({ useEnvFile: false, envFilePath: '${workspaceFolder}/.env' }),
+                update: updateConfigStub,
+            });
+            showInfoMessageStub.resolves(ActivationStrings.enableForWorkspace);
+            injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+            assert.ok(envChangeCallback);
+            envChangeCallback({ uri: testWorkspaceFolder.uri, changeType: 1 });
+            await new Promise<void>((resolve) => setImmediate(resolve));
+
+            sinon.assert.calledWith(traceErrorStub, sinon.match.string, error);
+            sinon.assert.notCalled(mockState.set);
         });
 
         test('should not show notification when Don\'t Show Again was previously selected', async () => {

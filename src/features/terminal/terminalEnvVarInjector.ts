@@ -4,6 +4,7 @@
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import {
+    ConfigurationTarget,
     Disposable,
     EnvironmentVariableScope,
     GlobalEnvironmentVariableCollection,
@@ -15,7 +16,7 @@ import { traceError, traceLog, traceVerbose } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
 import { resolveVariables } from '../../common/utils/internalVariables';
 import { showInformationMessage } from '../../common/window.apis';
-import { getConfiguration, getWorkspaceFolder } from '../../common/workspace.apis';
+import { getConfiguration, getWorkspaceFile, getWorkspaceFolder } from '../../common/workspace.apis';
 import { EnvVarManager } from '../execution/envVariableManager';
 
 export const ENV_FILE_NOTIFICATION_DONT_SHOW_KEY = 'python-envs:terminal:ENV_FILE_NOTIFICATION_DONT_SHOW';
@@ -28,6 +29,7 @@ export class TerminalEnvVarInjector implements Disposable {
     private disposables: Disposable[] = [];
     // Track which .env variables we've set for each workspace to avoid clearing shell activation variables
     private envVarKeys: Map<string, Set<string>> = new Map();
+    private envFileNotificationShown = false;
 
     constructor(
         private readonly envVarCollection: GlobalEnvironmentVariableCollection,
@@ -69,8 +71,8 @@ export class TerminalEnvVarInjector implements Disposable {
 
                 // Only show notification when env vars change and we have an env file but injection is disabled
                 if (!useEnvFile && envFilePath) {
-                    this.showEnvFileNotification().catch((error) => {
-                        traceError('Failed to show env file notification:', error);
+                    this.showEnvFileNotification(affectedWorkspace).catch((error) => {
+                        traceError('Failed to handle env file notification:', error);
                     });
                 }
 
@@ -213,17 +215,34 @@ export class TerminalEnvVarInjector implements Disposable {
     }
 
     /**
-     * Show a notification about env file injection being disabled, with a "Don't Show Again" option.
+     * Offer to enable env file injection for the affected workspace folder or suppress future reminders.
      */
-    private async showEnvFileNotification(): Promise<void> {
+    private async showEnvFileNotification(workspaceFolder: WorkspaceFolder): Promise<void> {
+        if (this.envFileNotificationShown) {
+            return;
+        }
+        this.envFileNotificationShown = true;
+
         const state = await getGlobalPersistentState();
         const dontShow = await state.get<boolean>(ENV_FILE_NOTIFICATION_DONT_SHOW_KEY);
         if (dontShow) {
             return;
         }
 
-        const result = await showInformationMessage(ActivationStrings.envFileInjectionDisabled, Common.dontShowAgain);
-        if (result === Common.dontShowAgain) {
+        const isFolderScope = !!getWorkspaceFile();
+        const enable = isFolderScope ? ActivationStrings.enableForFolder : ActivationStrings.enableForWorkspace;
+        const message = isFolderScope
+            ? ActivationStrings.envFileInjectionDisabledForFolder(workspaceFolder.name)
+            : ActivationStrings.envFileInjectionDisabled;
+        const result = await showInformationMessage(message, enable, Common.dontShowAgain);
+        if (result === enable) {
+            const config = getConfiguration('python', workspaceFolder.uri);
+            await config.update(
+                'terminal.useEnvFile',
+                true,
+                isFolderScope ? ConfigurationTarget.WorkspaceFolder : ConfigurationTarget.Workspace,
+            );
+        } else if (result === Common.dontShowAgain) {
             await state.set(ENV_FILE_NOTIFICATION_DONT_SHOW_KEY, true);
             traceLog(`User selected "Don't Show Again" for env file notification`);
         }
