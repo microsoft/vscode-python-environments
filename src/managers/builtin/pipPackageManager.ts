@@ -24,9 +24,8 @@ import {
     PythonEnvironmentApi,
 } from '../../api';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
-import { pickEnvironmentFrom } from '../../common/pickers/environments';
 import { PythonVersion } from '../../common/pythonVersion';
-import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
+import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
@@ -48,54 +47,6 @@ import {
 } from './commands/index';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
-
-function hasSameEnvironmentId(first: PythonEnvironment, second: PythonEnvironment): boolean {
-    return first.envId.managerId === second.envId.managerId && first.envId.id === second.envId.id;
-}
-
-async function offerNonGlobalInstallationEnvironment(
-    api: PythonEnvironmentApi,
-    venv: VenvManager,
-    environment: PythonEnvironment,
-    options: PackageManagementOptions,
-    resolvedInstallPackages: readonly string[],
-): Promise<PythonEnvironment | undefined> {
-    if (options.runHeadless || resolvedInstallPackages.length === 0) {
-        return environment;
-    }
-
-    const globalEnvironments = await api.getEnvironments('global');
-    if (!globalEnvironments.some((globalEnvironment) => hasSameEnvironmentId(environment, globalEnvironment))) {
-        return environment;
-    }
-
-    const createNew = l10n.t('Create New Virtual Environment');
-    const useExisting = l10n.t('Use Existing Virtual Environment');
-    const continueGlobally = l10n.t('Continue Globally');
-    const choice = await showInformationMessage(
-        l10n.t('You are installing packages into a global Python environment. Where would you like to install them?'),
-        createNew,
-        useExisting,
-        continueGlobally,
-    );
-
-    if (choice === createNew) {
-        return venv.create('global', {
-            quickCreate: true,
-        });
-    }
-
-    if (choice === useExisting) {
-        const environments = await api.getEnvironments('all');
-        const virtualEnvironments = environments.filter(
-            (environment) =>
-                !globalEnvironments.some((globalEnvironment) => hasSameEnvironmentId(environment, globalEnvironment)),
-        );
-        return pickEnvironmentFrom(virtualEnvironments);
-    }
-
-    return choice === continueGlobally ? environment : undefined;
-}
 
 export class PipPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -140,25 +91,6 @@ export class PipPackageManager implements PackageManager, Disposable {
             } else {
                 return;
             }
-        }
-
-        const installationEnvironment = await offerNonGlobalInstallationEnvironment(
-            this.api,
-            this.venv,
-            environment,
-            options,
-            toInstall,
-        );
-        if (!installationEnvironment) {
-            return;
-        }
-        if (!hasSameEnvironmentId(installationEnvironment, environment)) {
-            // Call API again to manage packages using the environments' prefered method
-            return await this.api.managePackages(installationEnvironment, {
-                ...options,
-                install: toInstall,
-                uninstall: toUninstall,
-            });
         }
 
         const execute = async (token?: CancellationToken): Promise<void> => {

@@ -30,6 +30,7 @@ import * as persistentState from '../common/persistentState';
 import type { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import type { ProjectCreators } from './creators/projectCreators';
 import type { EnvironmentManagers } from './envManagers';
+import { selectPackageManagementEnvironment } from './nonGlobalPackageInstallationEnvironment';
 import type { PythonProjectManager } from './projectManager';
 import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
@@ -347,11 +348,23 @@ export async function handlePackageUninstall(context: unknown) {
  * Manages package versions by allowing the user to select from available versions or enter a specific version.
  * If available versions can be fetched, a QuickPick is shown. Otherwise, an InputBox is used for free-text version entry.
  */
-export async function managePackageVersion(context: unknown) {
+export async function managePackageVersion(context: unknown, api: PythonEnvironmentApi, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const pkg = context.pkg;
-        const environment = context.parent.environment;
-        const packageManager = context.manager;
+        const originalEnvironment = context.parent.environment;
+        const environment = await selectPackageManagementEnvironment(api, em, originalEnvironment, {
+            install: [pkg.name],
+        });
+        if (!environment) {
+            return;
+        }
+        const isOriginalEnvironment =
+            environment.envId.managerId === originalEnvironment.envId.managerId &&
+            environment.envId.id === originalEnvironment.envId.id;
+        const packageManager = isOriginalEnvironment ? context.manager : em.getPackageManager(environment);
+        if (!packageManager) {
+            throw new Error(l10n.t('No package manager found for the selected environment.'));
+        }
 
         if (pkg.isTransitive) {
             const confirm = await showInformationMessage(
@@ -420,7 +433,7 @@ export async function managePackageVersion(context: unknown) {
             version = inputVersion?.trim();
         }
 
-        if (version === undefined || version === pkg.version) {
+        if (version === undefined || (isOriginalEnvironment && version === pkg.version)) {
             return;
         }
 

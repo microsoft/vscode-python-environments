@@ -1,14 +1,13 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventEmitter, Uri } from 'vscode';
-import {
-    PythonEnvironment,
-    PythonProject,
-} from '../api';
+import { PythonEnvironment, PythonProject } from '../api';
+import * as environmentPickers from '../common/pickers/environments';
+import * as windowApis from '../common/window.apis';
 import * as managerReady from '../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
 import type { PythonProjectManager } from '../features/projectManager';
-import type { InternalPackageManager } from '../managers/common/registeredManagers';
+import type { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 
 suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
     test('fires event with correct added and removed projects', () => {
@@ -173,6 +172,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
 suite('PythonEnvironmentApiImpl - package resolution', () => {
     setup(() => {
         sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
+        sinon.stub(managerReady, 'waitForAllEnvManagers').resolves();
     });
 
     teardown(() => {
@@ -181,13 +181,17 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
 
     function createApi(manager: InternalPackageManager | undefined): {
         api: PythonEnvironmentApiImpl;
+        getEnvironmentManager: sinon.SinonStub;
         getPackageManager: sinon.SinonStub;
     } {
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
+        const getEnvironmentManager = sinon.stub();
         const getPackageManager = sinon.stub().returns(manager);
         const envManagers = {
             onDidChangeActiveEnvironment: new EventEmitter().event,
             onDidChangePackageProviderPackages: new EventEmitter().event,
+            managers: [],
+            getEnvironmentManager,
             getPackageManager,
         } as unknown as ApiArgs[0];
         const projectManager = {
@@ -202,6 +206,7 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
                 {} as ApiArgs[3],
                 { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4],
             ),
+            getEnvironmentManager,
             getPackageManager,
         };
     }
@@ -239,5 +244,88 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
 
         assert.ok(getPackageManager.calledWithExactly(environment));
         assert.ok(manage.calledOnceWithExactly(environment, { install: ['example'] }));
+    });
+
+    test('creates a virtual environment and delegates package management to its manager', async () => {
+        const createdEnvironment = {
+            envId: { id: 'created', managerId: 'ms-python.python:venv' },
+        } as PythonEnvironment;
+        const manage = sinon.stub().resolves();
+        const create = sinon.stub().resolves(createdEnvironment);
+        const manager = { manage } as unknown as InternalPackageManager;
+        const { api, getEnvironmentManager, getPackageManager } = createApi(manager);
+        sinon.stub(api, 'getEnvironments').withArgs('global').resolves([environment]);
+        getEnvironmentManager
+            .withArgs('ms-python.python:venv')
+            .returns({ supportsCreate: true, create } as unknown as InternalEnvironmentManager);
+        sinon.stub(windowApis, 'showInformationMessage').resolves('Create New Virtual Environment');
+
+        await api.managePackages(environment, { install: ['example'] });
+
+        assert.ok(create.calledOnceWithExactly('global', { quickCreate: true }));
+        assert.ok(getPackageManager.calledWithExactly(createdEnvironment));
+        assert.ok(manage.calledOnceWithExactly(createdEnvironment, { install: ['example'] }));
+    });
+
+    test('delegates package management to a selected existing virtual environment', async () => {
+        const selectedEnvironment = {
+            envId: { id: 'selected', managerId: 'ms-python.python:venv' },
+        } as PythonEnvironment;
+        const manage = sinon.stub().resolves();
+        const manager = { manage } as unknown as InternalPackageManager;
+        const { api, getPackageManager } = createApi(manager);
+        const getEnvironments = sinon.stub(api, 'getEnvironments');
+        getEnvironments.withArgs('global').resolves([environment]);
+        getEnvironments.withArgs('all').resolves([environment, selectedEnvironment]);
+        sinon.stub(windowApis, 'showInformationMessage').resolves('Use Existing Virtual Environment');
+        const pickEnvironment = sinon
+            .stub(environmentPickers, 'pickEnvironmentFrom')
+            .resolves(selectedEnvironment);
+
+        await api.managePackages(environment, { install: ['example'] });
+
+        assert.ok(pickEnvironment.calledOnceWithExactly([selectedEnvironment]));
+        assert.ok(getPackageManager.calledWithExactly(selectedEnvironment));
+        assert.ok(manage.calledOnceWithExactly(selectedEnvironment, { install: ['example'] }));
+    });
+
+    test('continues with the global environment when requested', async () => {
+        const manage = sinon.stub().resolves();
+        const manager = { manage } as unknown as InternalPackageManager;
+        const { api } = createApi(manager);
+        sinon.stub(api, 'getEnvironments').withArgs('global').resolves([environment]);
+        sinon.stub(windowApis, 'showInformationMessage').resolves('Continue Globally');
+
+        await api.managePackages(environment, { install: ['example'] });
+
+        assert.ok(manage.calledOnceWithExactly(environment, { install: ['example'] }));
+    });
+
+    test('cancels package management when the global environment prompt is dismissed', async () => {
+        const manage = sinon.stub().resolves();
+        const manager = { manage } as unknown as InternalPackageManager;
+        const { api, getPackageManager } = createApi(manager);
+        sinon.stub(api, 'getEnvironments').withArgs('global').resolves([environment]);
+        sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
+
+        await api.managePackages(environment, { install: ['example'] });
+
+        assert.ok(getPackageManager.notCalled);
+        assert.ok(manage.notCalled);
+    });
+
+    test('does not prompt for headless or uninstall-only package management', async () => {
+        const manage = sinon.stub().resolves();
+        const manager = { manage } as unknown as InternalPackageManager;
+        const { api } = createApi(manager);
+        const getEnvironments = sinon.stub(api, 'getEnvironments');
+        const showInformationMessage = sinon.stub(windowApis, 'showInformationMessage');
+
+        await api.managePackages(environment, { install: ['example'], runHeadless: true });
+        await api.managePackages(environment, { uninstall: ['example'] });
+
+        assert.ok(getEnvironments.notCalled);
+        assert.ok(showInformationMessage.notCalled);
+        assert.strictEqual(manage.callCount, 2);
     });
 });
