@@ -4,6 +4,7 @@ import * as sinon from 'sinon';
 import * as typmoq from 'typemoq';
 import { Uri, WorkspaceFolder } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../../api';
+import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../../common/constants';
 import { timeout } from '../../../common/utils/asyncUtils';
 import { createDeferred } from '../../../common/utils/deferred';
 import * as winapi from '../../../common/window.apis';
@@ -279,14 +280,15 @@ suite('Auto Find Project tests', () => {
         });
     });
     suite('Selected environment sysPrefix exclusion', () => {
-        const root = Uri.file('/usr/home/root').fsPath;
-        const root2 = Uri.file('/usr/home/root2').fsPath;
+        const root = Uri.file(path.join(path.parse(process.cwd()).root, 'usr', 'home', 'root')).fsPath;
+        const root2 = Uri.file(path.join(path.parse(process.cwd()).root, 'usr', 'home', 'root2')).fsPath;
+        const broadPrefix = Uri.file(path.join(path.parse(root).root, 'usr')).fsPath;
 
         function folder(fsPath: string, index: number): WorkspaceFolder {
             return { uri: Uri.file(fsPath), name: path.basename(fsPath), index };
         }
 
-        function setupEnvironments(prefixes: Map<string, string | undefined | Error>): void {
+        function setupEnvironments(prefixes: Map<string, string | undefined | Error>, managerId = VENV_MANAGER_ID): void {
             getWorkspaceFoldersStub.returns(Array.from(prefixes.keys()).map((p, i) => folder(p, i)));
             envManagers
                 .setup((em) => em.getEnvironment(typmoq.It.isAny()))
@@ -295,7 +297,9 @@ suite('Auto Find Project tests', () => {
                     if (value instanceof Error) {
                         throw value;
                     }
-                    return value === undefined ? undefined : ({ sysPrefix: value } as PythonEnvironment);
+                    return value === undefined
+                        ? undefined
+                        : ({ sysPrefix: value, envId: { id: value, managerId } } as PythonEnvironment);
                 });
         }
 
@@ -324,6 +328,34 @@ suite('Auto Find Project tests', () => {
             assert.deepStrictEqual(items.map((i) => i.label).sort(), ['app', 'custom-env-project']);
         });
 
+        test('Keeps workspace projects when the selected system Python prefix contains the workspace', async () => {
+            setupEnvironments(
+                new Map([[root, broadPrefix], [root2, path.join(root2, 'embedded-python')]]),
+                SYSTEM_MANAGER_ID,
+            );
+            findFilesStub.resolves([
+                Uri.file(path.join(root, 'pyproject.toml')),
+                Uri.file(path.join(root, 'app', 'setup.py')),
+                Uri.file(path.join(root2, 'embedded-python', 'setup.py')),
+            ]);
+            projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+            const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+            assert.deepStrictEqual(names(await autoFindProjects.create()), ['app', 'embedded-python', path.basename(root)]);
+        });
+
+        test('Keeps workspace projects when a selected prefix contains or equals the workspace', async () => {
+            setupEnvironments(new Map([[root, broadPrefix], [root2, root2]]));
+            findFilesStub.resolves([
+                Uri.file(path.join(root, 'app', 'pyproject.toml')),
+                Uri.file(path.join(root2, 'setup.py')),
+            ]);
+            projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+            const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+            assert.deepStrictEqual(names(await autoFindProjects.create()), ['app', path.basename(root2)]);
+        });
+
         test('Applies each workspace folder selected environment prefix independently', async () => {
             const env1 = path.join(root, 'env-one');
             const env2 = path.join(root2, 'env-two');
@@ -349,7 +381,7 @@ suite('Auto Find Project tests', () => {
         });
 
         test('Missing, relative, or failed environment lookups preserve existing behavior', async () => {
-            const root3 = Uri.file('/usr/home/root3').fsPath;
+            const root3 = Uri.file(path.join(path.parse(root).root, 'usr', 'home', 'root3')).fsPath;
             setupEnvironments(
                 new Map<string, string | undefined | Error>([
                     [root, undefined],

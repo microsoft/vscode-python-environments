@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { Uri } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
+import { SYSTEM_MANAGER_ID } from '../../common/constants';
 import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo, traceWarn } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
@@ -67,15 +68,22 @@ export class AutoFindProjects implements PythonProjectCreator {
     ) {}
 
     /**
-     * Returns the `sysPrefix` of the environment selected for each open workspace folder.
-     * Only non-empty absolute prefixes are returned; lookup failures are logged and skipped.
+     * Returns workspace-local prefixes of selected non-system environments.
+     * Lookup failures are logged and skipped.
      */
     private async getSelectedEnvironmentPrefixes(): Promise<string[]> {
         const prefixes = await Promise.all(
             (getWorkspaceFolders() ?? []).map(async (folder) => {
                 try {
-                    const prefix = (await this.envManagers.getEnvironment(folder.uri))?.sysPrefix;
-                    return prefix && path.isAbsolute(prefix) ? prefix : undefined;
+                    const environment = await this.envManagers.getEnvironment(folder.uri);
+                    const prefix = environment?.sysPrefix;
+                    return environment?.envId.managerId !== SYSTEM_MANAGER_ID &&
+                        prefix &&
+                        path.isAbsolute(prefix) &&
+                        isSameOrParentPath(folder.uri.fsPath, prefix) &&
+                        !isSameOrParentPath(prefix, folder.uri.fsPath)
+                        ? prefix
+                        : undefined;
                 } catch (ex) {
                     traceWarn(`Auto Find: failed to get environment for ${folder.uri.fsPath}`, ex);
                     return undefined;
