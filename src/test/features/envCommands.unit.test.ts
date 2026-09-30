@@ -14,6 +14,7 @@ import {
     clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
+    handlePackageUninstall,
     removeEnvironmentCommand,
     removePythonProject,
     revealEnvInManagerView,
@@ -26,10 +27,15 @@ import * as shellProviders from '../../features/terminal/shells/providers';
 import { ShellStartupScriptProvider } from '../../features/terminal/shells/startupProvider';
 import { TerminalManager } from '../../features/terminal/terminalManager';
 import { EnvManagerView } from '../../features/views/envManagersView';
-import { ProjectEnvironment, ProjectItem } from '../../features/views/treeViewItems';
+import {
+    PackageTreeItem,
+    ProjectEnvironment,
+    ProjectItem,
+    type PythonEnvTreeItem,
+} from '../../features/views/treeViewItems';
 import type { EnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
-import { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
+import { InternalEnvironmentManager, InternalPackageManager } from '../../managers/common/registeredManagers';
 import { setupNonThenable } from '../mocks/helper';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
@@ -638,5 +644,39 @@ suite('Run In Terminal Command Tests', () => {
 
         sinon.assert.notCalled(getDedicatedTerminal);
         sinon.assert.notCalled(runInTerminalStub);
+    });
+});
+
+suite('Package command manager ownership', () => {
+    test('uninstalls with the manager attached to the package item', async () => {
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), 'package-environment'),
+            managerId: 'test:environment-manager',
+        });
+        const manage = sinon.stub().resolves();
+        const packageManager = new InternalPackageManager('test:package-manager', {
+            name: 'package-manager',
+            manage,
+            refresh: async () => undefined,
+            getPackages: async () => undefined,
+        });
+        const environmentItem = { environment } as PythonEnvTreeItem;
+        const packageItem = new PackageTreeItem(
+            {
+                name: 'requests',
+                displayName: 'requests',
+                pkgId: {
+                    id: 'requests',
+                    managerId: packageManager.id,
+                    environmentId: environment.envId.id,
+                },
+            },
+            environmentItem,
+            packageManager,
+        );
+
+        await handlePackageUninstall(packageItem);
+
+        assert.ok(manage.calledOnceWithExactly(environment, { uninstall: ['requests'], install: [] }));
     });
 });
