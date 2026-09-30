@@ -13,7 +13,8 @@ import { PythonEnvironment } from '../../api';
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidChangeConfiguration } from '../../common/workspace.apis';
-import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../envManagers';
+import type { PythonProjectManager } from '../projectManager';
 import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     GlobalProjectItem,
@@ -63,6 +64,9 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
                 this.debouncedUpdateProject.trigger();
             }),
             this.envManagers.onDidChangeEnvironments(() => {
+                this.debouncedUpdateProject.trigger();
+            }),
+            this.envManagers.onDidChangeProjectPackageManager(() => {
                 this.debouncedUpdateProject.trigger();
             }),
             this.envManagers.onDidChangePackages((e) => {
@@ -237,14 +241,15 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             const environmentItem = element as ProjectEnvironment;
             const parent = environmentItem.parent;
             const uri = parent.id === 'global' ? undefined : parent.project.uri;
-            const pkgManager = this.envManagers.getPackageManager(uri);
             const environment = environmentItem.environment;
+            const pkgManager = this.envManagers.getPackageManager(uri ?? environment);
 
             if (!pkgManager) {
                 return [new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackageManager)];
             }
 
-            let packages = await pkgManager.refresh(environment);
+            await pkgManager.refresh(environment);
+            const packages = await pkgManager.getPackages(environment);
             if (!packages) {
                 return [new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackages)];
             }
@@ -252,7 +257,9 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             // Store the reference for refreshing packages
             this.packageRoots.set(uri ? uri.fsPath : 'global', environmentItem);
 
-            return packages.map((p) => new ProjectPackage(environmentItem, p, pkgManager));
+            return packages
+                .sort((a, b) => (a.isTransitive === b.isTransitive ? 0 : a.isTransitive ? 1 : -1))
+                .map((p) => new ProjectPackage(environmentItem, p, pkgManager));
         }
 
         //return nothing if the element is not a project, environment, or undefined

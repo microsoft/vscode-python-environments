@@ -1,11 +1,16 @@
 import * as path from 'path';
-import { Uri } from 'vscode';
+import { Uri, WorkspaceFolder } from 'vscode';
 import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
 import { ProjectCreatorString } from '../../common/localize';
-import { traceInfo } from '../../common/logging';
+import { traceInfo, traceWarn } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
-import { findFiles } from '../../common/workspace.apis';
-import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
+import { findFiles, getWorkspaceFolders } from '../../common/workspace.apis';
+import type { EnvironmentManagers } from '../envManagers';
+import {
+    PythonProjectManager,
+    PythonProjectsImpl,
+} from '../projectManager';
+import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
 
 function getUniqueUri(uris: Uri[]): {
     label: string;
@@ -56,10 +61,52 @@ export class AutoFindProjects implements PythonProjectCreator {
 
     supportsQuickCreate = true;
 
-    constructor(private readonly pm: PythonProjectManager) {}
+    constructor(
+        private readonly pm: PythonProjectManager,
+        private readonly envManagers: EnvironmentManagers,
+    ) {}
+
+    /**
+     * Returns selected environment prefixes inside an open workspace folder.
+     * Lookup failures are logged and skipped.
+     */
+    private async getSelectedEnvironmentPrefixes(folders: readonly WorkspaceFolder[]): Promise<string[]> {
+        const prefixes = await Promise.all(
+            folders.map(async (folder) => {
+                try {
+                    const environment = await this.envManagers.getEnvironment(folder.uri);
+                    const prefix = environment?.sysPrefix;
+                    return prefix &&
+                        path.isAbsolute(prefix) &&
+                        folders.some((workspaceFolder) => isSameOrParentPath(workspaceFolder.uri.fsPath, prefix))
+                        ? prefix
+                        : undefined;
+                } catch (ex) {
+                    traceWarn(`Auto Find: failed to get environment for ${folder.uri.fsPath}`, ex);
+                    return undefined;
+                }
+            }),
+        );
+        return prefixes.filter((prefix): prefix is string => !!prefix);
+    }
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
-        const files = await findFiles('**/{pyproject.toml,setup.py}', '**/.venv/**');
+        const found = await findFiles('**/{pyproject.toml,setup.py}', '**/.venv/**');
+        // Exclude markers inside selected environments (e.g. installed packages in a custom-named venv).
+        const folders = found && found.length > 0 ? getWorkspaceFolders() ?? [] : [];
+        const prefixes = await this.getSelectedEnvironmentPrefixes(folders);
+        const files = found?.filter(
+            (uri) =>
+                !prefixes.some(
+                    (prefix) =>
+                        isSameOrParentPath(prefix, uri.fsPath) &&
+                        !folders.some(
+                            (folder) =>
+                                isSameOrParentPath(prefix, folder.uri.fsPath) &&
+                                isSameOrParentPath(folder.uri.fsPath, uri.fsPath),
+                        ),
+                ),
+        );
         if (!files || files.length === 0) {
             setImmediate(() => {
                 showErrorMessage('No projects found');
@@ -73,8 +120,8 @@ export class AutoFindProjects implements PythonProjectCreator {
                 // Skip this project if:
                 // 1. There's already a project registered with exactly the same path
                 // 2. There's already a project registered with this project's parent directory path
-                const np = path.normalize(p.uri.fsPath);
-                const nf = path.normalize(uri.fsPath);
+                const np = normalizePath(p.uri.fsPath);
+                const nf = normalizePath(uri.fsPath);
                 const nfp = path.dirname(nf);
                 return np !== nf && np !== nfp;
             }

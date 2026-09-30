@@ -5,7 +5,7 @@ import { Disposable } from 'vscode-jsonrpc';
 import { DidChangeEnvironmentVariablesEventArgs, PythonEnvironmentVariablesApi } from '../../api';
 import { resolveVariables } from '../../common/utils/internalVariables';
 import { createFileSystemWatcher, getConfiguration } from '../../common/workspace.apis';
-import { PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../projectManager';
 import { mergeEnvVariables, parseEnvFile } from './envVarUtils';
 
 export interface EnvVarManager extends PythonEnvironmentVariablesApi, Disposable {}

@@ -1,10 +1,11 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Extension, extensions } from 'vscode';
 
-export function getExtension<T = any>(extensionId: string): Extension<T> | undefined {
-    return extensions.getExtension(extensionId);
+/** Looks up an extension by ID; callers specify its exported API type when needed. */
+export function getExtension<T = unknown>(extensionId: string): Extension<T> | undefined {
+    return extensions.getExtension<T>(extensionId);
 }
 
-export function allExtensions(): readonly Extension<any>[] {
+/** Returns installed extensions without assuming a shared exported API type. */
+export function allExtensions(): readonly Extension<unknown>[] {
     return extensions.all;
 }

@@ -7,6 +7,7 @@ import { identifyTerminalShell } from '../common/shellDetector';
 import { quoteArgs } from '../execution/execUtils';
 import { normalizeShellPath } from './shells/common/shellUtils';
 import { traceLog } from '../../common/logging';
+import { waitForShellIntegration } from './utils';
 
 export async function runInTerminal(
     environment: PythonEnvironment,
@@ -25,6 +26,9 @@ export async function runInTerminal(
     // Normalize executable path for Git Bash on Windows
     if (shellType === ShellConstants.GITBASH) {
         executable = normalizeShellPath(executable, shellType);
+    }
+    if (!terminal.shellIntegration) {
+        await waitForShellIntegration(terminal);
     }
     if (terminal.shellIntegration) {
         let execution: TerminalShellExecution | undefined;

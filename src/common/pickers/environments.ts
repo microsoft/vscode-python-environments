@@ -1,6 +1,6 @@
 import { ProgressLocation, QuickInputButtons, QuickPickItem, QuickPickItemKind, ThemeIcon, Uri, l10n } from 'vscode';
 import { CreateEnvironmentOptions, IconPath, PythonEnvironment, PythonProject } from '../../api';
-import { InternalEnvironmentManager } from '../../internal.api';
+import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { Common, Interpreter, Pickers } from '../localize';
 import { traceError } from '../logging';
 import { EventNames } from '../telemetry/constants';
@@ -14,6 +14,7 @@ import {
     showQuickPickWithButtons,
     withProgress,
 } from '../window.apis';
+import { getWorkspaceFolders } from '../workspace.apis';
 import { pickEnvironmentManager } from './managers';
 
 type QuickPickIcon =
@@ -157,15 +158,20 @@ export async function pickEnvironment(
             label: Interpreter.browsePath,
             iconPath: new ThemeIcon('folder'),
         },
-        {
-            label: '',
-            kind: QuickPickItemKind.Separator,
-        },
-        {
-            label: Interpreter.createVirtualEnvironment,
-            iconPath: new ThemeIcon('add'),
-        },
     ];
+
+    if (getWorkspaceFolders()?.length) {
+        items.push(
+            {
+                label: '',
+                kind: QuickPickItemKind.Separator,
+            },
+            {
+                label: Interpreter.createVirtualEnvironment,
+                iconPath: new ThemeIcon('add'),
+            },
+        );
+    }
 
     if (options?.recommended) {
         const pathDescription = options.recommended.displayPath;

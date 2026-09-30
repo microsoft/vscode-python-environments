@@ -2,9 +2,8 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
-    "version": "1.37.0",
+    "version": "1.39.0",
     "publisher": "ms-python",
-    "preview": true,
     "engines": {
         "vscode": "^1.110.0-20260204"
     },
@@ -138,6 +137,12 @@
                     "description": "%python-envs.alwaysUseUv.description%",
                     "default": true,
                     "scope": "machine"
+                },
+                "python-envs.packageWatchers": {
+                    "type": "boolean",
+                    "description": "%python-envs.packageWatchers.description%",
+                    "default": true,
+                    "scope": "machine"
                 }
             }
         },
@@ -239,6 +244,18 @@
                 "title": "%python-envs.clearCache.title%",
                 "category": "Python",
                 "icon": "$(trash)"
+            },
+            {
+                "command": "python-envs.clearScriptEnvCache",
+                "title": "%python-envs.clearScriptEnvCache.title%",
+                "category": "Python Envs",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "python-envs.setupInlineScriptEnvs",
+                "title": "%python-envs.setupInlineScriptEnvs.title%",
+                "category": "Python Envs",
+                "icon": "$(tools)"
             },
             {
                 "command": "python-envs.runInTerminal",
@@ -410,6 +427,14 @@
                     "when": "config.python.useEnvironmentsExtension != false"
                 },
                 {
+                    "command": "python-envs.clearScriptEnvCache",
+                    "when": "pythonEnvsInlineScriptsEnabled"
+                },
+                {
+                    "command": "python-envs.setupInlineScriptEnvs",
+                    "when": "pythonEnvsInlineScriptsEnabled"
+                },
+                {
                     "command": "python-envs.terminal.activate",
                     "when": "pythonTerminalActivation"
                 },
@@ -498,7 +523,7 @@
                 {
                     "command": "python-envs.packages",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                    "when": "view == env-managers && viewItem =~ /;managePackages;/"
                 },
                 {
                     "command": "python-envs.copyEnvPath",
@@ -718,7 +743,7 @@
         "@types/which": "^3.0.4",
         "@typescript-eslint/eslint-plugin": "^8.16.0",
         "@typescript-eslint/parser": "^8.16.0",
-        "@vscode/test-electron": "^2.5.2",
+        "@vscode/test-electron": "^3.1.0",
         "@vscode/vsce": "^3.9.2",
         "eslint": "^9.15.0",
         "glob": "^8.1.0",

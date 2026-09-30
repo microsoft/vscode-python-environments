@@ -6,7 +6,7 @@ import * as sinon from 'sinon';
 import { CancellationTokenSource, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { handlePythonPath } from '../../common/utils/pythonPath';
-import { InternalEnvironmentManager } from '../../internal.api';
+import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 
 function createMockManager(
     id: string,

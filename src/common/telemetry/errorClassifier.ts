@@ -13,9 +13,19 @@ export type DiscoveryErrorType =
     | 'command_failed'
     | 'connection_error'
     | 'rpc_error'
+    | 'rpc_timeout'
+    | 'rpc_configure_timeout'
+    | 'rpc_refresh_timeout'
+    | 'rpc_resolve_timeout'
     | 'process_crash'
     | 'already_registered'
     | 'unknown';
+
+/** Returns true for spawn and JSON-RPC timeout telemetry categories. */
+export function isTimeoutErrorType(errorType: DiscoveryErrorType): boolean {
+    return errorType === 'spawn_timeout' || errorType === 'rpc_timeout' ||
+        (errorType.startsWith('rpc_') && errorType.endsWith('_timeout'));
+}
 
 /**
  * Classifies an error into a telemetry-safe category for the `errorType` property.
@@ -27,7 +37,16 @@ export function classifyError(ex: unknown): DiscoveryErrorType {
     }
 
     if (ex instanceof RpcTimeoutError) {
-        return 'spawn_timeout';
+        switch (ex.method) {
+            case 'configure':
+                return 'rpc_configure_timeout';
+            case 'refresh':
+                return 'rpc_refresh_timeout';
+            case 'resolve':
+                return 'rpc_resolve_timeout';
+            default:
+                return 'rpc_timeout';
+        }
     }
 
     // JSON-RPC connection errors (e.g., PET process died mid-request, connection closed/disposed)

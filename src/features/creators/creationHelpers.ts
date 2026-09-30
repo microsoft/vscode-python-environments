@@ -4,7 +4,8 @@ import { extensions, l10n, QuickInputButtons, Uri, window } from 'vscode';
 import { CreateEnvironmentOptions } from '../../api';
 import { traceError, traceVerbose } from '../../common/logging';
 import { showQuickPickWithButtons } from '../../common/window.apis';
-import { EnvironmentManagers, InternalEnvironmentManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../envManagers';
+import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 
 /**
  * Prompts the user to choose whether to create a new virtual environment (venv) for a project, with a clearer return and early exit.

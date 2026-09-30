@@ -118,6 +118,133 @@ suite('Conda Utils - windowsExceptionGenerateConfig', () => {
         });
     });
 
+    suite('Git Bash activation when `conda init bash` was detected (#1370)', () => {
+        test('Skips `source conda.sh` and emits only `conda activate <prefix>` when shellInitStatus.bash is true', async () => {
+            getCondaHookPs1PathStub.resolves('C:\\conda\\shell\\condabin\\conda-hook.ps1');
+            const sourceInitPath = 'C:\\conda\\Scripts\\activate.bat';
+            const prefix = 'myenv';
+            const condaFolder = 'C:\\conda';
+            const condaShPath = 'C:\\conda\\etc\\profile.d\\conda.sh';
+
+            const result = await windowsExceptionGenerateConfig(sourceInitPath, prefix, condaFolder, condaShPath, {
+                bash: true,
+            });
+
+            const gitBashActivation = result.shellActivation.get(ShellConstants.GITBASH);
+            assert.ok(gitBashActivation, 'Git Bash activation should be defined');
+            assert.strictEqual(
+                gitBashActivation.length,
+                1,
+                'Should have a single `conda activate` command when conda init bash is detected',
+            );
+            assert.strictEqual(gitBashActivation[0].executable, 'conda');
+            assert.deepStrictEqual(gitBashActivation[0].args, ['activate', 'myenv']);
+        });
+
+        test('Skips `source conda.sh` even when condaShPath is not provided', async () => {
+            getCondaHookPs1PathStub.resolves(undefined);
+            const sourceInitPath = 'C:\\conda\\Scripts\\activate.bat';
+            const prefix = 'myenv';
+            const condaFolder = 'C:\\conda';
+
+            const result = await windowsExceptionGenerateConfig(sourceInitPath, prefix, condaFolder, undefined, {
+                bash: true,
+            });
+
+            const gitBashActivation = result.shellActivation.get(ShellConstants.GITBASH);
+            assert.ok(gitBashActivation, 'Git Bash activation should be defined');
+            assert.strictEqual(gitBashActivation.length, 1);
+            assert.strictEqual(gitBashActivation[0].executable, 'conda');
+            assert.deepStrictEqual(gitBashActivation[0].args, ['activate', 'myenv']);
+        });
+
+        test('Quotes prefix paths that contain spaces', async () => {
+            getCondaHookPs1PathStub.resolves(undefined);
+            const prefixWithSpaces = 'C:\\Users\\John Doe\\envs\\myenv';
+
+            const result = await windowsExceptionGenerateConfig(
+                'C:\\conda\\Scripts\\activate.bat',
+                prefixWithSpaces,
+                'C:\\conda',
+                'C:\\conda\\etc\\profile.d\\conda.sh',
+                { bash: true },
+            );
+
+            const gitBashActivation = result.shellActivation.get(ShellConstants.GITBASH);
+            assert.ok(gitBashActivation);
+            assert.strictEqual(gitBashActivation.length, 1);
+            assert.strictEqual(gitBashActivation[0].executable, 'conda');
+            assert.ok(gitBashActivation[0].args, 'args should be defined');
+            assert.strictEqual(gitBashActivation[0].args[0], 'activate');
+            assert.ok(
+                gitBashActivation[0].args[1].startsWith('"') && gitBashActivation[0].args[1].endsWith('"'),
+                'prefix containing spaces should be quoted',
+            );
+        });
+
+        test('Still emits `source conda.sh + conda activate` when shellInitStatus.bash is false', async () => {
+            getCondaHookPs1PathStub.resolves(undefined);
+            const condaShPath = 'C:\\conda\\etc\\profile.d\\conda.sh';
+
+            const result = await windowsExceptionGenerateConfig(
+                'C:\\conda\\Scripts\\activate.bat',
+                'myenv',
+                'C:\\conda',
+                condaShPath,
+                { bash: false },
+            );
+
+            const gitBashActivation = result.shellActivation.get(ShellConstants.GITBASH);
+            assert.ok(gitBashActivation);
+            assert.strictEqual(gitBashActivation.length, 2);
+            assert.strictEqual(gitBashActivation[0].executable, 'source');
+            assert.strictEqual(gitBashActivation[1].executable, 'conda');
+        });
+
+        test('Still emits `source conda.sh + conda activate` when shellInitStatus is undefined', async () => {
+            getCondaHookPs1PathStub.resolves(undefined);
+            const condaShPath = 'C:\\conda\\etc\\profile.d\\conda.sh';
+
+            const result = await windowsExceptionGenerateConfig(
+                'C:\\conda\\Scripts\\activate.bat',
+                'myenv',
+                'C:\\conda',
+                condaShPath,
+            );
+
+            const gitBashActivation = result.shellActivation.get(ShellConstants.GITBASH);
+            assert.ok(gitBashActivation);
+            assert.strictEqual(gitBashActivation.length, 2);
+            assert.strictEqual(gitBashActivation[0].executable, 'source');
+            assert.strictEqual(gitBashActivation[1].executable, 'conda');
+        });
+
+        test('Does not affect PowerShell or CMD activation when shellInitStatus.bash is true', async () => {
+            getCondaHookPs1PathStub.resolves('C:\\conda\\shell\\condabin\\conda-hook.ps1');
+            const sourceInitPath = 'C:\\conda\\Scripts\\activate.bat';
+
+            const result = await windowsExceptionGenerateConfig(
+                sourceInitPath,
+                'myenv',
+                'C:\\conda',
+                'C:\\conda\\etc\\profile.d\\conda.sh',
+                { bash: true },
+            );
+
+            const pwshActivation = result.shellActivation.get(ShellConstants.PWSH);
+            assert.ok(pwshActivation);
+            assert.strictEqual(pwshActivation.length, 2);
+            assert.strictEqual(pwshActivation[0].executable, 'C:\\conda\\shell\\condabin\\conda-hook.ps1');
+            assert.strictEqual(pwshActivation[1].executable, 'conda');
+
+            const cmdActivation = result.shellActivation.get(ShellConstants.CMD);
+            assert.ok(cmdActivation);
+            assert.strictEqual(cmdActivation.length, 2);
+            assert.strictEqual(cmdActivation[0].executable, sourceInitPath);
+            assert.strictEqual(cmdActivation[1].executable, 'conda');
+        });
+    });
+
     suite('PowerShell activation', () => {
         test('Uses ps1 hook when available', async () => {
             // Arrange

@@ -282,13 +282,13 @@ suite('Integration: Package Management', function () {
         try {
             if (wasInstalled) {
                 // Uninstall first
-                await api.managePackages(targetEnv, { uninstall: [testPackage] });
+                await api.managePackages(targetEnv, { uninstall: [testPackage], runHeadless: true });
                 packageInstalled = false;
                 await sleep(2000);
             }
 
             // Install package
-            await api.managePackages(targetEnv, { install: [testPackage] });
+            await api.managePackages(targetEnv, { install: [testPackage], runHeadless: true });
             packageInstalled = true;
 
             // Refresh and verify
@@ -299,7 +299,7 @@ suite('Integration: Package Management', function () {
             assert.ok(isNowInstalled, `${testPackage} should be installed after managePackages install`);
 
             // Uninstall
-            await api.managePackages(targetEnv, { uninstall: [testPackage] });
+            await api.managePackages(targetEnv, { uninstall: [testPackage], runHeadless: true });
             packageInstalled = false;
 
             // Refresh and verify
@@ -312,7 +312,7 @@ suite('Integration: Package Management', function () {
             // Ensure cleanup even if assertions fail
             if (packageInstalled) {
                 try {
-                    await api.managePackages(targetEnv, { uninstall: [testPackage] });
+                    await api.managePackages(targetEnv, { uninstall: [testPackage], runHeadless: true });
                 } catch {
                     console.log('Cleanup: failed to uninstall test package');
                 }

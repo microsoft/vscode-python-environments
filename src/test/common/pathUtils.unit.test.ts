@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
-import { getResourceUri, normalizePath } from '../../common/utils/pathUtils';
+import { getResourceUri, isWindowsReservedDeviceName, normalizePath } from '../../common/utils/pathUtils';
 import * as utils from '../../common/utils/platformUtils';
 
 suite('Path Utilities', () => {
@@ -126,6 +126,42 @@ suite('Path Utilities', () => {
             const result = normalizePath(testPath);
 
             assert.strictEqual(result, 'C:/Path/To/File.txt');
+        });
+    });
+
+    suite('isWindowsReservedDeviceName', () => {
+        let isWindowsStub: sinon.SinonStub;
+
+        setup(() => {
+            isWindowsStub = sinon.stub(utils, 'isWindows');
+        });
+
+        teardown(() => {
+            sinon.restore();
+        });
+
+        test('flags reserved device names on Windows regardless of extension', () => {
+            isWindowsStub.returns(true);
+
+            for (const name of ['CON', 'prn', 'aux', 'nul', 'com1', 'LPT9', 'con.py', 'nul.foo']) {
+                assert.strictEqual(isWindowsReservedDeviceName(name), true, `${name} should be reserved`);
+            }
+        });
+
+        test('allows names that only resemble reserved device names on Windows', () => {
+            isWindowsStub.returns(true);
+
+            for (const name of ['console', 'com10', 'lpt0', 'printer', 'aux_helper']) {
+                assert.strictEqual(isWindowsReservedDeviceName(name), false, `${name} should be allowed`);
+            }
+        });
+
+        test('never flags reserved device names off Windows', () => {
+            isWindowsStub.returns(false);
+
+            for (const name of ['CON', 'nul', 'com1', 'lpt9']) {
+                assert.strictEqual(isWindowsReservedDeviceName(name), false, `${name} should be allowed off Windows`);
+            }
         });
     });
 });

@@ -28,7 +28,7 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
-import { PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../../features/projectManager';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { notifyMissingManagerIfDefault } from '../common/utils';
@@ -509,7 +509,10 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
 
         // If a global environment is still not set, try using the 'base'
         if (!this.globalEnv) {
-            this.globalEnv = this.findEnvironmentByName('base');
+            const base = this.findEnvironmentByName('base');
+            if (base?.version !== 'no-python') {
+                this.globalEnv = base;
+            }
         }
 
         // Find any conda environments that might be associated with the current projects

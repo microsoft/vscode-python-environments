@@ -15,6 +15,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { PYENV_MANAGER_ID } from '../../common/constants';
 import { PyenvStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -24,7 +25,7 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
-import { PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../../features/projectManager';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
@@ -120,7 +121,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
             if (toolSource === 'none') {
                 result = 'tool_not_found';
                 if (this.projectManager) {
-                    await notifyMissingManagerIfDefault('ms-python.python:pyenv', this.projectManager, this.api);
+                    await notifyMissingManagerIfDefault(PYENV_MANAGER_ID, this.projectManager, this.api);
                 }
             }
         } catch (ex) {

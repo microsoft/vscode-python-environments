@@ -9,6 +9,10 @@ resources:
       type: git
       name: 1ESPipelineTemplates/MicroBuildTemplate
       ref: refs/tags/release
+    - repository: templates
+      type: git
+      name: DevDiv/Pylance-Eng
+      ref: refs/heads/main
 
 parameters:
   - name: quality
@@ -31,6 +35,10 @@ variables:
     value: '@vscode/python-environments'
   - name: PackageDir
     value: api
+  - name: NodeVersion
+    value: '22.21.1'
+  - name: AZURE_ARTIFACTS_FEED
+    value: 'https://devdiv.pkgs.visualstudio.com/DevDiv/_packaging/Pylance_PublicPackages/npm/registry/'
   - name: npmTag
     ${{ if eq(parameters.quality, 'preview') }}:
       value: next
@@ -41,7 +49,7 @@ extends:
   template: azure-pipelines/MicroBuild.1ES.Official.Publish.yml@MicroBuildTemplate
   parameters:
     sdl:
-      sourceAnalysisPool: VSEngSS-MicroBuild2022-1ES
+      sourceAnalysisPool: VSEng-MicroBuildVSStable
       codeSignValidation:
         enabled: true
       sbom:
@@ -66,22 +74,27 @@ extends:
                   targetPath: $(Build.ArtifactStagingDirectory)
                   artifactName: npm-package
             steps:
-              - task: NodeTool@0
-                inputs:
-                  versionSpec: '22.21.1'
-                displayName: Select Node version
+              - template: azure-pipelines/extension/templates/steps/setup.yml@templates
+                parameters:
+                  installPython: false
+                  customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
+                  nodeVersion: $(NodeVersion)
 
               - script: npm install
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Install package dependencies
 
+              - script: npm run copy:sources
+                workingDirectory: $(Build.SourcesDirectory)/api
+                displayName: Copy src/api.ts, src/types.ts, src/publicErrors.ts to API package sources
+
               - script: npm run compile
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Compile TypeScript
 
-              - script: npm pack --ignore-scripts
+              - script: npm run test:package
                 workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Pack npm package
+                displayName: Pack and validate npm package
 
               - task: CopyFiles@2
                 displayName: Copy package tarball to staging
@@ -97,6 +110,8 @@ extends:
         jobs:
           - job: PublishPackage
             displayName: Publish npm package
+            templateContext:
+              isReleaseJob: true
             steps:
               - download: current
                 artifact: npm-package
@@ -109,5 +124,5 @@ extends:
                   contentSource: 'Folder'
                   folderLocation: '$(Pipeline.Workspace)/npm-package'
                   waitForReleaseCompletion: true
-                  owners: 'grwheele@microsoft.com'
+                  owners: 'brcan@microsoft.com'
                   approvers: 'eduardovil@microsoft.com'

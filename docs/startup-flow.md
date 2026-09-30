@@ -91,7 +91,7 @@ All three trigger `initialize()` lazily (once-only, guarded by `_initialized` de
 ---
 
 POST-INIT:
-1. register terminal package watcher
+1. register package watchers for workspace-selected and terminal-activated environments
 2. register settings change listener (`registerInterpreterSettingsChangeListener`) — re-runs priority chain if settings change
 3.  initialize terminal manager
 4.  send telemetry (manager selection, project structure, discovery summary)
