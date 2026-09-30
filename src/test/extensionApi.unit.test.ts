@@ -170,8 +170,10 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
 });
 
 suite('PythonEnvironmentApiImpl - package resolution', () => {
+    let waitForEnvManagerId: sinon.SinonStub;
+
     setup(() => {
-        sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
+        waitForEnvManagerId = sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
         sinon.stub(managerReady, 'waitForAllEnvManagers').resolves();
     });
 
@@ -276,6 +278,7 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
         await api.managePackages(environment, { install: ['example'] });
 
         assert.ok(create.calledOnceWithExactly('global', { quickCreate: true }));
+        assert.ok(waitForEnvManagerId.calledWithExactly(['ms-python.python:venv']));
         assert.ok(getPackageManager.calledWithExactly(createdEnvironment));
         assert.ok(manage.calledOnceWithExactly(createdEnvironment, { install: ['example'] }));
     });

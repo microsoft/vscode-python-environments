@@ -3,7 +3,7 @@ import { GetEnvironmentsScope, PackageManagementOptions, PythonEnvironment } fro
 import { VENV_MANAGER_ID } from '../common/constants';
 import { pickEnvironmentFrom } from '../common/pickers/environments';
 import { showInformationMessage } from '../common/window.apis';
-import { waitForAllEnvManagers } from './common/managerReady';
+import { waitForAllEnvManagers, waitForEnvManagerId } from './common/managerReady';
 import type { EnvironmentManagers } from './envManagers';
 
 function hasSameEnvironmentId(first: PythonEnvironment, second: PythonEnvironment): boolean {
@@ -53,6 +53,7 @@ export async function selectPackageManagementEnvironment(
     );
 
     if (choice === createNew) {
+        await waitForEnvManagerId([VENV_MANAGER_ID]);
         const venvManager = envManagers.getEnvironmentManager(VENV_MANAGER_ID);
         if (!venvManager?.supportsCreate) {
             throw new Error(l10n.t('The virtual environment manager is not available.'));
