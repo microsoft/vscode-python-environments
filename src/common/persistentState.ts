@@ -55,6 +55,15 @@ export function getWorkspacePersistentState(): Promise<PersistentState> {
     return _workspace.promise;
 }
 
+/**
+ * Returns the workspace persistent state only when it has already been initialized.
+ * Use this from code paths that must not block when the extension context is unavailable
+ * (for example, unit tests or code running before activation completed).
+ */
+export function tryGetWorkspacePersistentState(): Promise<PersistentState> | undefined {
+    return _workspace.completed ? _workspace.promise : undefined;
+}
+
 export function getGlobalPersistentState(): Promise<PersistentState> {
     return _global.promise;
 }

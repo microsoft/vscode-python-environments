@@ -23,7 +23,7 @@ import {
     InlineScriptRoutingRegistry,
     getInlineScriptRoutingKey,
 } from '../common/inlineScript/routingRegistry';
-import { traceError, traceVerbose } from '../common/logging';
+import { traceError, traceVerbose, traceWarn } from '../common/logging';
 import { StopWatch } from '../common/stopWatch';
 import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
@@ -31,6 +31,13 @@ import { getCallingExtension } from '../common/utils/frameUtils';
 import { normalizePath } from '../common/utils/pathUtils';
 import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import { ProjectScopedPackageManagerCache } from '../managers/common/projectScopedPackageManagerCache';
+import { loadDefaultEnvironmentSelection, saveDefaultEnvironmentSelection } from './defaultEnvironmentState';
+import {
+    DEFAULT_CONTEXT,
+    DEFAULT_CONTEXT_KEY,
+    EnvironmentContext,
+    isOrdinaryFileScheme,
+} from './environmentContext';
 import type { PythonProjectManager, PythonProjectSettings } from './projectManager';
 import {
     EditAllManagerSettings,
@@ -161,6 +168,19 @@ export interface EnvironmentManagers extends Disposable {
      */
     getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined;
 
+    /**
+     * Resolves the logical selection context for a scope. Ordinary loose files (files that are
+     * not part of any tracked Python project and have no script-specific routing) resolve to the
+     * shared rootless `default` context.
+     */
+    resolveContext(scope: Uri | undefined): EnvironmentContext;
+
+    /**
+     * Restores a previously persisted explicit selection for the default (non-workspace) context.
+     * @returns true when an explicit selection was restored and is now authoritative.
+     */
+    restoreDefaultEnvironmentSelection(): Promise<boolean>;
+
     getProjectEnvManagers(uris: Uri[]): InternalEnvironmentManager[];
 }
 
@@ -193,6 +213,16 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     private readonly _selectionRevisions = new Map<string, number>();
     private readonly _selectionOperationCounters = new Map<string, number>();
     private inlineScriptProjectSelectionQueue: Promise<void> = Promise.resolve();
+
+    /**
+     * The explicit (user/API) or restored selection for the default context.
+     * When set, it takes priority over the configured/automatic default manager fallback so a
+     * cross-manager selection made for non-workspace files is honored by subsequent reads.
+     */
+    private _explicitDefaultSelection: { managerId: string; environment: PythonEnvironment } | undefined;
+
+    /** Serializes competing explicit default-context writes so the last requested choice wins. */
+    private defaultSelectionQueue: Promise<void> = Promise.resolve();
 
     private _onDidChangeEnvironmentManager = new EventEmitter<DidChangeEnvironmentManagerEventArgs>();
     private _onDidChangePackageManager = new EventEmitter<DidChangePackageManagerEventArgs>();
@@ -227,6 +257,15 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     private enqueueInlineScriptProjectSelection<T>(operation: () => Promise<T>): Promise<T> {
         const run = this.inlineScriptProjectSelectionQueue.then(operation);
         this.inlineScriptProjectSelectionQueue = run.then(
+            () => undefined,
+            () => undefined,
+        );
+        return run;
+    }
+
+    private enqueueDefaultSelection<T>(operation: () => Promise<T>): Promise<T> {
+        const run = this.defaultSelectionQueue.then(operation);
+        this.defaultSelectionQueue = run.then(
             () => undefined,
             () => undefined,
         );
@@ -412,7 +451,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     }
                 }
             }
-            return this.getConfiguredOrCachedEnvironmentManager(context, project);
+            return this.getConfiguredOrCachedEnvironmentManager(
+                context instanceof Uri && this.isDefaultContextScope(context) ? undefined : context,
+                project,
+            );
         }
 
         if (typeof context === 'string') {
@@ -561,14 +603,48 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 this.setEnvironmentCore(scope, environment, shouldPersistSettings),
             );
         }
+        if (this.isExplicitDefaultSelection(scope, environment, shouldPersistSettings)) {
+            return this.enqueueDefaultSelection(() =>
+                this.setEnvironmentCore(scope, environment, shouldPersistSettings),
+            );
+        }
         return this.setEnvironmentCore(scope, environment, shouldPersistSettings);
     }
 
-    private async setEnvironmentCore(
+    /**
+     * True when the request is an explicit (user/API) write targeting the default context.
+     * Such writes are serialized so rapid A -> B -> C selections settle deterministically on C.
+     */
+    private isExplicitDefaultSelection(
         scope: Uri | undefined,
         environment: PythonEnvironment | undefined,
         shouldPersistSettings: boolean,
+    ): boolean {
+        if (!shouldPersistSettings || environment?.envId.managerId === INLINE_SCRIPT_MANAGER_ID) {
+            return false;
+        }
+        return this.normalizeScope(scope) === undefined;
+    }
+
+    private async setEnvironmentCore(
+        rawScope: Uri | undefined,
+        environment: PythonEnvironment | undefined,
+        shouldPersistSettings: boolean,
     ): Promise<void> {
+        // Ordinary loose files share the rootless default context: normalize them so
+        // selection, reads, caching and events all use the same scope. Inline-script
+        // selections keep their per-script scope.
+        const scope =
+            environment?.envId.managerId === INLINE_SCRIPT_MANAGER_ID ? rawScope : this.normalizeScope(rawScope);
+        const isDefaultContext = scope === undefined;
+        if (isDefaultContext && !shouldPersistSettings && this._explicitDefaultSelection) {
+            // An automatic (startup / settings re-evaluation / restore) commit must never
+            // overwrite an explicit selection that arrived while discovery was running.
+            traceVerbose(
+                '[setEnvironment] Skipping automatic default-context selection; an explicit selection is active.',
+            );
+            return;
+        }
         const customScope = environment ? environment : scope;
         const manager = this.getEnvironmentManager(customScope);
         if (!manager) {
@@ -613,8 +689,19 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             throw error;
         }
 
-        if (scope && !environment && manager.id === INLINE_SCRIPT_MANAGER_ID && shouldPersistSettings && project) {
-            const removeProject = await removeManagedInlineScriptPythonProjectSetting(project);
+        // Default context: record (or clear) the authoritative explicit selection before any
+        // subsequent read recomputes the effective manager.
+        let publishedEnvironment = environment;
+        if (isDefaultContext && shouldPersistSettings) {
+            await this.commitExplicitDefaultSelection(manager, environment);
+            if (!environment) {
+                // Clearing removes the explicit override; publish the recomputed
+                // automatic/configured fallback instead of an empty selection.
+                const fallbackManager = this.getEnvironmentManager(undefined);
+                publishedEnvironment = fallbackManager ? await fallbackManager.get(undefined) : undefined;
+            }
+        }
+        if (scope && !environment && manager.id === INLINE_SCRIPT_MANAGER_ID && shouldPersistSettings && project) {            const removeProject = await removeManagedInlineScriptPythonProjectSetting(project);
             if (removeProject) {
                 this.pm.remove(project);
             }
@@ -678,14 +765,14 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             return;
         }
         const oldEnv = this._activeSelection.get(key);
-        if (!this.isSameEnvironment(oldEnv, environment)) {
-            this._activeSelection.set(key, environment);
+        if (!this.isSameEnvironment(oldEnv, publishedEnvironment)) {
+            this._activeSelection.set(key, publishedEnvironment);
             await new Promise<void>((resolve, reject) => {
                 setImmediate(() => {
                     try {
                         this._onDidChangeActiveEnvironment.fire({
                             uri: this.getActiveSelectionUri(scope, manager, project),
-                            new: environment,
+                            new: publishedEnvironment,
                             old: oldEnv,
                         });
                         resolve();
@@ -695,6 +782,77 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 });
             });
         }
+    }
+
+    /**
+     * Records the authoritative explicit/restored default-context selection and persists it.
+     * Persistence failures are logged and leave the in-session selection in effect.
+     */
+    private async commitExplicitDefaultSelection(
+        manager: InternalEnvironmentManager,
+        environment: PythonEnvironment | undefined,
+    ): Promise<void> {
+        this._explicitDefaultSelection = environment ? { managerId: manager.id, environment } : undefined;
+        const persisted = await saveDefaultEnvironmentSelection(
+            environment
+                ? {
+                      managerId: manager.id,
+                      environmentPath: environment.environmentPath,
+                      environmentId: environment.envId.id,
+                  }
+                : undefined,
+        );
+        if (!persisted) {
+            traceWarn(
+                '[setEnvironment] Default environment selection could not be persisted; ' +
+                    'it stays active for this session only.',
+            );
+        }
+    }
+
+    /**
+     * Restores a persisted explicit selection for the default (non-workspace) context.
+     *
+     * The persisted identity is re-resolved through its owning manager so a stale descriptor is
+     * never published. A manager that is not (yet) registered leaves the stored state intact, so
+     * a temporarily unavailable manager does not destroy explicit intent; an environment the
+     * manager can no longer resolve clears the stored state.
+     */
+    public async restoreDefaultEnvironmentSelection(): Promise<boolean> {
+        if (this._explicitDefaultSelection) {
+            // A newer explicit selection already happened in this session; never undo it.
+            return true;
+        }
+        const stored = await loadDefaultEnvironmentSelection();
+        if (!stored) {
+            return false;
+        }
+        const manager = this._environmentManagers.get(stored.managerId);
+        if (!manager) {
+            traceVerbose(
+                `[restoreDefaultEnvironmentSelection] Manager '${stored.managerId}' is not registered; keeping stored selection.`,
+            );
+            return false;
+        }
+        let environment: PythonEnvironment | undefined;
+        try {
+            environment = await manager.resolve(Uri.parse(stored.environmentPath));
+        } catch (error) {
+            traceError('[restoreDefaultEnvironmentSelection] Failed to resolve persisted environment', error);
+            return false;
+        }
+        if (!environment) {
+            traceVerbose(
+                `[restoreDefaultEnvironmentSelection] Persisted environment '${stored.environmentPath}' no longer exists; clearing stored selection.`,
+            );
+            await saveDefaultEnvironmentSelection(undefined);
+            return false;
+        }
+        if (this._explicitDefaultSelection) {
+            return true;
+        }
+        await this.setEnvironment(undefined, environment, true);
+        return this._explicitDefaultSelection !== undefined;
     }
 
     /**
@@ -725,6 +883,29 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         environment: PythonEnvironment | undefined,
         shouldPersistSettings: boolean,
     ): Promise<void> {
+        // 'global' is the default context: converge on the single authoritative write path so
+        // setEnvironment(undefined), setEnvironments('global') and loose-file selection agree.
+        if (typeof scope === 'string') {
+            if (scope !== 'global') {
+                return;
+            }
+            return this.setEnvironment(undefined, environment, shouldPersistSettings);
+        }
+
+        if (Array.isArray(scope) && environment?.envId.managerId !== INLINE_SCRIPT_MANAGER_ID) {
+            // Ordinary loose files resolve to the shared default context instead of being
+            // dropped as "not a project".
+            const defaultScopes = scope.filter((uri) => uri instanceof Uri && this.isDefaultContextScope(uri));
+            if (defaultScopes.length > 0) {
+                const remaining = scope.filter((uri) => !defaultScopes.includes(uri));
+                await this.setEnvironment(undefined, environment, shouldPersistSettings);
+                if (remaining.length > 0) {
+                    await this.setEnvironmentsCore(remaining, environment, shouldPersistSettings);
+                }
+                return;
+            }
+        }
+
         if (environment) {
             const manager = this.managers.find((m) => m.id === environment.envId.managerId);
             if (!manager) {
@@ -799,29 +980,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         });
                     }
                 });
-            } else if (typeof scope === 'string' && scope === 'global') {
-                const m = this.getEnvironmentManager(undefined);
-                const operation = this.beginSelectionOperation('global');
-                await manager.set(undefined, environment);
-                // Always add settings when persisting, OR when manager differs
-                if (shouldPersistSettings || manager.id !== m?.id) {
-                    settings.push({
-                        project: undefined,
-                        envManager: manager.id,
-                        packageManager: manager.preferredPackageManagerId,
-                    });
-                }
-
-                if (shouldPersistSettings) {
-                    await setAllManagerSettings(settings);
-                }
-                if (this.commitSelectionOperation('global', operation)) {
-                    const oldEnv = this._activeSelection.get('global');
-                    if (!this.isSameEnvironment(oldEnv, environment)) {
-                        this._activeSelection.set('global', environment);
-                        events.push({ uri: undefined, new: environment, old: oldEnv });
-                    }
-                }
             }
             if (events.length > 0) {
                 await new Promise<void>((resolve, reject) => {
@@ -880,22 +1038,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     );
                     await this.fireActiveEnvironmentEvents(events);
                 }
-            } else if (typeof scope === 'string' && scope === 'global') {
-                const events: DidChangeEnvironmentEventArgs[] = [];
-                const manager = this.getEnvironmentManager(undefined);
-                if (manager) {
-                    const operation = this.beginSelectionOperation('global');
-                    await manager.set(undefined);
-                    const newEnv = await manager.get(undefined);
-                    if (this.commitSelectionOperation('global', operation)) {
-                        const oldEnv = this._activeSelection.get('global');
-                        if (!this.isSameEnvironment(oldEnv, newEnv)) {
-                            this._activeSelection.set('global', newEnv);
-                            events.push({ uri: undefined, new: newEnv, old: oldEnv });
-                        }
-                    }
-                }
-                await this.fireActiveEnvironmentEvents(events);
             }
         }
     }
@@ -939,7 +1081,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      * @param scope The scope to get the environment.
      * @returns The current PythonEnvironment for the scope, or undefined if none is set.
      */
-    async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+    async getEnvironment(rawScope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
+        const scope = this.normalizeScope(rawScope);
         const manager = this.getEnvironmentManager(scope);
         if (!manager) {
             traceVerbose(
@@ -966,7 +1109,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      * Unlike setEnvironment(), it does NOT call manager.set() or persist to settings.
      * Availability recovery may republish an unchanged descriptor so consumers retry a failed lookup.
      */
-    async refreshEnvironment(scope: GetEnvironmentScope, notifyIfUnchanged = false): Promise<void> {
+    async refreshEnvironment(rawScope: GetEnvironmentScope, notifyIfUnchanged = false): Promise<void> {
+        const scope = this.normalizeScope(rawScope);
         const manager = this.getEnvironmentManager(scope);
         if (!manager) {
             return;
@@ -997,7 +1141,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         );
     }
 
-    getLastKnownEnvironment(scope: GetEnvironmentScope): PythonEnvironment | undefined {
+    getLastKnownEnvironment(rawScope: GetEnvironmentScope): PythonEnvironment | undefined {
+        const scope = this.normalizeScope(rawScope);
         const project = scope ? this.pm.get(scope) : undefined;
         const manager = this.getEnvironmentManager(scope);
         const key = this.getActiveSelectionKey(scope, manager, project);
@@ -1013,7 +1158,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             ? this.getInlineScriptSelectionKey(scope)
             : project
               ? project.uri.toString()
-              : 'global';
+              : DEFAULT_CONTEXT_KEY;
     }
 
     private getActiveSelectionUri(
@@ -1026,6 +1171,47 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     private getInlineScriptSelectionKey(scope: Uri): string {
         return `inline-script:${normalizePath(scope.fsPath)}`;
+    }
+
+    /**
+     * True when the scope is an ordinary loose file, i.e. a file that belongs to no tracked
+     * Python project and has no script-specific (inline) routing. Such files share the single
+     * rootless default context instead of getting a scope of their own.
+     */
+    private isDefaultContextScope(scope: Uri): boolean {
+        if (!isOrdinaryFileScheme(scope)) {
+            // Unsupported/virtual schemes (notebook cells, provider-backed documents, ...)
+            // keep their existing routing.
+            return false;
+        }
+        if (this.pm.get(scope)) {
+            return false;
+        }
+        // Script-specific routing is resolved before normalizing a scope to the default context.
+        if (this.getInlineRoutingOverrideManager(scope)) {
+            return false;
+        }
+        if (this.inlineScriptRouting?.shouldRoute(scope)) {
+            return false;
+        }
+        const inlineEnv = this._activeSelection.get(this.getInlineScriptSelectionKey(scope));
+        return inlineEnv?.envId.managerId !== INLINE_SCRIPT_MANAGER_ID;
+    }
+
+    public resolveContext(scope: Uri | undefined): EnvironmentContext {
+        if (scope === undefined || this.isDefaultContextScope(scope)) {
+            return DEFAULT_CONTEXT;
+        }
+        const project = this.pm.get(scope);
+        return project ? { kind: 'project', uri: project.uri } : { kind: 'script', uri: scope };
+    }
+
+    /**
+     * Maps an ordinary loose-file scope onto the default context scope (`undefined`) so reads,
+     * writes, refreshes and cached lookups all agree. Other scopes are returned unchanged.
+     */
+    private normalizeScope(scope: Uri | undefined): Uri | undefined {
+        return scope !== undefined && this.isDefaultContextScope(scope) ? undefined : scope;
     }
 
     private getExactProjectEnvironmentManager(
@@ -1047,6 +1233,16 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         context: Uri | undefined,
         project: PythonProject | undefined,
     ): InternalEnvironmentManager | undefined {
+        // DEFAULT CONTEXT ONLY: an explicit (or restored) selection is authoritative. Without
+        // this, a cross-manager selection for non-workspace files is silently routed back to the
+        // configured default manager on the next read, and the selection appears not to stick.
+        if (context === undefined && project === undefined && this._explicitDefaultSelection) {
+            const explicitManager = this._environmentManagers.get(this._explicitDefaultSelection.managerId);
+            if (explicitManager) {
+                return explicitManager;
+            }
+        }
+
         const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
         if (defaultEnvManagerId !== undefined) {
             const settingsManager = this._environmentManagers.get(defaultEnvManagerId);
@@ -1067,7 +1263,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     }
 
     private getProjectSelectionKey(project: PythonProject | undefined): string {
-        return project ? project.uri.toString() : 'global';
+        return project ? project.uri.toString() : DEFAULT_CONTEXT_KEY;
     }
 
     private getInlineRoutingOverrideManager(scope: Uri): InternalEnvironmentManager | undefined {

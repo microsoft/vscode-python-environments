@@ -256,12 +256,25 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
     test('passes same-manager batch unsets to the manager atomically', async () => {
         const first = Uri.file('/workspace/first.py');
         const second = Uri.file('/workspace/second.py');
+        projectsByUri.set(first.toString(), { name: 'first.py', uri: first });
+        projectsByUri.set(second.toString(), { name: 'second.py', uri: second });
         const managerSet = sinon.stub().resolves();
         registerManager(async () => undefined, managerSet);
 
         await envManagers.setEnvironments([first, second], undefined, false);
 
         sinon.assert.calledOnceWithExactly(managerSet, [first, second], undefined);
+    });
+
+    test('collapses a batch of ordinary loose files onto the default context', async () => {
+        const first = Uri.file('/loose/first.py');
+        const second = Uri.file('/loose/second.py');
+        const managerSet = sinon.stub().resolves();
+        registerManager(async () => undefined, managerSet);
+
+        await envManagers.setEnvironments([first, second], undefined, false);
+
+        sinon.assert.calledOnceWithExactly(managerSet, undefined, undefined);
     });
 
     test('does not let an older same-manager refresh overwrite a newer selection', async () => {
