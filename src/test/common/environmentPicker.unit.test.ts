@@ -2,8 +2,75 @@
 // Licensed under the MIT License.
 
 import assert from 'node:assert';
+import * as path from 'path';
+import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
+import { Interpreter } from '../../common/localize';
+import { pickEnvironment } from '../../common/pickers/environments';
+import * as managerPicker from '../../common/pickers/managers';
+import * as windowApis from '../../common/window.apis';
+import * as workspaceApis from '../../common/workspace.apis';
+import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
+
+suite('Environment Picker Creation Availability', () => {
+    const folder = { uri: Uri.file(process.cwd()), name: 'workspace', index: 0 };
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    for (const { name, folders, canCreate } of [
+        { name: 'no workspace', folders: undefined, canCreate: false },
+        { name: 'an empty workspace', folders: [], canCreate: false },
+        { name: 'an open folder without detected projects', folders: [folder], canCreate: true },
+        {
+            name: 'a multi-root workspace',
+            folders: [folder, { uri: Uri.file(path.join(process.cwd(), 'second')), name: 'second', index: 1 }],
+            canCreate: true,
+        },
+    ]) {
+        test(`only offers creation with an open folder: ${name}`, async () => {
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(folders);
+            const pickManager = sinon.stub(managerPicker, 'pickEnvironmentManager');
+            const picker = sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items) => {
+                assert.strictEqual(
+                    items.some((item) => item.label === Interpreter.createVirtualEnvironment),
+                    canCreate,
+                );
+                assert.ok(items.some((item) => item.label === Interpreter.browsePath));
+                return undefined;
+            });
+
+            assert.strictEqual(await pickEnvironment([], [], { projects: [] }), undefined);
+            sinon.assert.calledOnce(picker);
+            sinon.assert.notCalled(pickManager);
+        });
+    }
+
+    test('still selects an existing environment without an open folder', async () => {
+        const environment = createMockPythonEnvironment({ envPath: path.join(process.cwd(), 'python') });
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(undefined);
+        sinon
+            .stub(windowApis, 'showQuickPickWithButtons')
+            .callsFake(async (items) => items.find((item) => item.label === environment.displayName));
+
+        const selected = await pickEnvironment([], [], { projects: [], recommended: environment });
+
+        assert.strictEqual(selected, environment);
+    });
+
+    test('still allows browsing for an interpreter without an open folder', async () => {
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(undefined);
+        sinon
+            .stub(windowApis, 'showQuickPickWithButtons')
+            .callsFake(async (items) => items.find((item) => item.label === Interpreter.browsePath));
+        const browse = sinon.stub(windowApis, 'showOpenDialog').resolves(undefined);
+
+        assert.strictEqual(await pickEnvironment([], [], { projects: [] }), undefined);
+        sinon.assert.calledOnce(browse);
+    });
+});
 
 /**
  * Test the logic used in environment pickers to include interpreter paths in descriptions
