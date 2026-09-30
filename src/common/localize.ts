@@ -302,7 +302,7 @@ export namespace ActivationStrings {
     export const enableForFolder = l10n.t('Enable for Folder');
     export const envFileInjectionDisabledForFolder = (name: string) =>
         l10n.t(
-            'An environment file is configured for folder "{0}" but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
+            'An environment file is configured for the folder "{0}" but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
             name,
         );
 }
