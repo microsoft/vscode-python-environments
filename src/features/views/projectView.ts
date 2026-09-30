@@ -66,6 +66,9 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             this.envManagers.onDidChangeEnvironments(() => {
                 this.debouncedUpdateProject.trigger();
             }),
+            this.envManagers.onDidChangeProjectPackageManager(() => {
+                this.debouncedUpdateProject.trigger();
+            }),
             this.envManagers.onDidChangePackages((e) => {
                 this.updatePackagesForEnvironment(e.environment);
             }),
@@ -238,8 +241,8 @@ export class ProjectView implements TreeDataProvider<ProjectTreeItem> {
             const environmentItem = element as ProjectEnvironment;
             const parent = environmentItem.parent;
             const uri = parent.id === 'global' ? undefined : parent.project.uri;
-            const pkgManager = this.envManagers.getPackageManager(uri);
             const environment = environmentItem.environment;
+            const pkgManager = this.envManagers.getPackageManager(uri ?? environment);
 
             if (!pkgManager) {
                 return [new ProjectEnvironmentInfo(environmentItem, ProjectViews.noPackageManager)];

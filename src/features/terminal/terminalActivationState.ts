@@ -9,9 +9,16 @@ import {
 } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
+import { StopWatch } from '../../common/stopWatch';
+import { EventNames } from '../../common/telemetry/constants';
+import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { onDidEndTerminalShellExecution, onDidStartTerminalShellExecution } from '../../common/window.apis';
 import { getActivationCommand, getDeactivationCommand } from '../common/activation';
+import { identifyTerminalShell } from '../common/shellDetector';
 import { getShellIntegrationTimeout, isTaskTerminal, shouldSkipTerminalActivation } from './utils';
+
+type ActivationTrigger = 'terminalOpen' | 'preExisting' | 'explicit' | 'environmentSwitch' | 'unknown';
+type CommandOutcome = 'succeeded' | 'failed' | 'timedOut' | 'unknown' | 'unverified' | 'noCommand';
 
 export interface DidChangeTerminalActivationStateEvent {
     terminal: Terminal;
@@ -21,8 +28,8 @@ export interface DidChangeTerminalActivationStateEvent {
 
 export interface TerminalActivation {
     isActivated(terminal: Terminal, environment?: PythonEnvironment): boolean;
-    activate(terminal: Terminal, environment: PythonEnvironment): Promise<void>;
-    deactivate(terminal: Terminal): Promise<void>;
+    activate(terminal: Terminal, environment: PythonEnvironment, trigger?: ActivationTrigger): Promise<void>;
+    deactivate(terminal: Terminal, trigger?: ActivationTrigger): Promise<void>;
     onDidChangeTerminalActivationState: Event<DidChangeTerminalActivationStateEvent>;
 }
 
@@ -50,8 +57,8 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
     private onTerminalClosed = this.onTerminalClosedEmitter.event;
 
     private activatedTerminals = new Map<Terminal, PythonEnvironment>();
-    private activatingTerminals = new Map<Terminal, Promise<void>>();
-    private deactivatingTerminals = new Map<Terminal, Promise<void>>();
+    private activatingTerminals = new Map<Terminal, Promise<CommandOutcome>>();
+    private deactivatingTerminals = new Map<Terminal, Promise<CommandOutcome>>();
 
     constructor() {
         this.disposables.push(
@@ -85,7 +92,11 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
         return this.activatedTerminals.get(terminal);
     }
 
-    async activate(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
+    async activate(
+        terminal: Terminal,
+        environment: PythonEnvironment,
+        trigger: ActivationTrigger = 'unknown',
+    ): Promise<void> {
         if (shouldSkipTerminalActivation(terminal)) {
             traceVerbose('Skipping activation for this terminal');
             return;
@@ -98,12 +109,14 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
 
         if (this.deactivatingTerminals.has(terminal)) {
             traceVerbose('Terminal is being deactivated, cannot activate.');
-            return this.deactivatingTerminals.get(terminal);
+            await this.deactivatingTerminals.get(terminal);
+            return;
         }
 
         if (this.activatingTerminals.has(terminal)) {
             traceVerbose('Terminal is being activated, skipping.');
-            return this.activatingTerminals.get(terminal);
+            await this.activatingTerminals.get(terminal);
+            return;
         }
 
         const terminalEnv = this.activatedTerminals.get(terminal);
@@ -115,25 +128,28 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
                 traceInfo(
                     `Terminal is activated with a different environment, deactivating: ${terminalEnv.environmentPath.fsPath}`,
                 );
-                await this.deactivate(terminal);
+                await this.deactivate(terminal, 'environmentSwitch');
             }
         }
 
         try {
-            const promise = this.activateInternal(terminal, environment);
+            const promise = this.runCommand(terminal, environment, 'activate', trigger);
             traceVerbose(`Activating terminal: ${environment.environmentPath.fsPath}`);
             this.activatingTerminals.set(terminal, promise);
-            await promise;
+            const outcome = await promise;
             this.activatingTerminals.delete(terminal);
-            this.updateActivationState(terminal, environment, true);
-            traceInfo(`Terminal is activated: ${environment.environmentPath.fsPath}`);
+            if (outcome === 'succeeded' || outcome === 'unverified') {
+                // sendText has no completion signal; preserve its existing optimistic UI behavior.
+                this.updateActivationState(terminal, environment, true);
+                traceInfo(`Terminal activation sent: ${environment.environmentPath.fsPath} (${outcome})`);
+            }
         } catch (ex) {
             this.activatingTerminals.delete(terminal);
             traceError('Failed to activate environment:\r\n', ex);
         }
     }
 
-    async deactivate(terminal: Terminal): Promise<void> {
+    async deactivate(terminal: Terminal, trigger: ActivationTrigger = 'unknown'): Promise<void> {
         if (isTaskTerminal(terminal)) {
             traceVerbose('Cannot deactivate environment in a task terminal');
             return;
@@ -141,24 +157,28 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
 
         if (this.activatingTerminals.has(terminal)) {
             traceVerbose('Terminal is being activated, cannot deactivate.');
-            return this.activatingTerminals.get(terminal);
+            await this.activatingTerminals.get(terminal);
+            return;
         }
 
         if (this.deactivatingTerminals.has(terminal)) {
             traceVerbose('Terminal is being deactivated, skipping.');
-            return this.deactivatingTerminals.get(terminal);
+            await this.deactivatingTerminals.get(terminal);
+            return;
         }
 
         const terminalEnv = this.activatedTerminals.get(terminal);
         if (terminalEnv) {
             try {
-                const promise = this.deactivateInternal(terminal, terminalEnv);
+                const promise = this.runCommand(terminal, terminalEnv, 'deactivate', trigger);
                 traceVerbose(`Deactivating terminal: ${terminalEnv.environmentPath.fsPath}`);
                 this.deactivatingTerminals.set(terminal, promise);
-                await promise;
+                const outcome = await promise;
                 this.deactivatingTerminals.delete(terminal);
-                this.updateActivationState(terminal, terminalEnv, false);
-                traceInfo(`Terminal is deactivated: ${terminalEnv.environmentPath.fsPath}`);
+                if (outcome === 'succeeded' || outcome === 'unverified') {
+                    this.updateActivationState(terminal, terminalEnv, false);
+                    traceInfo(`Terminal deactivation sent: ${terminalEnv.environmentPath.fsPath} (${outcome})`);
+                }
             } catch (ex) {
                 this.deactivatingTerminals.delete(terminal);
                 traceError('Failed to deactivate environment:\r\n', ex);
@@ -183,93 +203,62 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
         this.disposables.forEach((d) => d.dispose());
     }
 
-    private async activateInternal(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
-        if (terminal.shellIntegration) {
-            await this.activateUsingShellIntegration(terminal.shellIntegration, terminal, environment);
-        } else {
-            this.activateLegacy(terminal, environment);
-        }
-    }
-
-    private async deactivateInternal(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
-        if (terminal.shellIntegration) {
-            await this.deactivateUsingShellIntegration(terminal.shellIntegration, terminal, environment);
-        } else {
-            this.deactivateLegacy(terminal, environment);
-        }
-    }
-
-    private activateLegacy(terminal: Terminal, environment: PythonEnvironment) {
-        const activationCommands = getActivationCommand(terminal, environment);
-        if (activationCommands) {
-            terminal.sendText(activationCommands);
-            this.activatedTerminals.set(terminal, environment);
-        }
-    }
-
-    private deactivateLegacy(terminal: Terminal, environment: PythonEnvironment) {
-        const deactivationCommands = getDeactivationCommand(terminal, environment);
-        if (deactivationCommands) {
-            terminal.sendText(deactivationCommands);
-            this.activatedTerminals.delete(terminal);
-        }
-    }
-
-    private async activateUsingShellIntegration(
-        shellIntegration: TerminalShellIntegration,
+    private async runCommand(
         terminal: Terminal,
         environment: PythonEnvironment,
-    ): Promise<void> {
-        const activationCommand = getActivationCommand(terminal, environment);
-        if (activationCommand) {
-            try {
-                await this.executeTerminalShellCommandInternal(shellIntegration, activationCommand);
-                this.activatedTerminals.set(terminal, environment);
-            } catch {
-                traceError('Failed to activate environment using shell integration');
+        operation: 'activate' | 'deactivate',
+        trigger: ActivationTrigger,
+    ): Promise<CommandOutcome> {
+        const watch = new StopWatch();
+        const method = terminal.shellIntegration ? 'shellIntegration' : 'sendText';
+        let outcome: CommandOutcome = 'failed';
+        try {
+            const command =
+                operation === 'activate'
+                    ? getActivationCommand(terminal, environment)
+                    : getDeactivationCommand(terminal, environment);
+            if (!command) {
+                outcome = 'noCommand';
+            } else if (terminal.shellIntegration) {
+                outcome = await this.executeTerminalShellCommandInternal(terminal.shellIntegration, command);
+            } else {
+                terminal.sendText(command);
+                outcome = 'unverified';
             }
-        } else {
-            traceVerbose('No activation commands found for terminal.');
+        } catch (error) {
+            traceError(`Failed to ${operation} terminal environment`, error);
         }
-    }
-
-    private async deactivateUsingShellIntegration(
-        shellIntegration: TerminalShellIntegration,
-        terminal: Terminal,
-        environment: PythonEnvironment,
-    ): Promise<void> {
-        const deactivationCommand = getDeactivationCommand(terminal, environment);
-        if (deactivationCommand) {
-            try {
-                await this.executeTerminalShellCommandInternal(shellIntegration, deactivationCommand);
-                this.activatedTerminals.delete(terminal);
-            } catch {
-                traceError('Failed to deactivate environment using shell integration');
-            }
-        } else {
-            traceVerbose('No deactivation commands found for terminal.');
+        if (outcome !== 'succeeded' && outcome !== 'unverified') {
+            traceError(`Terminal ${operation} outcome: ${outcome}`);
         }
+        sendTelemetryEvent(EventNames.TERMINAL_ACTIVATION_OUTCOME, watch.elapsedTime, {
+            operation,
+            outcome,
+            method,
+            shell: identifyTerminalShell(terminal),
+            trigger,
+        });
+        return outcome;
     }
 
     private async executeTerminalShellCommandInternal(
         shellIntegration: TerminalShellIntegration,
         command: string,
-    ): Promise<boolean> {
+    ): Promise<CommandOutcome> {
         const execution = shellIntegration.executeCommand(command);
         const disposables: Disposable[] = [];
         const timeoutMs = getShellIntegrationTimeout();
 
-        const promise = new Promise<void>((resolve) => {
+        const promise = new Promise<CommandOutcome>((resolve) => {
             const timer = setTimeout(() => {
-                traceError(`Shell execution timed out: ${command}`);
-                resolve();
+                resolve('timedOut');
             }, timeoutMs);
 
             disposables.push(
                 new Disposable(() => clearTimeout(timer)),
                 this.onTerminalShellExecutionEnd((e: TerminalShellExecutionEndEvent) => {
                     if (e.execution === execution) {
-                        resolve();
+                        resolve(e.exitCode === 0 ? 'succeeded' : e.exitCode === undefined ? 'unknown' : 'failed');
                     }
                 }),
                 this.onTerminalShellExecutionStart((e: TerminalShellExecutionStartEvent) => {
@@ -281,11 +270,7 @@ export class TerminalActivationImpl implements TerminalActivationInternal {
         });
 
         try {
-            await promise;
-            return true;
-        } catch {
-            traceError(`Failed to execute shell command: ${command}`);
-            return false;
+            return await promise;
         } finally {
             disposables.forEach((d) => d.dispose());
         }

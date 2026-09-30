@@ -12,6 +12,8 @@ By default, every workspace folder you open in VS Code is automatically treated 
 - Add individual Python files as projects (great for standalone scripts)
 - Create brand new projects from templates
 
+The **Create Environment** action in the interpreter picker is available only when at least one workspace folder is open. Without an open folder, you can still select an existing interpreter or browse for one. Explicit global-environment creation through the **Create Environment** command or the **Environment Managers** view remains available.
+
 ### Why use projects?
 
 Projects solve a common challenge: **different parts of your workspace need different Python environments**.
