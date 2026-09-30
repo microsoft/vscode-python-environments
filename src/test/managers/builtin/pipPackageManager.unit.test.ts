@@ -266,6 +266,23 @@ suite('PipPackageManager', () => {
         assert.ok(shouldUseUvStub.notCalled);
     });
 
+    test('cancels installation when quick create is canceled', async () => {
+        const environment = createSystemEnvironment();
+        const createVenvStub = sinon.stub().resolves(undefined);
+        const manager = new PipPackageManager(
+            { getEnvironments: sinon.stub().resolves([environment]) } as unknown as PythonEnvironmentApi,
+            createMockLogOutputChannel(),
+            { create: createVenvStub } as unknown as VenvManager,
+        );
+        const shouldUseUvStub = sinon.stub(helpers, 'shouldUseUv');
+        sinon.stub(windowApis, 'showInformationMessage').resolves('Create New Virtual Environment');
+
+        await manager.manage(environment, { install: ['flask'] });
+
+        assert.ok(createVenvStub.calledOnce);
+        assert.ok(shouldUseUvStub.notCalled);
+    });
+
     test('installs into a selected virtual environment instead of the global environment', async () => {
         const environment = createSystemEnvironment();
         const virtualEnvironment = createMockPythonEnvironment({
@@ -300,6 +317,34 @@ suite('PipPackageManager', () => {
         assert.ok(shouldUseUvStub.notCalled);
     });
 
+    test('cancels installation when the existing environment picker is dismissed', async () => {
+        const environment = createSystemEnvironment();
+        const virtualEnvironment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), '.venv'),
+            managerId: 'ms-python.python:venv',
+        });
+        const getEnvironmentsStub = sinon.stub();
+        getEnvironmentsStub.withArgs('all').resolves([environment, virtualEnvironment]);
+        getEnvironmentsStub.withArgs('global').resolves([environment]);
+        const managePackagesStub = sinon.stub().resolves();
+        const manager = new PipPackageManager(
+            {
+                getEnvironments: getEnvironmentsStub,
+                managePackages: managePackagesStub,
+            } as unknown as PythonEnvironmentApi,
+            createMockLogOutputChannel(),
+            {} as VenvManager,
+        );
+        const shouldUseUvStub = sinon.stub(helpers, 'shouldUseUv');
+        sinon.stub(windowApis, 'showInformationMessage').resolves('Use Existing Virtual Environment');
+        sinon.stub(environmentPickers, 'pickEnvironmentFrom').resolves(undefined);
+
+        await manager.manage(environment, { install: ['flask'] });
+
+        assert.ok(managePackagesStub.notCalled);
+        assert.ok(shouldUseUvStub.notCalled);
+    });
+
     test('continues installing into the global environment when requested', async () => {
         const environment = createSystemEnvironment();
         const manager = new PipPackageManager(
@@ -329,6 +374,26 @@ suite('PipPackageManager', () => {
         await manager.manage(environment, { install: ['flask'] });
 
         assert.ok(shouldUseUvStub.notCalled);
+    });
+
+    test('does not prompt when installing into a virtual environment', async () => {
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), '.venv'),
+            managerId: 'ms-python.python:venv',
+        });
+        const manager = new PipPackageManager(
+            { getEnvironments: sinon.stub().resolves([]) } as unknown as PythonEnvironmentApi,
+            createMockLogOutputChannel(),
+            {} as VenvManager,
+        );
+        const showInformationMessageStub = sinon.stub(windowApis, 'showInformationMessage');
+        stubPackageManagementExecution();
+        const runPythonStub = sinon.stub(helpers, 'runPython').resolves('');
+
+        await manager.manage(environment, { install: ['flask'] });
+
+        assert.ok(showInformationMessageStub.notCalled);
+        assert.ok(runPythonStub.calledOnce);
     });
 
     test('does not prompt for headless global installations', async () => {
