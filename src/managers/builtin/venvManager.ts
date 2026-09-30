@@ -574,6 +574,7 @@ export class VenvManager implements EnvironmentManager {
 
     /**
      * Loads and maps Python environments to their corresponding project paths in the workspace. about  O(p × e) where p = projects.len and e = environments.len
+     * Skips unresolvable selections without preventing other projects from restoring their environments.
      */
     private async loadEnvMap() {
         const globals = await this.baseManager.getEnvironments('global');
@@ -608,7 +609,7 @@ export class VenvManager implements EnvironmentManager {
                         foundEnv = resolved;
                     } else {
                         this.log.error(`Failed to resolve python environment: ${env}`);
-                        return;
+                        continue;
                     }
                 }
                 // Given found env, add it to the map and fire the event if needed.
