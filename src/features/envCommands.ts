@@ -28,6 +28,7 @@ import {
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import * as persistentState from '../common/persistentState';
 import type { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
+import { normalizePackageName } from '../managers/common/packageUtils';
 import type { ProjectCreators } from './creators/projectCreators';
 import type { EnvironmentManagers } from './envManagers';
 import { selectPackageManagementEnvironment } from './nonGlobalPackageInstallationEnvironment';
@@ -366,7 +367,17 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
             throw new Error(l10n.t('No package manager found for the selected environment.'));
         }
 
-        if (pkg.isTransitive) {
+        let selectedPackage = isOriginalEnvironment ? pkg : undefined;
+        if (!isOriginalEnvironment) {
+            await packageManager.refresh(environment);
+            const packages = await packageManager.getPackages(environment);
+            const normalizedPackageName = normalizePackageName(pkg.name);
+            selectedPackage = packages?.find(
+                (candidate) => normalizePackageName(candidate.name) === normalizedPackageName,
+            );
+        }
+
+        if (selectedPackage?.isTransitive) {
             const confirm = await showInformationMessage(
                 l10n.t(
                     'The package "{0}" is a transitive dependency. Changing its version may cause unexpected behavior in packages that depend on it.',
@@ -404,7 +415,8 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
         if (availableVersions && availableVersions.length > 0) {
             const items = availableVersions.map((v) => ({
                 label: v.public,
-                description: v.public === pkg.version ? `$(check) ${l10n.t('Installed')}` : undefined,
+                description:
+                    v.public === selectedPackage?.version ? `$(check) ${l10n.t('Installed')}` : undefined,
             }));
 
             const selected = await showQuickPick(items, {
@@ -417,7 +429,7 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
             const inputVersion = await showInputBox({
                 title: l10n.t('Manage Package Version'),
                 prompt: l10n.t('Enter the version for {0}', pkg.name),
-                value: pkg.version,
+                value: selectedPackage?.version,
                 placeHolder: l10n.t('e.g. 1.2.3'),
                 validateInput: (value) => {
                     const trimmedValue = value.trim();
@@ -433,7 +445,7 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
             version = inputVersion?.trim();
         }
 
-        if (version === undefined || (isOriginalEnvironment && version === pkg.version)) {
+        if (version === undefined || version === selectedPackage?.version) {
             return;
         }
 
