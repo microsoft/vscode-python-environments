@@ -98,6 +98,7 @@ export class VenvManager implements EnvironmentManager {
     readonly description?: string | undefined;
     readonly tooltip?: string | MarkdownString | undefined;
     readonly iconPath?: IconPath | undefined;
+    readonly createCapabilities = { customName: true } as const;
 
     constructor(
         private readonly nativeFinder: NativePythonFinder,

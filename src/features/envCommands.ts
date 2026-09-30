@@ -209,13 +209,15 @@ export async function createAnyEnvironmentCommand(
     },
 ): Promise<PythonEnvironment | undefined> {
     const select = options?.selectEnvironment;
+    const supportsRequestedCreation = (manager: InternalEnvironmentManager): boolean =>
+        manager.supportsCreate && (options?.name === undefined || manager.supportsCustomName);
     const projects = pm.getProjects(options?.uri ? [options?.uri] : undefined);
     if (projects.length === 0) {
         const managerId = await pickEnvironmentManager(
-            em.managers.filter((m) => m.supportsCreate),
+            em.managers.filter(supportsRequestedCreation),
             undefined,
             undefined,
-            true, // showEnterInterpreterPath
+            options?.name === undefined,
         );
 
         // Handle "Enter Interpreter Path" selection
@@ -243,7 +245,7 @@ export async function createAnyEnvironmentCommand(
 
             selected.forEach((p) => {
                 const manager = em.getEnvironmentManager(p.uri);
-                if (manager && manager.supportsCreate && !defaultManagers.includes(manager)) {
+                if (manager && supportsRequestedCreation(manager) && !defaultManagers.includes(manager)) {
                     defaultManagers.push(manager);
                 }
             });
@@ -255,10 +257,10 @@ export async function createAnyEnvironmentCommand(
                 manager = defaultManagers[0];
             } else {
                 let managerId = await pickEnvironmentManager(
-                    em.managers.filter((m) => m.supportsCreate),
+                    em.managers.filter(supportsRequestedCreation),
                     defaultManagers,
                     options?.showBackButton,
-                    true, // showEnterInterpreterPath
+                    options?.name === undefined,
                 );
 
                 // Handle "Enter Interpreter Path" selection
