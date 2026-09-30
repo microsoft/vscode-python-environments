@@ -1313,8 +1313,7 @@ async function selectCommonPackagesOrSkip(
                 traceInfo('Package Installer: user selected skip package installation');
                 return undefined;
             }
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } catch (ex: any) {
+        } catch (ex) {
             if (ex === QuickInputButtons.Back) {
                 return selectCommonPackagesOrSkip(common, installed, showSkipOption);
             }
