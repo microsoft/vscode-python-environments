@@ -19,7 +19,7 @@ export function timeout(milliseconds: number, token?: CancellationToken): Cancel
                 source.cancel();
                 source.dispose();
             },
-        });
+        }) as CancelablePromise<void>;
     }
 
     return new Promise<void>((resolve, reject) => {
@@ -28,15 +28,28 @@ export function timeout(milliseconds: number, token?: CancellationToken): Cancel
             return;
         }
 
-        const handle = setTimeout(() => {
-            disposable.dispose();
-            resolve();
-        }, milliseconds);
-        const disposable = token.onCancellationRequested(() => {
-            clearTimeout(handle);
-            disposable.dispose();
+        let handle: ReturnType<typeof setTimeout> | undefined;
+        let settled = false;
+        let disposable: { dispose(): void } | undefined;
+        disposable = token.onCancellationRequested(() => {
+            settled = true;
+            if (handle !== undefined) {
+                clearTimeout(handle);
+            }
+            disposable?.dispose();
             reject(new CancellationError());
         });
+        if (settled) {
+            return;
+        }
+        handle = setTimeout(() => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            disposable?.dispose();
+            resolve();
+        }, milliseconds);
     });
 }
 
