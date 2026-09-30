@@ -2,9 +2,11 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventEmitter, Uri } from 'vscode';
 import {
+    isCreateEnvironmentOptionNotSupportedError,
     PythonEnvironment,
     PythonProject,
 } from '../api';
+import * as managerPickers from '../common/pickers/managers';
 import * as managerReady from '../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
 import type { PythonProjectManager } from '../features/projectManager';
@@ -73,7 +75,7 @@ suite('PythonEnvironmentApiImpl - createEnvironment', () => {
         sinon.restore();
     });
 
-    function createApi(create: sinon.SinonStub): PythonEnvironmentApiImpl {
+    function createApi(create: sinon.SinonStub, supportsCustomName = true): PythonEnvironmentApiImpl {
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
         const mockEnvManagers = {
             onDidChangeActiveEnvironment: new EventEmitter().event,
@@ -81,6 +83,7 @@ suite('PythonEnvironmentApiImpl - createEnvironment', () => {
             getEnvironmentManager: sinon.stub().returns({
                 id: 'ms-python.python:venv',
                 supportsCreate: true,
+                supportsCustomName,
                 create,
             }),
         } as unknown as ApiArgs[0];
@@ -131,6 +134,61 @@ suite('PythonEnvironmentApiImpl - createEnvironment', () => {
         }
 
         assert.ok(create.notCalled);
+    });
+
+    test('rejects a name before calling a manager that does not support custom names', async () => {
+        const create = sinon.stub();
+        const api = createApi(create, false);
+
+        await assert.rejects(
+            api.createEnvironment(Uri.file('workspace'), { name: 'analysis-env' }),
+            isCreateEnvironmentOptionNotSupportedError,
+        );
+
+        assert.ok(create.notCalled);
+    });
+
+    test('only offers managers supporting custom names for multi-scope creation', async () => {
+        type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
+        const unsupportedCreate = sinon.stub();
+        const supportedCreate = sinon.stub().resolves({} as PythonEnvironment);
+        const unsupportedManager = {
+            id: 'example:immutable',
+            supportsCreate: true,
+            supportsCustomName: false,
+            create: unsupportedCreate,
+        };
+        const supportedManager = {
+            id: 'example:venv',
+            supportsCreate: true,
+            supportsCustomName: true,
+            create: supportedCreate,
+        };
+        const firstScope = Uri.file('first');
+        const secondScope = Uri.file('second');
+        const mockEnvManagers = {
+            onDidChangeActiveEnvironment: new EventEmitter().event,
+            onDidChangePackageProviderPackages: new EventEmitter().event,
+            getEnvironmentManager: sinon.stub(),
+        };
+        mockEnvManagers.getEnvironmentManager.withArgs(firstScope).returns(unsupportedManager);
+        mockEnvManagers.getEnvironmentManager.withArgs(secondScope).returns(supportedManager);
+        const pickManager = sinon.stub(managerPickers, 'pickEnvironmentManager').resolves(supportedManager.id);
+        const api = new PythonEnvironmentApiImpl(
+            mockEnvManagers as unknown as ApiArgs[0],
+            { getProjects: () => [], onDidChangeProjects: new EventEmitter<void>().event } as unknown as ApiArgs[1],
+            {} as unknown as ApiArgs[2],
+            {} as unknown as ApiArgs[3],
+            { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4],
+        );
+        const options = { name: 'analysis-env' };
+
+        await api.createEnvironment([firstScope, secondScope], options);
+
+        assert.strictEqual(pickManager.callCount, 1);
+        assert.deepStrictEqual(pickManager.firstCall.args[0], [supportedManager]);
+        assert.ok(supportedCreate.calledOnceWithExactly([firstScope, secondScope], options));
+        assert.ok(unsupportedCreate.notCalled);
     });
 });
 

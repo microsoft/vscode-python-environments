@@ -34,7 +34,7 @@ import type {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from './types';
-import { PackageVersionLookupNotSupportedError } from './publicErrors';
+import { CreateEnvironmentOptionNotSupportedError, PackageVersionLookupNotSupportedError } from './publicErrors';
 import { INLINE_SCRIPT_MANAGER_ID } from './common/constants';
 import { traceError, traceInfo } from './common/logging';
 import { pickEnvironmentManager } from './common/pickers/managers';
@@ -169,6 +169,12 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             if (!manager.supportsCreate) {
                 throw new Error(`Environment manager does not support creating environments: ${manager.id}`);
             }
+            if (options?.name !== undefined && !manager.supportsCustomName) {
+                throw new CreateEnvironmentOptionNotSupportedError(
+                    'name',
+                    `Environment manager does not support named environment creation: ${manager.id}`,
+                );
+            }
             return manager.create(scope, options);
         } else if (Array.isArray(scope) && scope.length === 1 && scope[0] instanceof Uri) {
             return this.createEnvironment(scope[0], options);
@@ -186,12 +192,21 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
                 throw new Error('No environment managers found');
             }
 
-            const managerId = await pickEnvironmentManager(managers);
+            const compatibleManagers =
+                options?.name === undefined ? managers : managers.filter((manager) => manager.supportsCustomName);
+            if (compatibleManagers.length === 0) {
+                throw new CreateEnvironmentOptionNotSupportedError(
+                    'name',
+                    'None of the environment managers for the requested scopes support named environment creation.',
+                );
+            }
+
+            const managerId = await pickEnvironmentManager(compatibleManagers);
             if (!managerId) {
                 throw new Error('No environment manager selected');
             }
 
-            const manager = managers.find((m) => m.id === managerId);
+            const manager = compatibleManagers.find((m) => m.id === managerId);
             if (!manager) {
                 throw new Error('No environment manager found');
             }

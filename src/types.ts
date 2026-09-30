@@ -282,6 +282,19 @@ export type RefreshEnvironmentsScope = Uri | undefined;
 export type GetEnvironmentsScope = Uri | 'all' | 'global';
 
 /**
+ * Capabilities supported when creating an environment.
+ */
+export interface CreateEnvironmentCapabilities {
+    /**
+     * Whether the manager can create an environment with an exact caller-supplied name.
+     *
+     * When `true`, the manager must use {@link CreateEnvironmentOptions.name} exactly or
+     * reject the request. When `false` or omitted, named creation is unsupported.
+     */
+    readonly customName?: boolean;
+}
+
+/**
  * Event arguments for when the current Python environment changes.
  */
 export type DidChangeEnvironmentEventArgs = {
@@ -412,6 +425,13 @@ export interface EnvironmentManager {
     readonly log?: LogOutputChannel;
 
     /**
+     * Capabilities supported by this manager's {@link EnvironmentManager.create} implementation.
+     *
+     * Omitted capabilities are treated as unsupported.
+     */
+    readonly createCapabilities?: CreateEnvironmentCapabilities;
+
+    /**
      * The quick create details for the environment manager. Having this method also enables the quick create feature
      * for the environment manager. Should Implement {@link EnvironmentManager.create} to support quick create.
      */
@@ -426,8 +446,10 @@ export interface EnvironmentManager {
      * @remarks
      * Invoked when an environment of this manager's type should be created for the given
      * scope. Typical triggers include user-initiated environment-creation flows and
-     * programmatic creation via the API. Implementations should use a supplied
-     * {@link CreateEnvironmentOptions.name} or reject it when the requested name is invalid.
+     * programmatic creation via the API. Managers advertising
+     * `createCapabilities.customName` must use a supplied {@link CreateEnvironmentOptions.name}
+     * exactly or reject it. The API rejects named creation before invoking managers that do
+     * not advertise this capability.
      */
     create?(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions): Promise<PythonEnvironment | undefined>;
 
@@ -987,8 +1009,9 @@ export interface CreateEnvironmentOptions {
     /**
      * Portable path segment to use as the new environment's name. Directory separators,
      * control characters, Windows-reserved characters and device names, trailing periods
-     * or spaces, `.` and `..` are not allowed. When omitted, the environment manager may
-     * prompt for a name or choose a default.
+     * or spaces, `.` and `..` are not allowed. The selected manager must advertise
+     * {@link CreateEnvironmentCapabilities.customName}; otherwise creation rejects. When
+     * omitted, the environment manager may prompt for a name or choose a default.
      */
     name?: string;
     /**

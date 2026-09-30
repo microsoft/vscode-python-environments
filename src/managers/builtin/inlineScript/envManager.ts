@@ -328,6 +328,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     public readonly displayName = l10n.t('Inline scripts');
     public readonly preferredPackageManagerId = 'ms-python.python:pip';
     public readonly description: string | undefined = undefined;
+    public readonly createCapabilities = { customName: false } as const;
     public readonly tooltip: string | MarkdownString = new MarkdownString(
         l10n.t('Environments built from PEP 723 inline script metadata.'),
         true,
