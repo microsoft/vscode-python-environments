@@ -2,7 +2,7 @@ import { l10n } from 'vscode';
 import { GetEnvironmentsScope, PackageManagementOptions, PythonEnvironment } from '../api';
 import { VENV_MANAGER_ID } from '../common/constants';
 import { pickEnvironmentFrom } from '../common/pickers/environments';
-import { showInformationMessage } from '../common/window.apis';
+import { showQuickPick } from '../common/window.apis';
 import { waitForAllEnvManagers, waitForEnvManagerId } from './common/managerReady';
 import type { EnvironmentManagers } from './envManagers';
 
@@ -42,17 +42,15 @@ export async function selectPackageManagementEnvironment(
         return environment;
     }
 
-    const createNew = l10n.t('Create New Virtual Environment');
-    const useExisting = l10n.t('Use Existing Virtual Environment');
-    const continueGlobally = l10n.t('Continue Globally');
-    const choice = await showInformationMessage(
-        l10n.t('You are installing packages into a global Python environment. Where would you like to install them?'),
-        createNew,
-        useExisting,
-        continueGlobally,
-    );
+    const continueGlobally = { label: l10n.t('Continue Globally') };
+    const useExisting = { label: l10n.t('Use Existing Virtual Environment') };
+    const createNew = { label: l10n.t('Create New Virtual Environment') };
+    const choice = await showQuickPick([continueGlobally, useExisting, createNew], {
+        title: l10n.t('You are installing packages into a global Python environment'),
+        placeHolder: l10n.t('Select where to install the packages'),
+    });
 
-    if (choice === createNew) {
+    if (choice?.label === createNew.label) {
         await waitForEnvManagerId([VENV_MANAGER_ID]);
         const venvManager = envManagers.getEnvironmentManager(VENV_MANAGER_ID);
         if (!venvManager?.supportsCreate) {
@@ -61,16 +59,14 @@ export async function selectPackageManagementEnvironment(
         return venvManager.create('global', { quickCreate: true });
     }
 
-    if (choice === useExisting) {
+    if (choice?.label === useExisting.label) {
         const environments = await getEnvironments(envManagers, 'all');
         const virtualEnvironments = environments.filter(
             (candidate) =>
-                !globalEnvironments.some((globalEnvironment) =>
-                    hasSameEnvironmentId(candidate, globalEnvironment),
-                ),
+                !globalEnvironments.some((globalEnvironment) => hasSameEnvironmentId(candidate, globalEnvironment)),
         );
         return pickEnvironmentFrom(virtualEnvironments);
     }
 
-    return choice === continueGlobally ? environment : undefined;
+    return choice?.label === continueGlobally.label ? environment : undefined;
 }

@@ -273,7 +273,7 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
         getEnvironmentManager
             .withArgs('ms-python.python:venv')
             .returns({ supportsCreate: true, create } as unknown as InternalEnvironmentManager);
-        sinon.stub(windowApis, 'showInformationMessage').resolves('Create New Virtual Environment');
+        sinon.stub(windowApis, 'showQuickPick').resolves({ label: 'Create New Virtual Environment' });
 
         await api.managePackages(environment, { install: ['example'] });
 
@@ -291,7 +291,7 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
         const manager = { manage } as unknown as InternalPackageManager;
         const { api, environmentManagers, getPackageManager } = createApi(manager);
         environmentManagers.push(createDiscoveryManager([environment], [environment, selectedEnvironment]));
-        sinon.stub(windowApis, 'showInformationMessage').resolves('Use Existing Virtual Environment');
+        sinon.stub(windowApis, 'showQuickPick').resolves({ label: 'Use Existing Virtual Environment' });
         const pickEnvironment = sinon
             .stub(environmentPickers, 'pickEnvironmentFrom')
             .resolves(selectedEnvironment);
@@ -308,7 +308,7 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
         const manager = { manage } as unknown as InternalPackageManager;
         const { api, environmentManagers } = createApi(manager);
         environmentManagers.push(createDiscoveryManager([environment]));
-        sinon.stub(windowApis, 'showInformationMessage').resolves('Continue Globally');
+        sinon.stub(windowApis, 'showQuickPick').resolves({ label: 'Continue Globally' });
 
         await api.managePackages(environment, { install: ['example'] });
 
@@ -320,7 +320,7 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
         const manager = { manage } as unknown as InternalPackageManager;
         const { api, environmentManagers, getPackageManager } = createApi(manager);
         environmentManagers.push(createDiscoveryManager([environment]));
-        sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
+        sinon.stub(windowApis, 'showQuickPick').resolves(undefined);
 
         await api.managePackages(environment, { install: ['example'] });
 
@@ -334,13 +334,13 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
         const { api, environmentManagers } = createApi(manager);
         const getEnvironments = sinon.stub().resolves([environment]);
         environmentManagers.push({ getEnvironments } as unknown as InternalEnvironmentManager);
-        const showInformationMessage = sinon.stub(windowApis, 'showInformationMessage');
+        const showQuickPick = sinon.stub(windowApis, 'showQuickPick');
 
         await api.managePackages(environment, { install: ['example'], runHeadless: true });
         await api.managePackages(environment, { uninstall: ['example'] });
 
         assert.ok(getEnvironments.notCalled);
-        assert.ok(showInformationMessage.notCalled);
+        assert.ok(showQuickPick.notCalled);
         assert.strictEqual(manage.callCount, 2);
     });
 });
