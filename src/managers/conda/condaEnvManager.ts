@@ -551,20 +551,13 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                     }
                 }
             } else {
-                // If there is not an environment already assigned by user to this project
-                // then see if there is one in the collection
-                if (pathSorted.length === 1) {
-                    this.fsPathToEnv.set(normalizedPath, pathSorted[0]);
-                } else {
-                    // If there is more than one environment then we need to check if the project
-                    // is a subfolder of one of the environments
-                    const found = pathSorted.find((e) => {
-                        const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
-                        return t && normalizePath(t) === normalizedPath;
-                    });
-                    if (found) {
-                        this.fsPathToEnv.set(normalizedPath, found);
-                    }
+                // Infer a local environment only for its owning project, even when just one was found.
+                const found = pathSorted.find((e) => {
+                    const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
+                    return t && normalizePath(t) === normalizedPath;
+                });
+                if (found) {
+                    this.fsPathToEnv.set(normalizedPath, found);
                 }
             }
         }
