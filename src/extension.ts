@@ -12,6 +12,7 @@ import {
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
+import { initializeExperimentation } from './common/experimentation/service';
 import { InlineScriptPackagesNotManagedError } from './common/inlineScript/errors';
 import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
 import { setPersistentState } from './common/persistentState';
@@ -26,6 +27,7 @@ import {
     sendProjectStructureTelemetry,
 } from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
+import { registerTelemetryReporter } from './common/telemetry/reporter';
 import { safeRegister } from './common/utils/asyncUtils';
 import { createDeferred } from './common/utils/deferred';
 
@@ -160,6 +162,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
     context.subscriptions.push(outputChannel, registerLogger(outputChannel));
+    context.subscriptions.push(registerTelemetryReporter());
+    initializeExperimentation(context);
 
     ensureCorrectVersion();
 
