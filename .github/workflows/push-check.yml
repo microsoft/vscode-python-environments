@@ -83,7 +83,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.12', '3.14', '3.15-dev']
+        python-version: ['3.10', '3.12', '3.14', '3.15']
 
     steps:
       - name: Checkout
@@ -142,6 +142,7 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install Dependencies
         run: npm ci
@@ -170,7 +171,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.12', '3.14', '3.15-dev']
+        python-version: ['3.10', '3.12', '3.14', '3.15']
 
     steps:
       - name: Checkout
@@ -229,6 +230,7 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install Dependencies
         run: npm ci
@@ -260,7 +262,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.12', '3.14', '3.15-dev']
+        python-version: ['3.10', '3.12', '3.14', '3.15']
 
     steps:
       - name: Checkout
@@ -319,6 +321,7 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install Dependencies
         run: npm ci
