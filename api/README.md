@@ -41,11 +41,15 @@ Managers remain interfaces and may advertise an optional flat map of async
 capability checks. No base class or inheritance is required. Missing maps or
 entries use the exported default dictionaries; explicit unsupported results and
 probe errors never fall back to a supported default.
-Required operations default supported. Environment creation and removal default
-supported when the raw manager implements `create` or `remove`; explicit opt-outs
-still take precedence. Other optional methods/events and quick creation require
-an explicit opt-in, even if the corresponding hook exists. This changes discovery
-only, not whether existing operations can be called.
+Required operations default supported. Optional methods/events default supported
+when the corresponding raw hook is callable; missing hooks default unsupported.
+Existing options inherit their parent's effective support. Quick creation also
+requires raw `create` and `quickCreateConfig` hooks unless explicitly advertised.
+Install-spec formatting remains supported through the extension's fallback.
+No operation or event subscription is invoked to infer support. Managers should
+override unsupported stubs and context/tool restrictions explicitly. These
+compatibility defaults change discovery only, not existing operation dispatch,
+prompts, or UI gating.
 
 Consumers can query the selected package manager without invoking an operation:
 

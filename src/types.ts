@@ -380,7 +380,8 @@ export interface RemoveEnvironmentOptions {
 export interface EnvironmentManager {
     /**
      * Dynamic support overrides. Missing entries use the external environment capability defaults.
-     * Creation/removal default to raw method availability. Other optional features require explicit opt-in.
+     * Optional methods/events default to raw hook availability; existing options inherit parent support.
+     * Quick creation additionally requires the raw create and quickCreateConfig hooks unless advertised.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
     readonly capabilities?: Capabilities<EnvironmentCapability>;
@@ -665,7 +666,8 @@ export interface DidChangePackagesEventArgs {
 export interface PackageManager {
     /**
      * Dynamic support overrides. Missing entries use the external package capability defaults.
-     * Optional methods/events require explicit opt-in, regardless of hook presence.
+     * Optional methods/events default to raw hook availability; existing options inherit parent support.
+     * Advertise unsupported stubs and context/tool restrictions explicitly to refine these defaults.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
     readonly capabilities?: Capabilities<PackageCapability>;

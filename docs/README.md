@@ -1891,13 +1891,17 @@ if (typeof api.getPackageCapability === 'function') {
 
 ### Types and authoring
 
-`EnvironmentCapability` and `PackageCapability` are explicit string literal
-union types defining the allowed keys, independent of the default implementations.
-There are no separate runtime key arrays or objects.
+`EnvironmentCapability` and `PackageCapability` are string-literal unions derived
+from the keys of their default dictionaries using `keyof typeof`. Each dictionary
+is the single source of truth for its capability keys, descriptions, and defaults;
+adding a capability means adding one documented default entry. There are no
+separate handwritten key unions or runtime key arrays.
 Maps and resolver/query parameters accept only the corresponding keys, not an
-arbitrary `string`. Default dictionaries must cover every union member and cannot
-introduce unlisted keys. JavaScript callers still receive an unsupported result
-for unknown runtime keys.
+arbitrary `string`. The dictionaries use `satisfies Record<string, ...>` to validate
+checker signatures without widening their literal keys, and explicit
+`Promise<Support>` return types avoid circular inference through prerequisite
+resolvers. JavaScript callers still receive an unsupported result for unknown
+runtime keys.
 
 ```typescript
 type Support =
@@ -1956,59 +1960,72 @@ entry, otherwise `{ supported: false, reason: "Capability not implemented" }`.
 An explicit unsupported result or thrown error never triggers fallback.
 Unknown runtime keys are unsupported.
 
-Required operations default supported. Environment creation and removal default
-supported when the raw manager implements `create` or `remove`; no operation is
-invoked to determine support. Explicit opt-outs still take precedence. Other
-optional methods/events and quick creation default unsupported, even when the
-corresponding hook exists; managers must explicitly advertise these features.
-Existing option defaults resolve their parent,
-so a parent opt-out disables omitted child entries. Explicit child overrides
-are responsible for their own prerequisites.
+The defaults use compatibility-first heuristics:
 
-| Environment capability | Covered surface | Default when omitted |
-| --- | --- | --- |
-| `environments.list` | `getEnvironments` | Supported |
-| `environments.refresh` | `refresh` | Supported |
-| `environments.resolve` | `resolve`; target URI in `scope` | Supported |
-| `environments.getSelected` | `get` | Supported |
-| `environments.setSelected` | `set`, including clearing selection | Supported |
-| `environments.create` | `create` | Supported when the raw method exists |
-| `environments.create.quick` | `quickCreate` | Unsupported |
-| `environments.create.additionalPackages` | `additionalPackages` | Inherit create |
-| `environments.remove` | `remove` | Supported when the raw method exists |
-| `environments.remove.headless` | `runHeadless` | Inherit remove |
-| `environments.clearCache` | `clearCache` | Unsupported |
-| `environments.events.changed` | `onDidChangeEnvironments` | Unsupported |
-| `environments.events.selectionChanged` | `onDidChangeEnvironment` | Unsupported |
+1. Required contract methods default supported.
+2. Optional methods/events default supported when the corresponding raw hook is
+   callable (`typeof hook === 'function'`), otherwise unsupported. Wrapper methods
+   do not establish raw provider support.
+3. Existing options inherit their parent's effective support, including explicit
+   parent opt-outs. Quick creation additionally requires callable raw `create`
+   and `quickCreateConfig` hooks, matching the legacy support predicate.
+4. Features with an extension-provided fallback default supported.
 
-| Package capability | Covered surface | Default when omitted |
-| --- | --- | --- |
-| `packages.list` | `getPackages` | Supported |
-| `packages.list.skipCache` | `skipCache` | Inherit list |
-| `packages.refresh` | `refresh` | Supported |
-| `packages.manage` | `manage` | Supported |
-| `packages.manage.install` | `install` array | Inherit manage |
-| `packages.manage.uninstall` | `uninstall` array | Inherit manage |
-| `packages.manage.upgrade` | `upgrade` | Inherit install |
-| `packages.manage.headless` | `runHeadless` | Inherit manage |
-| `packages.manage.showSkipOption` | Interactive skip option | Inherit manage |
-| `packages.direct` | `getDirectPackageNames` / enrichment | Unsupported |
-| `packages.version` | Tool version via `getVersion` | Unsupported |
-| `packages.availableVersions` | `getPackageAvailableVersions` | Unsupported |
-| `packages.formatInstallSpec` | Versioned install syntax | Supported via `name==version` fallback |
-| `packages.clearCache` | `clearCache` | Unsupported |
-| `packages.watchTargets` | Custom `getPackageWatchTargets` | Unsupported |
-| `packages.events.changed` | `onDidChangePackages` | Unsupported |
+No operation, event subscription, or quick-create metadata hook is invoked to
+infer support. Explicit child advertisements own their prerequisites and can
+support implementations that do not use the default hooks. Newly introduced
+capabilities should remain unsupported until their compatibility rule is
+deliberately defined.
+
+In the tables, **Hook** means callable raw method/event presence, and **Inherit**
+means resolving the named parent capability. An optional input lets callers omit
+that argument; it is not proof that an implementation honors it. Inherited
+option defaults are optimistic compatibility assumptions.
+
+| Environment capability | Covered surface | Contract requirement | Default when omitted |
+| --- | --- | --- | --- |
+| `environments.list` | `getEnvironments` | Required method | Supported |
+| `environments.refresh` | `refresh` | Required method | Supported |
+| `environments.resolve` | `resolve`; target URI in `scope` | Required method | Supported |
+| `environments.getSelected` | `get` | Required method | Supported |
+| `environments.setSelected` | `set`, including clearing selection | Required method | Supported |
+| `environments.create` | `create` | Optional method | Hook |
+| `environments.create.quick` | `quickCreate`; `quickCreateConfig` metadata | Optional input on optional `create`; optional metadata method | Raw `create` and `quickCreateConfig` hooks, then inherit create |
+| `environments.create.additionalPackages` | `additionalPackages` | Optional input on optional `create` | Inherit create |
+| `environments.remove` | `remove` | Optional method | Hook |
+| `environments.remove.headless` | `runHeadless` | Optional input on optional `remove` | Inherit remove |
+| `environments.clearCache` | `clearCache` | Optional method | Hook |
+| `environments.events.changed` | `onDidChangeEnvironments` | Optional event | Hook |
+| `environments.events.selectionChanged` | `onDidChangeEnvironment` | Optional event | Hook |
+
+| Package capability | Covered surface | Contract requirement | Default when omitted |
+| --- | --- | --- | --- |
+| `packages.list` | `getPackages` | Required method | Supported |
+| `packages.list.skipCache` | `skipCache` | Optional input on required `getPackages` | Inherit list |
+| `packages.refresh` | `refresh` | Required method | Supported |
+| `packages.manage` | `manage` | Required method | Supported |
+| `packages.manage.install` | `install` array | Input on required `manage`; union requires install or uninstall | Inherit manage |
+| `packages.manage.uninstall` | `uninstall` array | Input on required `manage`; union requires install or uninstall | Inherit manage |
+| `packages.manage.upgrade` | `upgrade` | Optional input on required `manage` | Inherit install |
+| `packages.manage.headless` | `runHeadless` | Optional input on required `manage` | Inherit manage |
+| `packages.manage.showSkipOption` | `showSkipOption` | Optional input on required `manage` | Inherit manage |
+| `packages.direct` | `getDirectPackageNames` / enrichment | Optional method | Hook |
+| `packages.version` | Tool version via `getVersion` | Optional method | Hook |
+| `packages.availableVersions` | `getPackageAvailableVersions` | Optional method | Hook |
+| `packages.formatInstallSpec` | `formatInstallSpec` | Optional method | Supported via `name==version` fallback |
+| `packages.clearCache` | `clearCache` | Optional method | Hook |
+| `packages.watchTargets` | Custom `getPackageWatchTargets` | Optional method | Hook |
+| `packages.events.changed` | `onDidChangePackages` | Optional event | Hook |
 
 ### Compatibility and built-in limitations
 
 Legacy providers need not add a map or change inheritance to keep existing
-operations working. Creation/removal support follows their raw methods unless
-overridden. Other optional features report unsupported until explicitly
-advertised, even when callable. Required operations and inherited option defaults
-remain deliberately optimistic: support does not guarantee that a method honors
-every request or will succeed. Built-in managers explicitly advertise their
-supported optional features.
+operations working. Optional support follows their raw hooks unless overridden.
+Required operations, hook presence, and inherited options are compatibility
+inferences, not guarantees that a method honors every request or will succeed.
+Advertise unsupported stubs and contextual/tool restrictions explicitly.
+Capability queries remain advisory: existing operation dispatch, synchronous
+support getters, prompts, and UI gating are unchanged.
 
 Venv and Conda support additional packages in quick creation only. Quick-path
 support does not certify a prompt-free invocation: venv dependency validation
@@ -2018,15 +2035,23 @@ unexpected metadata I/O failures reject rather than being reported as invalid
 metadata. Conda quick support does not generate or reserve an environment name.
 Headless removal permits progress/error UI; Conda and inline-script removal
 already need no confirmation.
+Inline-script explicitly advertises quick creation without `quickCreateConfig`,
+and reports URI resolution unsupported because its `resolve` method is a stub.
 
 Pip version lookup depends on the selected backend and tool version (pip >=21.2;
 pip >=25.1 changes parsing, not the capability). Poetry version lookup, upgrade,
-and interactive skip are unsupported; project-sensitive checks use its scoped
-instance. Conda has no direct-name hook. Direct-package classification is
+and interactive skip are explicitly unsupported, even though its version-lookup
+method exists; project-sensitive checks use its scoped instance. Conda has no
+direct-name hook. Direct-package classification is
 best-effort, not exact installation intent; absent `isTransitive` remains unknown.
 
+`packages.clearCache` describes the optional provider contract hook. No built-in
+package manager implements it, and the internal package wrapper does not forward
+it; this capability does not introduce a public cache-clearing operation.
+
 Provider event keys describe provider hooks, not extension-generated events.
-Watch-target support means custom patterns, not general watching. Scope
+Watch-target support means custom patterns, not general watching: default
+site-packages watchers do not depend on this hook. Scope
 variants, package names, combined operation arguments, lifecycle (`dispose`),
 project binding (`createForProject`), metadata, and version lookup `errorMode`
 are not additional capabilities. Project CRUD, execution, environment variables,

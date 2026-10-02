@@ -19,6 +19,7 @@ suite('Manager capabilities integration', function () {
     this.timeout(60_000);
     let api: PythonEnvironmentApi;
     let environment: PythonEnvironment;
+    let manager: EnvironmentManager;
     let packages: PackageManager;
     let capabilities: Capabilities<PackageCapability>;
     let environmentCapabilities: Capabilities<EnvironmentCapability>;
@@ -51,7 +52,7 @@ suite('Manager capabilities integration', function () {
                 throw new Error('A capability query must not invoke the optional operation');
             },
         };
-        const manager: EnvironmentManager = {
+        manager = {
             name: 'capability-test-environment',
             get capabilities() {
                 return environmentCapabilities;
@@ -88,10 +89,46 @@ suite('Manager capabilities integration', function () {
         );
     });
 
-    test('optional hooks require explicit advertisements across the extension boundary', async () => {
-        assert.strictEqual((await api.getPackageCapability(environment, 'packages.direct')).supported, false);
+    test('optional hooks infer support while advertisements override it across the extension boundary', async () => {
+        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.direct'), { supported: true });
+        const unsupported = { supported: false, reason: 'Disabled for test' } as const;
+        capabilities = { 'packages.direct': async () => unsupported };
+        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.direct'), unsupported);
+        capabilities = {};
+        delete packages.getDirectPackageNames;
+        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.direct'), {
+            supported: false,
+            reason: 'Capability not implemented',
+        });
         capabilities = { 'packages.direct': async () => ({ supported: true }) };
         assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.direct'), { supported: true });
+    });
+
+    test('quick creation infers legacy hooks while preserving contextual parent overrides', async () => {
+        assert.strictEqual(
+            (await api.getEnvironmentCapability(environmentManagerId, 'environments.create.quick')).supported,
+            false,
+        );
+        manager.quickCreateConfig = () => {
+            throw new Error('A capability query must not invoke quick-create metadata');
+        };
+        manager.clearCache = async () => {
+            throw new Error('A capability query must not clear caches');
+        };
+        for (const key of ['environments.create.quick', 'environments.clearCache'] as const) {
+            assert.deepStrictEqual(await api.getEnvironmentCapability(environmentManagerId, key), { supported: true });
+        }
+        const unsupported = { supported: false, reason: 'Creation disabled in this scope' } as const;
+        environmentCapabilities = {
+            'environments.create': async (context) => {
+                assert.strictEqual(context.scope, 'global');
+                return unsupported;
+            },
+        };
+        assert.deepStrictEqual(
+            await api.getEnvironmentCapability(environmentManagerId, 'environments.create.quick', { scope: 'global' }),
+            unsupported,
+        );
     });
 
     teardown(() => {
@@ -118,7 +155,7 @@ suite('Manager capabilities integration', function () {
         assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.manage.install'), {
             supported: true,
         });
-        assert.strictEqual((await api.getPackageCapability(environment, 'packages.direct')).supported, false);
+        assert.strictEqual((await api.getPackageCapability(environment, 'packages.direct')).supported, true);
         assert.strictEqual(manageCalls, 0);
     });
 
