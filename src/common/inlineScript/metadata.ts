@@ -709,7 +709,7 @@ export function sliceHeaderBytes(text: string): string {
  * Returns `undefined` for:
  *  - any URI scheme other than `file:` (notebook cells, untitled
  *    buffers, git: revisions, etc. are out of scope);
- *  - any I/O error (logged at `traceVerbose`), unless strict mode is requested;
+ *  - any I/O error (logged at `traceVerbose`);
  *  - any of the malformed-metadata cases handled by
  *    `readInlineScriptMetadata`.
  * @param uri The local script to read.

@@ -47,9 +47,10 @@ Existing options inherit their parent's effective support. Quick creation also
 requires raw `create` and `quickCreateConfig` hooks unless explicitly advertised.
 Install-spec formatting remains supported through the extension's fallback.
 No operation or event subscription is invoked to infer support. Managers should
-override unsupported stubs and context/tool restrictions explicitly. These
-compatibility defaults change discovery only, not existing operation dispatch,
-prompts, or UI gating.
+override unsupported stubs explicitly and may refine context/tool restrictions
+later. Runtime preflight checks are not required to advertise general support.
+These compatibility defaults change discovery only, not existing operation
+dispatch, prompts, or UI gating.
 
 Consumers can query the selected package manager without invoking an operation:
 
@@ -88,4 +89,3 @@ extensibility - with field tables, parameter tables, return types, and examples.
 - [Extensibility](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#extensibility) - register your own environment manager, package manager, or project creator
 
 See [`CHANGELOG.md`](https://github.com/microsoft/vscode-python-environments/blob/main/api/CHANGELOG.md) for API changes between versions.
-
