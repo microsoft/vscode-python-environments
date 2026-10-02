@@ -1555,7 +1555,7 @@ trigger, as the specification.
 | `name` | `string` | Yes | Manager name. Allowed characters: `a-z`, `A-Z`, `0-9`, `-`, `_`. |
 | `displayName` | `string` | No | Name shown in the UI. |
 | `preferredPackageManagerId` | `string` | Yes | Package manager to pair with, formatted `<publisher>.<extension>:<manager-name>`, for example `ms-python.python:pip`. |
-| `capabilities` | `Capabilities<EnvironmentCapability>` | No | Dynamic support overrides; omitted entries use the [external defaults](#manager-capabilities). |
+| `capabilities` | `Capabilities<EnvironmentManagerCapability>` | No | Dynamic support overrides; omitted entries use the [external defaults](#manager-capabilities). |
 | `description` | `string` | No | Secondary text shown in the UI. |
 | `tooltip` | `string \| MarkdownString` | No | Hover text for the manager. |
 | `iconPath` | [`IconPath`](#iconpath) | No | Icon shown for the manager. |
@@ -1624,7 +1624,7 @@ Reports and changes the packages of an environment.
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
 | `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
-| `capabilities` | `Capabilities<PackageCapability>` | No | Dynamic support overrides evaluated on the correct project-bound instance; see [capabilities](#manager-capabilities). |
+| `capabilities` | `Capabilities<PackageManagerCapability>` | No | Dynamic support overrides evaluated on the correct project-bound instance; see [capabilities](#manager-capabilities). |
 | `dispose()` | `() => void` | No | Releases resources owned by the manager. The extension disposes project-scoped managers when their project is removed or replaced, their provider is unregistered, or the extension shuts down. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
@@ -1856,15 +1856,15 @@ support checks are unchanged.
 ### Querying support
 
 ```typescript
-getEnvironmentCapability(
+getEnvironmentManagerCapability(
     managerId: string,
-    capability: EnvironmentCapability,
+    capability: EnvironmentManagerCapability,
     context?: CapabilityContext,
 ): Promise<Support>;
 
-getPackageCapability(
+getPackageManagerCapability(
     environment: PythonEnvironment,
-    capability: PackageCapability,
+    capability: PackageManagerCapability,
     project?: PythonProject,
 ): Promise<Support>;
 ```
@@ -1881,8 +1881,8 @@ or extensions.
 Feature-detect the query methods when supporting older extension runtimes:
 
 ```typescript
-if (typeof api.getPackageCapability === 'function') {
-    const support = await api.getPackageCapability(environment, 'packages.direct');
+if (typeof api.getPackageManagerCapability === 'function') {
+    const support = await api.getPackageManagerCapability(environment, 'packages.direct');
     if (!support.supported) {
         // support.reason explains why this feature is unavailable.
     }
@@ -1891,7 +1891,7 @@ if (typeof api.getPackageCapability === 'function') {
 
 ### Types and authoring
 
-`EnvironmentCapability` and `PackageCapability` are string-literal unions derived
+`EnvironmentManagerCapability` and `PackageManagerCapability` are string-literal unions derived
 from the keys of their default dictionaries using `keyof typeof`. Each dictionary
 is the single source of truth for its capability keys, descriptions, and defaults;
 adding a capability means adding one documented default entry. There are no
@@ -1926,7 +1926,7 @@ No base class, constructor changes, or registration-time binding is needed:
 
 ```typescript
 // Members of a PackageManager implementation:
-readonly capabilities: Capabilities<PackageCapability> = {
+readonly capabilities: Capabilities<PackageManagerCapability> = {
     'packages.availableVersions': async (context) =>
         this.checkVersionLookupSupport(context),
     'packages.manage.upgrade': async (_context) => ({

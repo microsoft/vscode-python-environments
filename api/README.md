@@ -56,8 +56,8 @@ Consumers can query the selected package manager without invoking an operation:
 ```typescript
 const api = await PythonEnvironments.api();
 const environment = await api.getEnvironment(undefined);
-if (environment && typeof api.getPackageCapability === 'function') {
-    const support = await api.getPackageCapability(environment, 'packages.direct');
+if (environment && typeof api.getPackageManagerCapability === 'function') {
+    const support = await api.getPackageManagerCapability(environment, 'packages.direct');
     if (support.supported) {
         // Best-effort direct/transitive package classification is available.
     }
@@ -88,3 +88,4 @@ extensibility - with field tables, parameter tables, return types, and examples.
 - [Extensibility](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#extensibility) - register your own environment manager, package manager, or project creator
 
 See [`CHANGELOG.md`](https://github.com/microsoft/vscode-python-environments/blob/main/api/CHANGELOG.md) for API changes between versions.
+
