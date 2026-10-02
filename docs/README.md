@@ -274,11 +274,13 @@ applies to.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `quickCreate` | `boolean` | No | `true` creates without any prompts. `false` means the user explicitly declined quick create, so prompts are allowed. `undefined` leaves the decision to the manager, which may offer quick create. |
-| `additionalPackages` | `string[]` | No | Packages to install in addition to whatever the manager installs by default. |
+| `name` | `string` | `false` | Portable path segment to use as the new environment's name. Directory separators, control characters, Windows-reserved filename characters (such as `:` and `?`) and device names (such as `CON` and `NUL`), trailing periods or spaces, `.` and `..` are rejected. The selected manager must advertise `createCapabilities.customName`; otherwise creation rejects. When omitted, the manager may prompt for a name or choose a default. |
+| `quickCreate` | `boolean` | `false` | `true` creates without any prompts. `false` means the user explicitly declined quick create, so prompts are allowed. `undefined` leaves the decision to the manager, which may offer quick create. |
+| `additionalPackages` | `string[]` | `false` | Packages to install in addition to whatever the manager installs by default. |
 
 ```typescript
 const env = await api.createEnvironment(projectUri, {
+    name: 'analysis-env',
     quickCreate: true,
     additionalPackages: ['requests', 'pytest'],
 });
@@ -506,16 +508,17 @@ createEnvironment(
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `scope` | [`CreateEnvironmentScope`](#scope-types) | Yes | `Uri` or `Uri[]` for the projects the environment is created for; `'global'` creates one outside any project. |
-| `options` | [`CreateEnvironmentOptions`](#createenvironmentoptions) | No | Controls prompting (`quickCreate`) and extra packages (`additionalPackages`). |
+| `options` | [`CreateEnvironmentOptions`](#createenvironmentoptions) | No | Controls the environment name (`name`), prompting (`quickCreate`), and extra packages (`additionalPackages`). |
 
 **Returns** `Promise<PythonEnvironment | undefined>` - `undefined` when no
 environment was created, for example because the user cancelled the flow.
 Rejects when no environment manager is registered for the scope, when the
-manager does not support creation, or when creation itself fails - so handle
-errors as well as `undefined`.
+manager does not support creation, when a supplied name is unsupported, or when
+creation itself fails - so handle errors as well as `undefined`.
 
 ```typescript
 const created = await api.createEnvironment(projectUri, {
+    name: 'analysis-env',
     quickCreate: true,
     additionalPackages: ['requests'],
 });
@@ -1561,6 +1564,7 @@ trigger, as the specification.
 | `set(scope, environment?)` | `(scope: SetEnvironmentScope, environment?: PythonEnvironment) => Promise<void>` | Yes | Sets or clears the active environment for the scope. Also called at startup to rehydrate persisted state. |
 | `get(scope)` | `(scope: GetEnvironmentScope) => Promise<PythonEnvironment \| undefined>` | Yes | Returns the active environment for the scope. Called very frequently. |
 | `resolve(context)` | `(context: ResolveEnvironmentContext) => Promise<PythonEnvironment \| undefined>` | Yes | Turns a `Uri` for an interpreter or environment folder into a fully populated environment with complete `execInfo`. |
+| `createCapabilities` | `CreateEnvironmentCapabilities` | No | Declares optional creation behavior. Set `customName: true` only when `create` uses a supplied name exactly or rejects it. Omitted capabilities are unsupported. |
 | `create(scope, options?)` | `(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions) => Promise<PythonEnvironment \| undefined>` | No | Creates an environment. Omit the method entirely if creation is unsupported - the UI disables create when `create === undefined`. Add a `.gitignore` when creating a folder inside the workspace. |
 | `remove(environment, options?)` | `(environment: PythonEnvironment, options?: RemoveEnvironmentOptions) => Promise<void>` | No | Deletes an environment. |
 | `quickCreateConfig()` | `() => QuickCreateConfig \| undefined` | No | Describes the quick create path. Implementing it enables quick create, which requires `create` too. |

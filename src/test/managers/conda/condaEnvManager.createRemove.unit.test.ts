@@ -4,7 +4,7 @@ import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { QuickPickItem, Uri } from 'vscode';
+import { QuickInputButtons, QuickPickItem, Uri } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -116,6 +116,97 @@ suite('CondaEnvManager.create - step-based flow', () => {
         assert.ok(createNamedStub.calledOnceWithExactly(api, sinon.match.any, sinon.match.any, 'fallback-env', '3.12'));
         assert.ok(createPrefixStub.notCalled);
     });
+
+    test('uses a supplied name without showing the environment type or name prompts', async () => {
+        const createdEnvironment = {} as PythonEnvironment;
+        const showQuickPickStub = sinon
+            .stub(windowApis, 'showQuickPickWithButtons')
+            .resolves({ label: 'Python', description: '3.12' } as QuickPickItem);
+        const showInputBoxStub = sinon.stub(windowApis, 'showInputBoxWithButtons');
+        const createNamedStub = sinon.stub(condaUtils, 'createNamedCondaEnvironment').resolves(createdEnvironment);
+        const api = {
+            getEnvironments: sinon.stub().resolves([]),
+            getPythonProject: sinon.stub().returns(undefined),
+        } as unknown as PythonEnvironmentApi;
+
+        const result = await createStepBasedCondaFlow(
+            api,
+            createMockLogOutputChannel(),
+            {} as EnvironmentManager,
+            Uri.file('workspace'),
+            'analysis-env',
+        );
+
+        assert.strictEqual(result, createdEnvironment);
+        assert.ok(showQuickPickStub.calledOnce);
+        assert.ok(showInputBoxStub.notCalled);
+        assert.ok(createNamedStub.calledOnceWithExactly(api, sinon.match.any, sinon.match.any, 'analysis-env', '3.12'));
+    });
+
+    test('does not replace a supplied name when navigating back from Python selection', async () => {
+        const showQuickPickStub = sinon.stub(windowApis, 'showQuickPickWithButtons').rejects(QuickInputButtons.Back);
+        const showInputBoxStub = sinon.stub(windowApis, 'showInputBoxWithButtons');
+        const createNamedStub = sinon.stub(condaUtils, 'createNamedCondaEnvironment');
+        const api = {
+            getEnvironments: sinon.stub().resolves([]),
+            getPythonProject: sinon.stub().returns(undefined),
+        } as unknown as PythonEnvironmentApi;
+
+        const result = await createStepBasedCondaFlow(
+            api,
+            createMockLogOutputChannel(),
+            {} as EnvironmentManager,
+            Uri.file('workspace'),
+            'analysis-env',
+        );
+
+        assert.strictEqual(result, undefined);
+        assert.ok(showQuickPickStub.calledOnce);
+        assert.ok(showInputBoxStub.notCalled);
+        assert.ok(createNamedStub.notCalled);
+    });
+
+    test('uses the prefix name selected by the user', async () => {
+        const tempRoot = await fse.mkdtemp(path.join(os.tmpdir(), 'conda-prefix-flow-'));
+        try {
+            await fse.mkdirp(path.join(tempRoot, '.conda'));
+            const showQuickPickStub = sinon.stub(windowApis, 'showQuickPickWithButtons');
+            showQuickPickStub
+                .onFirstCall()
+                .resolves({ label: CondaStrings.condaPrefix, description: 'Prefix' } as QuickPickItem);
+            showQuickPickStub.onSecondCall().resolves({ label: 'Python', description: '3.12' } as QuickPickItem);
+            sinon.stub(windowApis, 'showInputBoxWithButtons').resolves('analysis-env');
+            sinon.stub(condaUtils, 'getLocation').resolves(tempRoot);
+            const createdEnvironment = {} as PythonEnvironment;
+            const createPrefixStub = sinon
+                .stub(condaUtils, 'createPrefixCondaEnvironment')
+                .resolves(createdEnvironment);
+            const api = {
+                getEnvironments: sinon.stub().resolves([]),
+                getPythonProject: sinon.stub().returns(undefined),
+            } as unknown as PythonEnvironmentApi;
+
+            const result = await createStepBasedCondaFlow(
+                api,
+                createMockLogOutputChannel(),
+                {} as EnvironmentManager,
+                Uri.file('workspace'),
+            );
+
+            assert.strictEqual(result, createdEnvironment);
+            assert.ok(
+                createPrefixStub.calledOnceWithExactly(
+                    api,
+                    sinon.match.any,
+                    sinon.match.any,
+                    path.join(tempRoot, 'analysis-env'),
+                    '3.12',
+                ),
+            );
+        } finally {
+            await fse.remove(tempRoot);
+        }
+    });
 });
 
 suite('CondaEnvManager.create - orchestration', () => {
@@ -172,6 +263,35 @@ suite('CondaEnvManager.create - orchestration', () => {
         assert.strictEqual(quickCreateStub.firstCall.args[3], DEFAULT_CONDA_PREFIX);
         assert.strictEqual(quickCreateStub.firstCall.args[4], './.conda');
         assert.deepStrictEqual(quickCreateStub.firstCall.args[5], ['pytest']);
+    });
+
+    test('global quick create uses an explicit name instead of generating one', async () => {
+        const manager = createManager();
+        const env = makeEnv('analysis-env', testPath('miniconda3', 'envs', 'analysis-env'), '3.12.0');
+        quickCreateStub.resolves(env);
+
+        const result = await manager.create('global', {
+            name: 'analysis-env',
+            quickCreate: true,
+        });
+
+        assert.strictEqual(result, env);
+        assert.ok(getDefaultPrefixStub.calledOnce);
+        assert.ok(generateNameStub.notCalled);
+        assert.strictEqual(quickCreateStub.firstCall.args[4], 'analysis-env');
+    });
+
+    test('custom create forwards an explicit name to the interactive flow', async () => {
+        const manager = createManager();
+        const env = makeEnv('analysis-env', testPath('miniconda3', 'envs', 'analysis-env'), '3.12.0');
+        createCondaStub.resolves(env);
+        const scope = Uri.file(testPath('workspace', 'project'));
+
+        const result = await manager.create(scope, { name: 'analysis-env' });
+
+        assert.strictEqual(result, env);
+        assert.strictEqual(createCondaStub.firstCall.args[3], scope);
+        assert.strictEqual(createCondaStub.firstCall.args[4], 'analysis-env');
     });
 
     test('project quick create uses the project root and writes .gitignore', async () => {

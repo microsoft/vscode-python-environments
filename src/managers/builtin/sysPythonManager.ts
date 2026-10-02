@@ -51,6 +51,7 @@ export class SysPythonManager implements EnvironmentManager {
     public readonly description: string | undefined;
     public readonly tooltip: string | MarkdownString;
     public readonly iconPath: IconPath;
+    public readonly createCapabilities = { customName: false } as const;
 
     constructor(
         private readonly nativeFinder: NativePythonFinder,

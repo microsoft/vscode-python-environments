@@ -282,6 +282,19 @@ export type RefreshEnvironmentsScope = Uri | undefined;
 export type GetEnvironmentsScope = Uri | 'all' | 'global';
 
 /**
+ * Capabilities supported when creating an environment.
+ */
+export interface CreateEnvironmentCapabilities {
+    /**
+     * Whether the manager can create an environment with an exact caller-supplied name.
+     *
+     * When `true`, the manager must use {@link CreateEnvironmentOptions.name} exactly or
+     * reject the request. When `false` or omitted, named creation is unsupported.
+     */
+    readonly customName?: boolean;
+}
+
+/**
  * Event arguments for when the current Python environment changes.
  */
 export type DidChangeEnvironmentEventArgs = {
@@ -412,6 +425,13 @@ export interface EnvironmentManager {
     readonly log?: LogOutputChannel;
 
     /**
+     * Capabilities supported by this manager's {@link EnvironmentManager.create} implementation.
+     *
+     * Omitted capabilities are treated as unsupported.
+     */
+    readonly createCapabilities?: CreateEnvironmentCapabilities;
+
+    /**
      * The quick create details for the environment manager. Having this method also enables the quick create feature
      * for the environment manager. Should Implement {@link EnvironmentManager.create} to support quick create.
      */
@@ -420,13 +440,16 @@ export interface EnvironmentManager {
     /**
      * Creates a new Python environment within the specified scope. Create should support adding a .gitignore file if it creates a folder within the workspace. If a manager does not support environment creation, do not implement this method; the UI disables "create" options when `this.manager.create === undefined`.
      * @param scope - The scope within which to create the environment.
-     * @param options - Optional parameters for creating the Python environment.
+     * @param options - Optional parameters for creating the Python environment, including its name.
      * @returns A promise that resolves to the created Python environment, or undefined if creation failed.
      *
      * @remarks
      * Invoked when an environment of this manager's type should be created for the given
      * scope. Typical triggers include user-initiated environment-creation flows and
-     * programmatic creation via the API.
+     * programmatic creation via the API. Managers advertising
+     * `createCapabilities.customName` must use a supplied {@link CreateEnvironmentOptions.name}
+     * exactly or reject it. The API rejects named creation before invoking managers that do
+     * not advertise this capability.
      */
     create?(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions): Promise<PythonEnvironment | undefined>;
 
@@ -983,6 +1006,14 @@ export type PackageManagementOptions = PackageManagementInteractionOptions &
  * Options for creating a Python environment.
  */
 export interface CreateEnvironmentOptions {
+    /**
+     * Portable path segment to use as the new environment's name. Directory separators,
+     * control characters, Windows-reserved characters and device names, trailing periods
+     * or spaces, `.` and `..` are not allowed. The selected manager must advertise
+     * {@link CreateEnvironmentCapabilities.customName}; otherwise creation rejects. When
+     * omitted, the environment manager may prompt for a name or choose a default.
+     */
+    name?: string;
     /**
      * Provides some context about quick create based on user input.
      *   - if true, the environment should be created without any user input or prompts.
