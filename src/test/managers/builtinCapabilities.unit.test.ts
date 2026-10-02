@@ -23,7 +23,7 @@ import { PoetryPackageManager } from '../../managers/poetry/poetryPackageManager
 import { createMockLogOutputChannel } from '../mocks/helper';
 
 suite('Built-in manager capabilities', () => {
-    const root = path.join(process.cwd(), 'capability-fixtures');
+    const root = path.join(__dirname, 'capability-fixtures');
     const project: PythonProject = { name: 'project', uri: Uri.file(path.join(root, 'project')) };
     let api: PythonEnvironmentApi;
     let log: ReturnType<typeof createMockLogOutputChannel>;

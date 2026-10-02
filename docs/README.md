@@ -1960,6 +1960,8 @@ only `(context)`. Do not copy defaults into each provider.
 The resolvers choose the advertised checker first, otherwise the dictionary
 entry, otherwise `{ supported: false, reason: "Capability not implemented" }`.
 An explicit unsupported result or thrown error never triggers fallback.
+An advertisement must be a checker function or `undefined` (use defaults).
+Other values reject with a `TypeError` rather than silently using defaults.
 Unknown runtime keys are unsupported.
 
 The defaults use compatibility-first heuristics:

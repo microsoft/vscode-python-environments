@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
-import { Uri } from 'vscode';
+import { l10n, Uri } from 'vscode';
 import {
     CapabilityContext,
     defaultEnvironmentCapabilities,
@@ -80,7 +80,7 @@ const packageDefaults: Record<PackageManagerCapability, boolean> = {
 
 suite('Manager capabilities', () => {
     const supported: Support = { supported: true };
-    const notImplemented: Support = { supported: false, reason: 'Capability not implemented' };
+    const notImplemented: Support = { supported: false, reason: l10n.t('Capability not implemented') };
     const denied: Support = { supported: false, reason: 'Disabled by provider' };
 
     suite('Defaults', () => {
@@ -164,6 +164,30 @@ suite('Manager capabilities', () => {
     });
 
     suite('Advertisements and prerequisites', () => {
+        test('undefined advertisements retain defaults', async () => {
+            const env = environmentManager({ capabilities: { 'environments.list': undefined } });
+            const pkg = packageManager({ capabilities: { 'packages.list': undefined } });
+            assert.deepStrictEqual(await environmentCapability(env, 'environments.list'), supported);
+            assert.deepStrictEqual(await packageCapability(pkg, 'packages.list'), supported);
+        });
+
+        test('malformed advertisements reject instead of silently using defaults', async () => {
+            for (const value of [null, false, { supported: true }]) {
+                const env = environmentManager();
+                const pkg = packageManager();
+                Reflect.set(env, 'capabilities', { 'environments.list': value });
+                Reflect.set(pkg, 'capabilities', { 'packages.list': value });
+                await assert.rejects(
+                    environmentCapability(env, 'environments.list'),
+                    (error) => error instanceof TypeError && error.message.includes('environments.list'),
+                );
+                await assert.rejects(
+                    packageCapability(pkg, 'packages.list'),
+                    (error) => error instanceof TypeError && error.message.includes('packages.list'),
+                );
+            }
+        });
+
         test('environment overrides win in either direction; omitted entries keep defaults', async () => {
             const manager = environmentManager({
                 capabilities: {
