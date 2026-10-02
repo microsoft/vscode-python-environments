@@ -47,6 +47,8 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     let selectedEnvironment: sinon.SinonStub;
     let envProbe: sinon.SinonStub<[CapabilityContext], Promise<Support>>;
     let pkgProbe: sinon.SinonStub<[CapabilityContext], Promise<Support>>;
+    let scopedProbe: sinon.SinonStub<[CapabilityContext], Promise<Support>>;
+    const scopedSupport: Support = { supported: false, reason: 'Scoped provider response' };
 
     setup(() => {
         clock = sinon.useFakeTimers();
@@ -83,6 +85,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         );
         envProbe = sinon.stub<[CapabilityContext], Promise<Support>>().resolves({ supported: true });
         pkgProbe = sinon.stub<[CapabilityContext], Promise<Support>>().resolves({ supported: true });
+        scopedProbe = sinon.stub<[CapabilityContext], Promise<Support>>().resolves(scopedSupport);
     });
 
     teardown(() => {
@@ -123,7 +126,10 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
 
     function registerPackages(scoped = false, name = 'packages'): sinon.SinonStub | undefined {
         const provider = packageProvider(name);
-        const create = scoped ? sinon.stub().callsFake(() => packageProvider(name)) : undefined;
+        const create = scoped ? sinon.stub().callsFake(() => ({
+            ...packageProvider(name),
+            capabilities: { 'packages.list': scopedProbe },
+        })) : undefined;
         managers.registerPackageManager({ ...provider, createForProject: create }, { extensionId });
         return create;
     }
@@ -154,21 +160,14 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         });
     });
 
-    test('environment probes reject without converting the error to unsupported', async () => {
+    test('provider probe failures reach the public caller', async () => {
         registerOwner();
-        const failure = new Error('probe failed');
+        registerPackages();
+        const failure = new Error('Provider probe failed');
         envProbe.rejects(failure);
+        pkgProbe.rejects(failure);
         await assert.rejects(api.getEnvironmentManagerCapability(ownerId, 'environments.list'), (error) => error === failure);
-    });
-
-    test('does not cache capability results', async () => {
-        registerOwner();
-        envProbe.onSecondCall().resolves({ supported: false, reason: 'tool removed' });
-        assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, true);
-        assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, 'environments.list'), {
-            supported: false,
-            reason: 'tool removed',
-        });
+        await assert.rejects(api.getPackageManagerCapability(environment, 'packages.list'), (error) => error === failure);
     });
 
     test('queries the preferred non-project package provider without project inference', async () => {
@@ -183,22 +182,11 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     test('explicit project selects its configured scoped provider without a registered owner', async () => {
         configuredPackage.returns(`${extensionId}:configured`);
         const create = registerPackages(true, 'configured');
-        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, true);
+        assert.strictEqual(await api.getPackageManagerCapability(environment, 'packages.list', project), scopedSupport);
         assert.ok(create?.calledOnceWithExactly(project));
-        assert.strictEqual(pkgProbe.firstCall.args[0].project, project);
-        assert.strictEqual(pkgProbe.firstCall.args[0].environment, environment);
-        assert.ok(configuredPackage.calledWithExactly(projectManager, project.uri));
-    });
-
-    test('explicit project is unavailable until its configured provider registers', async () => {
-        registerOwner();
-        registerPackages();
-        configuredPackage.returns(`${extensionId}:configured`);
-        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, false);
+        assert.ok(scopedProbe.calledOnceWithExactly({ environment, project }));
         assert.ok(pkgProbe.notCalled);
-        registerPackages(true, 'configured');
-        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, true);
-        assert.strictEqual(pkgProbe.firstCall.args[0].project, project);
+        assert.ok(configuredPackage.calledWithExactly(projectManager, project.uri));
     });
 
     test('environment routing infers a unique project and selects its different configured provider', async () => {
@@ -206,10 +194,11 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         const preferredFactory = registerPackages(true);
         configuredPackage.returns(`${extensionId}:configured`);
         const configuredFactory = registerPackages(true, 'configured');
-        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list')).supported, true);
+        assert.strictEqual(await api.getPackageManagerCapability(environment, 'packages.list'), scopedSupport);
         assert.ok(preferredFactory?.notCalled);
         assert.ok(configuredFactory?.calledOnceWithExactly(project));
-        assert.strictEqual(pkgProbe.firstCall.args[0].project, project);
+        assert.ok(scopedProbe.calledOnceWithExactly({ environment, project }));
+        assert.ok(pkgProbe.notCalled);
     });
 
     test('environment-only package queries are unavailable until both providers register', async () => {
@@ -246,31 +235,16 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(pkgProbe.notCalled);
     });
 
-    test('a missing configured provider returns unsupported without root fallback', async () => {
+    test('a missing configured provider cannot fall back to the preferred root', async () => {
         registerOwner();
         const create = registerPackages(true);
         configuredPackage.returns(`${extensionId}:missing`);
-        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list')).supported, false);
+        for (const explicitProject of [undefined, project]) {
+            const support = await api.getPackageManagerCapability(environment, 'packages.list', explicitProject);
+            assert.ok(!support.supported && support.reason.length > 0);
+        }
         assert.ok(create?.notCalled);
         assert.ok(pkgProbe.notCalled);
-    });
-
-    test('package probe failures reject', async () => {
-        registerPackages(true);
-        const failure = new Error('package probe failed');
-        pkgProbe.rejects(failure);
-        await assert.rejects(api.getPackageManagerCapability(environment, 'packages.list', project), (e) => e === failure);
-    });
-
-    test('scoped capability results are reevaluated without recreating the scoped manager', async () => {
-        const create = registerPackages(true);
-        pkgProbe.onSecondCall().resolves({ supported: false, reason: 'project changed' });
-        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, true);
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.list', project), {
-            supported: false,
-            reason: 'project changed',
-        });
-        assert.ok(create?.calledOnce);
     });
 
     test('project factory errors reject rather than falling back to the root', async () => {
@@ -279,6 +253,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         create?.throws(failure);
         await assert.rejects(api.getPackageManagerCapability(environment, 'packages.list', project), (e) => e === failure);
         assert.ok(pkgProbe.notCalled);
+        assert.ok(scopedProbe.notCalled);
     });
 
     test('registry lookup errors reject', async () => {

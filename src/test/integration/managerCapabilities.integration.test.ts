@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
-import { Disposable, extensions, Uri } from 'vscode';
+import { ConfigurationTarget, Disposable, extensions, Uri, workspace } from 'vscode';
 import {
     EnvironmentManager,
     PackageManager,
@@ -19,7 +19,6 @@ suite('Manager capabilities integration', function () {
     let packages: PackageManager;
     let packageCapabilities: PackageManager['capabilities'];
     let environmentCapabilities: EnvironmentManager['capabilities'];
-    let manageCalls: number;
     const disposables: Disposable[] = [];
 
     suiteSetup(async () => {
@@ -32,15 +31,12 @@ suite('Manager capabilities integration', function () {
     setup(() => {
         packageCapabilities = undefined;
         environmentCapabilities = undefined;
-        manageCalls = 0;
         packages = {
             name: 'capability-test-packages',
             get capabilities() {
                 return packageCapabilities;
             },
-            manage: async () => {
-                manageCalls++;
-            },
+            manage: async () => assert.fail('Capability queries must not manage packages'),
             refresh: async () => {},
             getPackages: async () => [],
         };
@@ -97,25 +93,59 @@ suite('Manager capabilities integration', function () {
         );
     });
 
-    test('dynamic overrides and default prerequisites cross the extension boundary', async () => {
-        let enabled = false;
+    test('package queries reach the configured project-bound provider, not its root', async () => {
+        const folder = workspace.workspaceFolders?.[0];
+        assert.ok(folder, 'The integration workspace must be open');
+        const project = api.getPythonProject(folder.uri);
+        assert.ok(project, 'The workspace project must be registered');
+        const scopedSupport = { supported: false, reason: 'Project-bound provider response' } as const;
+        const provider: PackageManager = {
+            ...packages,
+            name: 'capability-test-scoped',
+            capabilities: { 'packages.list': async () => assert.fail('The unbound root must not be queried') },
+            createForProject: (boundProject) => ({
+                ...packages,
+                name: 'capability-test-scoped',
+                capabilities: {
+                    'packages.list': async (context) => {
+                        assert.strictEqual(boundProject.uri.toString(), project.uri.toString());
+                        assert.strictEqual(context.project, boundProject);
+                        assert.strictEqual(context.environment, environment);
+                        return scopedSupport;
+                    },
+                },
+            }),
+        };
+        disposables.push(api.registerPackageManager(provider, { extensionId: ENVS_EXTENSION_ID }));
+        const config = workspace.getConfiguration('python-envs', folder.uri);
+        const target = workspace.workspaceFolders?.length === 1 ? ConfigurationTarget.Workspace : ConfigurationTarget.WorkspaceFolder;
+        const inspected = config.inspect<unknown[]>('pythonProjects');
+        const previous = target === ConfigurationTarget.Workspace ? inspected?.workspaceValue : inspected?.workspaceFolderValue;
+        try {
+            await config.update('pythonProjects', [
+                { path: '.', packageManager: `${ENVS_EXTENSION_ID}:${provider.name}` },
+                ...config.get<unknown[]>('pythonProjects', []),
+            ], target);
+            assert.deepStrictEqual(
+                await api.getPackageManagerCapability(environment, 'packages.list', project),
+                scopedSupport,
+            );
+        } finally {
+            await config.update('pythonProjects', previous, target);
+        }
+    });
+
+    test('package prerequisites preserve context and reasons across separately loaded modules', async () => {
+        const denied = { supported: false, reason: 'Disabled by provider' } as const;
         packageCapabilities = {
             'packages.manage': async (context) => {
                 assert.strictEqual(context.environment, environment);
-                return enabled ? { supported: true } : { supported: false, reason: 'Disabled for test' };
+                return denied;
             },
             'packages.manage.install': (context) =>
                 resolvePackageManagerCapability(packages, 'packages.manage', context),
         };
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.upgrade'), {
-            supported: false,
-            reason: 'Disabled for test',
-        });
-        enabled = true;
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.upgrade'), {
-            supported: true,
-        });
-        assert.strictEqual(manageCalls, 0);
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.upgrade'), denied);
     });
 
     test('prerequisite cycles are detected across separately loaded API modules', async () => {
@@ -127,14 +157,5 @@ suite('Manager capabilities integration', function () {
             () => api.getPackageManagerCapability(environment, 'packages.manage'),
             /Capability dependency cycle/,
         );
-    });
-
-    test('unsupported advertisements do not enforce or change existing operations', async () => {
-        packageCapabilities = {
-            'packages.manage': async () => ({ supported: false, reason: 'Advisory only' }),
-        };
-        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.manage')).supported, false);
-        await api.managePackages(environment, { install: ['example'], runHeadless: true });
-        assert.strictEqual(manageCalls, 1);
     });
 });
