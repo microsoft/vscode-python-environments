@@ -190,8 +190,12 @@ async function resolveCapability<M extends { readonly capabilities?: Capabilitie
     }
     const nextContext: EvaluationContext = Object.defineProperty({ ...context }, ancestryKey, {
         value: [...ancestry, { manager, capability }],
+        enumerable: true,
     });
-    const advertised = manager.capabilities;
+    const advertised: unknown = manager.capabilities;
+    if (advertised !== undefined && !isCapabilityRecord(advertised)) {
+        throw new TypeError(l10n.t('Manager capabilities must be an object.'));
+    }
     const check =
         advertised && Object.prototype.hasOwnProperty.call(advertised, capability)
             ? advertised[capability]
@@ -203,4 +207,12 @@ async function resolveCapability<M extends { readonly capabilities?: Capabilitie
         throw new TypeError(l10n.t('Capability {0} must be advertised as a function.', capability));
     }
     return check(nextContext);
+}
+
+function isCapabilityRecord(value: unknown): value is Readonly<Record<PropertyKey, unknown>> {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
 }
