@@ -37,26 +37,7 @@ export async function activate() {
 
 ## Manager capabilities
 
-Managers remain interfaces and may advertise an optional flat map of async
-capability checks. No base class or inheritance is required. Missing maps or
-entries use the exported default dictionaries; explicit unsupported results and
-probe errors never fall back to a supported default.
-Required operations default supported. Optional methods/events default supported
-when the corresponding raw hook is callable; missing hooks default unsupported.
-Existing options inherit their parent's effective support. Quick creation also
-requires raw `create` and `quickCreateConfig` hooks unless explicitly advertised.
-Install-spec formatting remains supported through the extension's fallback.
-No operation or event subscription is invoked to infer support. Managers should
-override unsupported stubs explicitly and may refine context/tool restrictions
-later. Runtime preflight checks are not required to advertise general support.
-These compatibility defaults change discovery only, not existing operation
-dispatch, prompts, or UI gating.
-
-Queries use currently registered managers without activating extensions or
-waiting for registration. A missing manager returns unsupported with an
-unavailable reason immediately; a later query can succeed after registration.
-
-Consumers can query the selected package manager without invoking an operation:
+Capabilities report general manager support without invoking an operation:
 
 ```typescript
 const api = await PythonEnvironments.api();
@@ -69,13 +50,26 @@ if (environment && typeof api.getPackageManagerCapability === 'function') {
 }
 ```
 
-Feature detection is necessary when supporting older installed extension
-runtimes. For a raw provider, use `resolvePackageManagerCapability` or
-`resolveEnvironmentManagerCapability`. Checks describe general feature support,
-not request validation or guaranteed operation success.
+Managers may advertise an optional `capabilities` map. Omitted entries use
+compatibility defaults: required operations are supported, optional methods and
+events follow raw hook presence, and option capabilities inherit their parent.
+An explicit unsupported result overrides those defaults.
 
-See the [capability reference and default matrix](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#manager-capabilities)
-for all keys, authoring examples, routing behavior, and limitations.
+To change a manager's advertised support, add or remove an entry in its map.
+Removing an entry restores the default; return `{ supported: false, reason }` to
+disable support. Checks must be read-only and noninteractive.
+
+Capability keys come from `defaultEnvironmentCapabilities` and
+`defaultPackageCapabilities`. Adding a public key requires a default dictionary
+entry, tests, documentation, and only the manager overrides that differ from the
+default. Removing a dictionary key is a breaking API change.
+
+Feature-detect query methods when supporting older extension runtimes. Queries
+use currently registered managers and describe support, not request validity or
+guaranteed success.
+
+See the [capability guide](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#manager-capabilities)
+for defaults and provider maintenance.
 
 ## Full API reference
 
