@@ -1,6 +1,7 @@
 import type {
     Capabilities,
     CapabilityContext,
+    DefaultCapabilityCheck,
     EnvironmentCapability,
     EnvironmentManager,
     PackageCapability,
@@ -136,10 +137,20 @@ const unknownCapabilityMap: Capabilities<PackageCapability> = { 'packages.unknow
 
 const environmentDefaultsAreComplete: Equal<keyof typeof defaultEnvironmentCapabilities, EnvironmentCapability> = true;
 const packageDefaultsAreComplete: Equal<keyof typeof defaultPackageCapabilities, PackageCapability> = true;
+const environmentDefaultSignatureIsExact: Equal<
+    (typeof defaultEnvironmentCapabilities)['environments.create.quick'],
+    DefaultCapabilityCheck<EnvironmentManager>
+> = true;
+const packageDefaultSignatureIsExact: Equal<
+    (typeof defaultPackageCapabilities)['packages.list.skipCache'],
+    DefaultCapabilityCheck<PackageManager>
+> = true;
 
 void unknownCapabilityMap;
 void environmentDefaultsAreComplete;
 void packageDefaultsAreComplete;
+void environmentDefaultSignatureIsExact;
+void packageDefaultSignatureIsExact;
 void packageSupport;
 void environmentSupport;
 void packageDefault;

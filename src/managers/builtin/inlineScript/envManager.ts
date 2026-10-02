@@ -293,6 +293,10 @@ interface SavedMetadataSnapshot {
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.resolve': async () => ({
+            supported: false,
+            reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),
+        }),
         'environments.remove': async () => ({ supported: true }),
         'environments.clearCache': async () => ({ supported: true }),
         'environments.events.changed': async () => ({ supported: true }),

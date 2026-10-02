@@ -11,40 +11,11 @@ import type {
     PythonProject,
 } from './types.js';
 
-/** Supported environment capability keys. Adding a key also requires defining its default. */
-export type EnvironmentCapability =
-    | 'environments.list' // List known environments for a scope.
-    | 'environments.refresh' // Rediscover environments for a scope.
-    | 'environments.resolve' // Resolve an interpreter or environment URI into an environment.
-    | 'environments.getSelected' // Read the selected environment for a scope.
-    | 'environments.setSelected' // Set or clear the selected environment for a scope.
-    | 'environments.create' // Create an environment.
-    | 'environments.create.quick' // Offer a quick creation path; some requests may still prompt.
-    | 'environments.create.additionalPackages' // Install extra packages in a supported creation mode.
-    | 'environments.remove' // Delete an environment.
-    | 'environments.remove.headless' // Delete without confirmation or input prompts.
-    | 'environments.clearCache' // Clear the manager's cached environment data.
-    | 'environments.events.changed' // Emit provider notifications when environments change.
-    | 'environments.events.selectionChanged'; // Emit provider notifications when selection changes.
+/** Environment capability keys derived from the canonical default dictionary. */
+export type EnvironmentCapability = keyof typeof defaultEnvironmentCapabilities;
 
-/** Supported package capability keys. Adding a key also requires defining its default. */
-export type PackageCapability =
-    | 'packages.list' // List installed packages in an environment.
-    | 'packages.list.skipCache' // Retrieve installed packages without using cached results.
-    | 'packages.refresh' // Refresh installed package data.
-    | 'packages.manage' // Execute package management requests.
-    | 'packages.manage.install' // Install the requested packages.
-    | 'packages.manage.uninstall' // Uninstall the requested packages.
-    | 'packages.manage.upgrade' // Honor the upgrade option during installation.
-    | 'packages.manage.headless' // Manage packages without confirmation or input prompts.
-    | 'packages.manage.showSkipOption' // Offer a skip choice during interactive package selection.
-    | 'packages.direct' // Identify direct versus transitive packages on a best-effort basis.
-    | 'packages.version' // Report the package-manager tool version.
-    | 'packages.availableVersions' // Look up available versions of a package.
-    | 'packages.formatInstallSpec' // Format a version-pinned install specifier, including the default fallback.
-    | 'packages.clearCache' // Clear the manager's cached package data.
-    | 'packages.watchTargets' // Supply custom filesystem patterns for package-change watching.
-    | 'packages.events.changed'; // Emit provider notifications when packages change.
+/** Package capability keys derived from the canonical default dictionary. */
+export type PackageCapability = keyof typeof defaultPackageCapabilities;
 
 export type ManagerCapability = EnvironmentCapability | PackageCapability;
 
@@ -71,84 +42,95 @@ export type DefaultCapabilityCheck<M> = (manager: M, context: CapabilityContext)
 
 /**
  * Environment capability catalog and compatibility defaults.
- * Creation/removal follow raw method availability; other optional features require explicit opt-in.
- * Existing options inherit their parent's effective support.
+ * Optional methods/events follow raw hook availability; existing options inherit their parent's
+ * effective support. Quick creation also requires the legacy create and quickCreateConfig hooks.
  */
 export const defaultEnvironmentCapabilities = Object.freeze({
-    /** getEnvironments: required. An empty result is valid. */
-    'environments.list': async (_manager, _context) => supportIf(true),
-    /** refresh: required. */
-    'environments.refresh': async (_manager, _context) => supportIf(true),
-    /** resolve: required. Finding no environment is valid; pass the target URI as scope. */
-    'environments.resolve': async (_manager, _context) => supportIf(true),
-    /** get: required. No selected environment is valid. */
-    'environments.getSelected': async (_manager, _context) => supportIf(true),
-    /** set: required, including clearing the selection. */
-    'environments.setSelected': async (_manager, _context) => supportIf(true),
-    /** create: supported when the raw provider implements the operation. */
-    'environments.create': async (manager, _context) => supportIf(typeof manager.create === 'function'),
-    /** Availability of the quick path, not a guarantee that every request is prompt-free. */
-    'environments.create.quick': async (_manager, _context) => supportIf(false),
-    /** Additional packages in a documented creation mode, not necessarily every mode. */
+    /** List known environments for a scope. Required getEnvironments operation; an empty result is valid. */
+    'environments.list': async (_manager, _context): Promise<Support> => supportIf(true),
+    /** Rediscover environments for a scope. Required refresh operation. */
+    'environments.refresh': async (_manager, _context): Promise<Support> => supportIf(true),
+    /** Resolve an interpreter or environment URI. Required resolve operation; pass the target URI as scope. */
+    'environments.resolve': async (_manager, _context): Promise<Support> => supportIf(true),
+    /** Read the selected environment for a scope. Required get operation; no selection is valid. */
+    'environments.getSelected': async (_manager, _context): Promise<Support> => supportIf(true),
+    /** Set or clear the selected environment for a scope. Required set operation. */
+    'environments.setSelected': async (_manager, _context): Promise<Support> => supportIf(true),
+    /** Create an environment when the raw provider implements create. */
+    'environments.create': async (manager, _context): Promise<Support> => supportIf(typeof manager.create === 'function'),
+    /** Offer a quick creation path via legacy hooks. Explicit overrides may use other hooks; requests may still prompt. */
+    'environments.create.quick': async (manager, context): Promise<Support> =>
+        typeof manager.create === 'function' && typeof manager.quickCreateConfig === 'function'
+            ? resolveEnvironmentManagerCapability(manager, 'environments.create', context)
+            : supportIf(false),
+    /** Install extra packages in a documented creation mode, not necessarily every mode. */
     'environments.create.additionalPackages': async (manager, context): Promise<Support> =>
         resolveEnvironmentManagerCapability(manager, 'environments.create', context),
-    /** remove: supported when the raw provider implements the operation. */
-    'environments.remove': async (manager, _context) => supportIf(typeof manager.remove === 'function'),
-    /** Removal without confirmation/input; progress and error UI are not suppressed. */
+    /** Delete an environment when the raw provider implements remove. */
+    'environments.remove': async (manager, _context): Promise<Support> => supportIf(typeof manager.remove === 'function'),
+    /** Delete without confirmation/input; progress and error UI are not suppressed. */
     'environments.remove.headless': async (manager, context): Promise<Support> =>
         resolveEnvironmentManagerCapability(manager, 'environments.remove', context),
-    /** clearCache: requires explicit opt-in. */
-    'environments.clearCache': async (_manager, _context) => supportIf(false),
-    /** Provider notifications, not events synthesized by the extension. */
-    'environments.events.changed': async (_manager, _context) => supportIf(false),
-    /** Provider selection notifications, not events synthesized by the extension. */
-    'environments.events.selectionChanged': async (_manager, _context) => supportIf(false),
-} satisfies Record<EnvironmentCapability, DefaultCapabilityCheck<EnvironmentManager>>);
+    /** Clear the manager's cached environment data through its optional clearCache operation. */
+    'environments.clearCache': async (manager, _context): Promise<Support> =>
+        supportIf(typeof manager.clearCache === 'function'),
+    /** Emit provider notifications when environments change, not events synthesized by the extension. */
+    'environments.events.changed': async (manager, _context): Promise<Support> =>
+        supportIf(typeof manager.onDidChangeEnvironments === 'function'),
+    /** Emit provider selection notifications, not events synthesized by the extension. */
+    'environments.events.selectionChanged': async (manager, _context): Promise<Support> =>
+        supportIf(typeof manager.onDidChangeEnvironment === 'function'),
+} satisfies Record<string, DefaultCapabilityCheck<EnvironmentManager>>);
 
 /**
  * Package capability catalog and compatibility defaults.
- * Legacy option support is optimistic; explicit manager advertisements can refine or disable it.
+ * Optional methods/events follow raw hook availability. Legacy option support is optimistic;
+ * explicit manager advertisements can refine or disable either inference.
  */
 export const defaultPackageCapabilities = Object.freeze({
-    /** getPackages: required. An empty result is valid. */
-    'packages.list': async (_manager, _context) => supportIf(true),
-    /** Fresh retrieval; does not require a separate cache implementation. */
+    /** List installed packages in an environment. Required getPackages operation; an empty result is valid. */
+    'packages.list': async (_manager, _context): Promise<Support> => supportIf(true),
+    /** Retrieve installed packages without cached results; does not require a separate cache implementation. */
     'packages.list.skipCache': async (manager, context): Promise<Support> =>
         resolvePackageManagerCapability(manager, 'packages.list', context),
-    /** refresh: required. */
-    'packages.refresh': async (_manager, _context) => supportIf(true),
-    /** manage: required; individual operation variants have their own keys. */
-    'packages.manage': async (_manager, _context) => supportIf(true),
-    /** Honor the install array. */
+    /** Refresh installed package data. Required refresh operation. */
+    'packages.refresh': async (_manager, _context): Promise<Support> => supportIf(true),
+    /** Execute package management requests. Required manage operation; variants have their own keys. */
+    'packages.manage': async (_manager, _context): Promise<Support> => supportIf(true),
+    /** Install the requested packages by honoring the install array. */
     'packages.manage.install': async (manager, context): Promise<Support> =>
         resolvePackageManagerCapability(manager, 'packages.manage', context),
-    /** Honor the uninstall array. */
+    /** Uninstall the requested packages by honoring the uninstall array. */
     'packages.manage.uninstall': async (manager, context): Promise<Support> =>
         resolvePackageManagerCapability(manager, 'packages.manage', context),
     /** Honor upgrade for installation, without guaranteeing identical solver behavior. */
     'packages.manage.upgrade': async (manager, context): Promise<Support> =>
         resolvePackageManagerCapability(manager, 'packages.manage.install', context),
-    /** No confirmation/pickers, including when installation arrays are empty. */
+    /** Manage packages without confirmation/input, including when installation arrays are empty. */
     'packages.manage.headless': async (manager, context): Promise<Support> =>
         resolvePackageManagerCapability(manager, 'packages.manage', context),
     /** Offer skip during interactive package selection, when applicable. */
     'packages.manage.showSkipOption': async (manager, context): Promise<Support> =>
         resolvePackageManagerCapability(manager, 'packages.manage', context),
-    /** Best-effort direct/transitive classification, not exact user installation intent. */
-    'packages.direct': async (_manager, _context) => supportIf(false),
-    /** Package-manager tool version, not Python or an installed package's version. */
-    'packages.version': async (_manager, _context) => supportIf(false),
-    /** Available package versions; requires explicit opt-in, including tool/version restrictions. */
-    'packages.availableVersions': async (_manager, _context) => supportIf(false),
-    /** Supported through the extension's name==version fallback even without a custom formatter. */
-    'packages.formatInstallSpec': async (_manager, _context) => supportIf(true),
-    /** clearCache: requires explicit opt-in. */
-    'packages.clearCache': async (_manager, _context) => supportIf(false),
-    /** Custom watch patterns, not general package-change watching. */
-    'packages.watchTargets': async (_manager, _context) => supportIf(false),
-    /** Provider notifications, not extension-owned watchers or synthesized events. */
-    'packages.events.changed': async (_manager, _context) => supportIf(false),
-} satisfies Record<PackageCapability, DefaultCapabilityCheck<PackageManager>>);
+    /** Identify direct/transitive packages on a best-effort basis, not exact user installation intent. */
+    'packages.direct': async (manager, _context): Promise<Support> =>
+        supportIf(typeof manager.getDirectPackageNames === 'function'),
+    /** Report the package-manager tool version, not Python or an installed package's version. */
+    'packages.version': async (manager, _context): Promise<Support> => supportIf(typeof manager.getVersion === 'function'),
+    /** Look up available package versions; advertisements refine unsupported stubs and tool/version restrictions. */
+    'packages.availableVersions': async (manager, _context): Promise<Support> =>
+        supportIf(typeof manager.getPackageAvailableVersions === 'function'),
+    /** Format a version-pinned install specifier, using the extension's name==version fallback if needed. */
+    'packages.formatInstallSpec': async (_manager, _context): Promise<Support> => supportIf(true),
+    /** Clear the manager's cached package data through its optional clearCache operation, not an extension fallback. */
+    'packages.clearCache': async (manager, _context): Promise<Support> => supportIf(typeof manager.clearCache === 'function'),
+    /** Supply custom filesystem patterns for package-change watching, not general watching. */
+    'packages.watchTargets': async (manager, _context): Promise<Support> =>
+        supportIf(typeof manager.getPackageWatchTargets === 'function'),
+    /** Emit provider notifications when packages change, not extension-owned watchers or synthesized events. */
+    'packages.events.changed': async (manager, _context): Promise<Support> =>
+        supportIf(typeof manager.onDidChangePackages === 'function'),
+} satisfies Record<string, DefaultCapabilityCheck<PackageManager>>);
 
 /**
  * Resolves general environment-manager support without invoking the operation or prompting.
