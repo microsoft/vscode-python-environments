@@ -196,5 +196,11 @@ async function resolveCapability<M extends { readonly capabilities?: Capabilitie
         advertised && Object.prototype.hasOwnProperty.call(advertised, capability)
             ? advertised[capability]
             : undefined;
-    return check ? check(nextContext) : defaults[capability](manager, nextContext);
+    if (check === undefined) {
+        return defaults[capability](manager, nextContext);
+    }
+    if (typeof check !== 'function') {
+        throw new TypeError(l10n.t('Capability {0} must be advertised as a function.', capability));
+    }
+    return check(nextContext);
 }
