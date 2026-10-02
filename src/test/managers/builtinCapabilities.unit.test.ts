@@ -187,6 +187,12 @@ suite('Built-in manager capabilities', () => {
             });
         });
 
+        test('inline URI resolution is unsupported without invoking its stub', async () => {
+            const resolve = sinon.stub(manager, 'resolve');
+            assertUnsupported(await environmentCapability(manager, 'environments.resolve', { scope: script }));
+            assert.ok(resolve.notCalled && stateUpdate.notCalled && readMetadata.notCalled);
+        });
+
         test('valid local script supports quick creation without quickCreateConfig or mutations', async () => {
             const create = sinon.stub(manager, 'create');
             const remove = sinon.stub(manager, 'remove');

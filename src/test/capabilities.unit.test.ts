@@ -146,7 +146,7 @@ suite('Manager capabilities', () => {
         assert.ok(Object.isFrozen(defaultPackageCapabilities));
     });
 
-    test('create/remove follow raw hooks while other optional features remain opt-in without invoking operations', async () => {
+    test('optional capabilities follow raw hooks without invoking operations or subscribing to events', async () => {
         const env = environmentManager({
             create: async () => unexpectedOperation(),
             quickCreateConfig: unexpectedOperation,
@@ -163,22 +163,74 @@ suite('Manager capabilities', () => {
             getPackageWatchTargets: unexpectedOperation,
             onDidChangePackages: unexpectedOperation,
         });
-        const expectedEnvironmentDefaults = {
-            ...environmentDefaults,
-            'environments.create': true,
-            'environments.create.additionalPackages': true,
-            'environments.remove': true,
-            'environments.remove.headless': true,
-        };
         const wrapped = new InternalEnvironmentManager('test:environment', env);
         for (const key of Object.keys(environmentDefaults) as EnvironmentCapability[]) {
-            assert.strictEqual((await resolveEnvironmentManagerCapability(env, key)).supported, expectedEnvironmentDefaults[key], key);
-            assert.strictEqual((await wrapped.getCapability(key)).supported, expectedEnvironmentDefaults[key], key);
+            assert.strictEqual((await resolveEnvironmentManagerCapability(env, key)).supported, true, key);
+            assert.strictEqual((await wrapped.getCapability(key)).supported, true, key);
         }
         for (const key of Object.keys(packageDefaults) as PackageCapability[]) {
-            assert.strictEqual((await resolvePackageManagerCapability(pkg, key)).supported, packageDefaults[key]);
+            assert.strictEqual((await resolvePackageManagerCapability(pkg, key)).supported, true, key);
         }
     });
+
+    for (const [key, hook] of [
+        ['environments.clearCache', 'clearCache'],
+        ['environments.events.changed', 'onDidChangeEnvironments'],
+        ['environments.events.selectionChanged', 'onDidChangeEnvironment'],
+    ] as const) {
+        test(`${key} follows only its own raw hook and preserves overrides`, async () => {
+            const manager = environmentManager({ [hook]: unexpectedOperation });
+            assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, key), { supported: true });
+            assert.deepStrictEqual(
+                await resolveEnvironmentManagerCapability(
+                    environmentManager({ ...manager, capabilities: { [key]: async () => unsupported } }),
+                    key,
+                ),
+                unsupported,
+            );
+            const failure = new Error('Capability probe failed');
+            await assert.rejects(
+                resolveEnvironmentManagerCapability(
+                    environmentManager({ ...manager, capabilities: { [key]: async () => { throw failure; } } }),
+                    key,
+                ),
+                (error) => error === failure,
+            );
+            delete manager[hook];
+            assert.strictEqual((await resolveEnvironmentManagerCapability(manager, key)).supported, false);
+        });
+    }
+
+    for (const [key, hook] of [
+        ['packages.direct', 'getDirectPackageNames'],
+        ['packages.version', 'getVersion'],
+        ['packages.availableVersions', 'getPackageAvailableVersions'],
+        ['packages.clearCache', 'clearCache'],
+        ['packages.watchTargets', 'getPackageWatchTargets'],
+        ['packages.events.changed', 'onDidChangePackages'],
+    ] as const) {
+        test(`${key} follows only its own raw hook and preserves overrides`, async () => {
+            const manager = packageManager({ [hook]: unexpectedOperation });
+            assert.deepStrictEqual(await resolvePackageManagerCapability(manager, key), { supported: true });
+            assert.deepStrictEqual(
+                await resolvePackageManagerCapability(
+                    packageManager({ ...manager, capabilities: { [key]: async () => unsupported } }),
+                    key,
+                ),
+                unsupported,
+            );
+            const failure = new Error('Capability probe failed');
+            await assert.rejects(
+                resolvePackageManagerCapability(
+                    packageManager({ ...manager, capabilities: { [key]: async () => { throw failure; } } }),
+                    key,
+                ),
+                (error) => error === failure,
+            );
+            delete manager[hook];
+            assert.strictEqual((await resolvePackageManagerCapability(manager, key)).supported, false);
+        });
+    }
 
     test('creation and removal defaults independently follow current raw method availability', async () => {
         const manager = environmentManager({ create: async () => unexpectedOperation(), capabilities: {} });
@@ -202,6 +254,7 @@ suite('Manager capabilities', () => {
         });
         for (const key of [
             'environments.create',
+            'environments.create.quick',
             'environments.create.additionalPackages',
             'environments.remove',
             'environments.remove.headless',
@@ -226,7 +279,7 @@ suite('Manager capabilities', () => {
         }
     });
 
-    test('optional parent opt-ins enable inherited options but not quick creation', async () => {
+    test('optional parent opt-ins enable inherited options including the legacy quick path', async () => {
         const manager = environmentManager({
             create: async () => unexpectedOperation(),
             quickCreateConfig: unexpectedOperation,
@@ -236,13 +289,62 @@ suite('Manager capabilities', () => {
                 'environments.remove': async () => ({ supported: true }),
             },
         });
-        for (const key of ['environments.create.additionalPackages', 'environments.remove.headless'] as const) {
+        for (const key of [
+            'environments.create.quick',
+            'environments.create.additionalPackages',
+            'environments.remove.headless',
+        ] as const) {
             assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, key), { supported: true });
         }
-        assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, 'environments.create.quick'), {
-            supported: false,
-            reason: 'Capability not implemented',
-        });
+    });
+
+    test('quick creation requires both raw hooks unless explicitly advertised', async () => {
+        for (const hooks of [
+            {},
+            { create: unexpectedOperation },
+            { quickCreateConfig: unexpectedOperation },
+        ]) {
+            const manager = environmentManager({
+                ...hooks,
+                capabilities: { 'environments.create': async () => ({ supported: true }) },
+            });
+            assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, 'environments.create.quick'), {
+                supported: false,
+                reason: 'Capability not implemented',
+            });
+        }
+        const hooks = { create: unexpectedOperation, quickCreateConfig: unexpectedOperation };
+        assert.deepStrictEqual(
+            await resolveEnvironmentManagerCapability(
+                environmentManager({
+                    ...hooks,
+                    capabilities: { 'environments.create.quick': async () => unsupported },
+                }),
+                'environments.create.quick',
+            ),
+            unsupported,
+        );
+        const failure = new Error('Create support probe failed');
+        await assert.rejects(
+            resolveEnvironmentManagerCapability(
+                environmentManager({
+                    ...hooks,
+                    capabilities: { 'environments.create': async () => { throw failure; } },
+                }),
+                'environments.create.quick',
+            ),
+            (error) => error === failure,
+        );
+        assert.deepStrictEqual(
+            await resolveEnvironmentManagerCapability(
+                environmentManager({
+                    create: unexpectedOperation,
+                    capabilities: { 'environments.create.quick': async () => ({ supported: true }) },
+                }),
+                'environments.create.quick',
+            ),
+            { supported: true },
+        );
     });
 
     test('explicit child advertisements decide their own prerequisites', async () => {
@@ -382,6 +484,26 @@ suite('Manager capabilities', () => {
         }
         for (const key of Object.keys(packageDefaults) as PackageCapability[]) {
             assert.strictEqual((await pkg.getCapability(key)).supported, packageDefaults[key]);
+        }
+        pkg.dispose();
+    });
+
+    test('package wrapper queries infer raw hooks without invoking operations or subscribing to events', async () => {
+        const manager = packageManager({
+            getDirectPackageNames: unexpectedOperation,
+            getVersion: unexpectedOperation,
+            getPackageAvailableVersions: unexpectedOperation,
+            clearCache: unexpectedOperation,
+            getPackageWatchTargets: unexpectedOperation,
+            onDidChangePackages: unexpectedOperation,
+        });
+        const wrapped = new InternalPackageManager('test:packages', manager);
+        try {
+            for (const key of Object.keys(packageDefaults) as PackageCapability[]) {
+                assert.deepStrictEqual(await wrapped.getCapability(key), { supported: true }, key);
+            }
+        } finally {
+            wrapped.dispose();
         }
     });
 
