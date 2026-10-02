@@ -35,6 +35,34 @@ export async function activate() {
 }
 ```
 
+## Manager capabilities
+
+Managers remain interfaces and may advertise an optional flat map of async
+capability checks. No base class or inheritance is required. Missing maps or
+entries use the exported default dictionaries; explicit unsupported results and
+probe errors never fall back to a supported default.
+
+Consumers can query the selected package manager without invoking an operation:
+
+```typescript
+const api = await PythonEnvironments.api();
+const environment = await api.getEnvironment(undefined);
+if (environment && typeof api.getPackageCapability === 'function') {
+    const support = await api.getPackageCapability(environment, 'packages.direct');
+    if (support.supported) {
+        // Best-effort direct/transitive package classification is available.
+    }
+}
+```
+
+Feature detection is necessary when supporting older installed extension
+runtimes. For a raw provider, use `resolvePackageManagerCapability` or
+`resolveEnvironmentManagerCapability`. Checks describe general feature support,
+not request validation or guaranteed operation success.
+
+See the [capability reference and default matrix](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#manager-capabilities)
+for all keys, authoring examples, routing behavior, and limitations.
+
 ## Full API reference
 
 📘 **[Python Environments API reference](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md)**
@@ -51,4 +79,3 @@ extensibility - with field tables, parameter tables, return types, and examples.
 - [Extensibility](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#extensibility) - register your own environment manager, package manager, or project creator
 
 See [`CHANGELOG.md`](https://github.com/microsoft/vscode-python-environments/blob/main/api/CHANGELOG.md) for API changes between versions.
-
