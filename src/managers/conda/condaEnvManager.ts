@@ -29,7 +29,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
 import { CondaStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -72,7 +72,7 @@ import {
 } from './condaUtils';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
-    readonly capabilities: Capabilities<EnvironmentCapability> = {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         'environments.create': async () => ({ supported: true }),
         'environments.remove': async () => ({ supported: true }),
         'environments.clearCache': async () => ({ supported: true }),

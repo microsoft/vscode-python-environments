@@ -34,7 +34,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
-import { Capabilities, EnvironmentCapability, resolveEnvironmentManagerCapability } from '../../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../../capabilities';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -292,7 +292,7 @@ interface SavedMetadataSnapshot {
 
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
-    readonly capabilities: Capabilities<EnvironmentCapability> = {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         'environments.resolve': async () => ({
             supported: false,
             reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),

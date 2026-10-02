@@ -9,8 +9,8 @@ import { Disposable, Memento, Uri } from 'vscode';
 import { EnvironmentManager, PackageManager, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import {
     CapabilityContext,
-    EnvironmentCapability,
-    PackageCapability,
+    EnvironmentManagerCapability,
+    PackageManagerCapability,
     resolveEnvironmentManagerCapability as environmentCapability,
     resolvePackageManagerCapability as packageCapability,
     Support,
@@ -211,7 +211,7 @@ suite('Built-in manager capabilities', () => {
 
         test('invalid scopes and invalid metadata disable all creation variants', async () => {
             const scopes: CapabilityContext['scope'][] = [undefined, 'global', 'all', [], [script, script], Uri.parse('untitled:script.py')];
-            const keys: EnvironmentCapability[] = ['environments.create', 'environments.create.quick', 'environments.create.additionalPackages'];
+            const keys: EnvironmentManagerCapability[] = ['environments.create', 'environments.create.quick', 'environments.create.additionalPackages'];
             for (const scope of scopes) {
                 for (const key of keys) {
                     assertUnsupported(await environmentCapability(manager, key, { scope }));
@@ -307,7 +307,7 @@ suite('Built-in manager capabilities', () => {
         const first = manager.createForProject(project);
         const second = manager.createForProject(otherProject);
         disposables.push(first, second);
-        const keys: PackageCapability[] = ['packages.list', 'packages.list.skipCache', 'packages.direct', 'packages.manage', 'packages.manage.headless', 'packages.refresh'];
+        const keys: PackageManagerCapability[] = ['packages.list', 'packages.list.skipCache', 'packages.direct', 'packages.manage', 'packages.manage.headless', 'packages.refresh'];
         for (const key of keys) {
             assertUnsupported(await packageCapability(manager, key, { project }));
             assert.deepStrictEqual(await packageCapability(first, key, { project }), { supported: true });
@@ -385,18 +385,18 @@ suite('Built-in manager capabilities', () => {
     });
 
     suite('exhaustive optional advertisements', () => {
-        const environmentKeys: EnvironmentCapability[] = [
+        const environmentKeys: EnvironmentManagerCapability[] = [
             'environments.create', 'environments.create.quick', 'environments.create.additionalPackages',
             'environments.remove', 'environments.remove.headless', 'environments.clearCache',
             'environments.events.changed', 'environments.events.selectionChanged',
         ];
-        const commonEnvironmentKeys: EnvironmentCapability[] = [
+        const commonEnvironmentKeys: EnvironmentManagerCapability[] = [
             'environments.clearCache', 'environments.events.changed', 'environments.events.selectionChanged',
         ];
         const environmentManagers: {
             name: string;
             create: () => EnvironmentManager;
-            supported: EnvironmentCapability[];
+            supported: EnvironmentManagerCapability[];
         }[] = [
             {
                 name: 'venv',
@@ -474,14 +474,14 @@ suite('Built-in manager capabilities', () => {
             });
         }
 
-        const packageKeys: PackageCapability[] = [
+        const packageKeys: PackageManagerCapability[] = [
             'packages.direct', 'packages.version', 'packages.availableVersions', 'packages.formatInstallSpec',
             'packages.clearCache', 'packages.watchTargets', 'packages.events.changed',
         ];
         const packageManagers: {
             name: string;
             create: () => PackageManager;
-            supported: PackageCapability[];
+            supported: PackageManagerCapability[];
         }[] = [
             {
                 name: 'pip',

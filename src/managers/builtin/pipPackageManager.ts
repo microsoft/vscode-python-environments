@@ -24,7 +24,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { Capabilities, PackageCapability } from '../../capabilities';
+import { Capabilities, PackageManagerCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -52,7 +52,7 @@ import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
-    readonly capabilities: Capabilities<PackageCapability> = {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
         'packages.version': async () => ({ supported: true }),
         'packages.events.changed': async () => ({ supported: true }),
         'packages.availableVersions': async ({ environment }) => {

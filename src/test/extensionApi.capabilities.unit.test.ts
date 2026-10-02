@@ -144,7 +144,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     test('queries only the explicit environment manager before readiness initialization', async () => {
         registerOwner();
         const context = { environment, project, scope: project.uri };
-        assert.deepStrictEqual(await api.getEnvironmentCapability(ownerId, 'environments.list', context), {
+        assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, 'environments.list', context), {
             supported: true,
         });
         assert.ok(envProbe.calledOnceWithExactly(context));
@@ -153,13 +153,13 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
 
     test('rejects contradictory environment ownership before waiting or probing', async () => {
         registerOwner();
-        await assert.rejects(api.getEnvironmentCapability('other:manager', 'environments.list', { environment }));
+        await assert.rejects(api.getEnvironmentManagerCapability('other:manager', 'environments.list', { environment }));
         assert.ok(envProbe.notCalled);
         assert.ok(getExtension.notCalled);
     });
 
     test('missing environment manager returns a reason after a noninteractive bounded wait', async () => {
-        const pending = api.getEnvironmentCapability(ownerId, 'environments.list');
+        const pending = api.getEnvironmentManagerCapability(ownerId, 'environments.list');
         await clock.tickAsync(MANAGER_READY_TIMEOUT_MS);
         const support = await pending;
         assert.ok(!support.supported && support.reason.includes(ownerId));
@@ -167,7 +167,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     });
 
     test('waits for pending environment registration', async () => {
-        const pending = api.getEnvironmentCapability(ownerId, 'environments.list');
+        const pending = api.getEnvironmentManagerCapability(ownerId, 'environments.list');
         await clock.tickAsync(1);
         registerOwner();
         assert.deepStrictEqual(await pending, { supported: true });
@@ -180,7 +180,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             registerOwner();
             throw failure;
         });
-        await assert.rejects(api.getEnvironmentCapability(ownerId, 'environments.list'), (error) => error === failure);
+        await assert.rejects(api.getEnvironmentManagerCapability(ownerId, 'environments.list'), (error) => error === failure);
         assert.ok(envProbe.notCalled);
         assert.strictEqual(clock.countTimers(), 0);
     });
@@ -188,11 +188,11 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     test('a hung activation is bounded and a later query sees registration', async () => {
         const activation = createDeferred<void>();
         installedExtension(() => activation.promise);
-        const pending = api.getEnvironmentCapability(ownerId, 'environments.list');
+        const pending = api.getEnvironmentManagerCapability(ownerId, 'environments.list');
         await clock.tickAsync(MANAGER_READY_TIMEOUT_MS);
         assert.strictEqual((await pending).supported, false);
         registerOwner();
-        assert.strictEqual((await api.getEnvironmentCapability(ownerId, 'environments.list')).supported, true);
+        assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, true);
         activation.resolve();
     });
 
@@ -200,14 +200,14 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         registerOwner();
         const failure = new Error('probe failed');
         envProbe.rejects(failure);
-        await assert.rejects(api.getEnvironmentCapability(ownerId, 'environments.list'), (error) => error === failure);
+        await assert.rejects(api.getEnvironmentManagerCapability(ownerId, 'environments.list'), (error) => error === failure);
     });
 
     test('does not cache capability results', async () => {
         registerOwner();
         envProbe.onSecondCall().resolves({ supported: false, reason: 'tool removed' });
-        assert.strictEqual((await api.getEnvironmentCapability(ownerId, 'environments.list')).supported, true);
-        assert.deepStrictEqual(await api.getEnvironmentCapability(ownerId, 'environments.list'), {
+        assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, true);
+        assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, 'environments.list'), {
             supported: false,
             reason: 'tool removed',
         });
@@ -217,7 +217,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         projects = [];
         registerOwner();
         registerPackages();
-        assert.strictEqual((await api.getPackageCapability(environment, 'packages.list')).supported, true);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list')).supported, true);
         assert.strictEqual(pkgProbe.firstCall.args[0].environment, environment);
         assert.ok(selectedEnvironment.notCalled);
     });
@@ -225,7 +225,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     test('explicit project selects its configured scoped provider without waiting for the owner', async () => {
         configuredPackage.returns(`${extensionId}:configured`);
         const create = registerPackages(true, 'configured');
-        assert.strictEqual((await api.getPackageCapability(environment, 'packages.list', project)).supported, true);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, true);
         assert.ok(create?.calledOnceWithExactly(project));
         assert.strictEqual(pkgProbe.firstCall.args[0].project, project);
         assert.strictEqual(pkgProbe.firstCall.args[0].environment, environment);
@@ -235,7 +235,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
 
     test('explicit project waits for its configured provider rather than the preferred root', async () => {
         configuredPackage.returns(`${extensionId}:configured`);
-        const pending = api.getPackageCapability(environment, 'packages.list', project);
+        const pending = api.getPackageManagerCapability(environment, 'packages.list', project);
         await clock.tickAsync(1);
         registerPackages(true, 'configured');
         assert.strictEqual((await pending).supported, true);
@@ -246,7 +246,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         registerOwner();
         const preferredFactory = registerPackages(true);
         configuredPackage.returns(`${extensionId}:configured`);
-        const pending = api.getPackageCapability(environment, 'packages.list');
+        const pending = api.getPackageManagerCapability(environment, 'packages.list');
         await clock.tickAsync(1);
         assert.ok(pkgProbe.notCalled);
         const configuredFactory = registerPackages(true, 'configured');
@@ -257,7 +257,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     });
 
     test('waits for both the owning environment manager and its preferred package manager', async () => {
-        const pending = api.getPackageCapability(environment, 'packages.list');
+        const pending = api.getPackageManagerCapability(environment, 'packages.list');
         await clock.tickAsync(1);
         registerOwner();
         await clock.tickAsync(1);
@@ -273,7 +273,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
                     : [project, { name: 'second', uri: Uri.joinPath(Uri.file(process.cwd()), 'second') }];
             registerOwner();
             const create = registerPackages(true);
-            const support = await api.getPackageCapability(environment, 'packages.list');
+            const support = await api.getPackageManagerCapability(environment, 'packages.list');
             assert.ok(!support.supported && support.reason.length > 0);
             assert.ok(create?.notCalled);
             assert.ok(pkgProbe.notCalled);
@@ -283,7 +283,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     test('an untracked explicit project never probes a project-aware root', async () => {
         projects = [];
         registerPackages(true);
-        assert.strictEqual((await api.getPackageCapability(environment, 'packages.list', project)).supported, false);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, false);
         assert.ok(pkgProbe.notCalled);
     });
 
@@ -291,7 +291,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         registerOwner();
         const create = registerPackages(true);
         configuredPackage.returns(`${extensionId}:missing`);
-        const pending = api.getPackageCapability(environment, 'packages.list');
+        const pending = api.getPackageManagerCapability(environment, 'packages.list');
         await clock.tickAsync(MANAGER_READY_TIMEOUT_MS);
         assert.strictEqual((await pending).supported, false);
         assert.ok(create?.notCalled);
@@ -303,21 +303,21 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         installedExtension(async () => {
             throw failure;
         });
-        await assert.rejects(api.getPackageCapability(environment, 'packages.list', project), (e) => e === failure);
+        await assert.rejects(api.getPackageManagerCapability(environment, 'packages.list', project), (e) => e === failure);
     });
 
     test('package probe failures reject', async () => {
         registerPackages(true);
         const failure = new Error('package probe failed');
         pkgProbe.rejects(failure);
-        await assert.rejects(api.getPackageCapability(environment, 'packages.list', project), (e) => e === failure);
+        await assert.rejects(api.getPackageManagerCapability(environment, 'packages.list', project), (e) => e === failure);
     });
 
     test('scoped capability results are reevaluated without recreating the scoped manager', async () => {
         const create = registerPackages(true);
         pkgProbe.onSecondCall().resolves({ supported: false, reason: 'project changed' });
-        assert.strictEqual((await api.getPackageCapability(environment, 'packages.list', project)).supported, true);
-        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.list', project), {
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, true);
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.list', project), {
             supported: false,
             reason: 'project changed',
         });
@@ -328,19 +328,19 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         const create = registerPackages(true);
         const failure = new Error('project factory failed');
         create?.throws(failure);
-        await assert.rejects(api.getPackageCapability(environment, 'packages.list', project), (e) => e === failure);
+        await assert.rejects(api.getPackageManagerCapability(environment, 'packages.list', project), (e) => e === failure);
         assert.ok(pkgProbe.notCalled);
     });
 
     test('readiness errors reject', async () => {
         const failure = new Error('registry lookup failed');
         sinon.stub(managers, 'getEnvironmentManager').throws(failure);
-        await assert.rejects(api.getEnvironmentCapability(ownerId, 'environments.list'), (e) => e === failure);
+        await assert.rejects(api.getEnvironmentManagerCapability(ownerId, 'environments.list'), (e) => e === failure);
     });
 
     test('query timeout does not complete a later operational readiness wait', async () => {
         createManagerReady(managers, projectManager, disposables);
-        const pending = api.getEnvironmentCapability(ownerId, 'environments.list');
+        const pending = api.getEnvironmentManagerCapability(ownerId, 'environments.list');
         await clock.tickAsync(MANAGER_READY_TIMEOUT_MS);
         assert.strictEqual((await pending).supported, false);
         let ready = false;
@@ -358,7 +358,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         installedExtension(async () => {
             registerOwner().dispose();
         });
-        assert.strictEqual((await api.getEnvironmentCapability(ownerId, 'environments.list')).supported, false);
+        assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, false);
         assert.ok(envProbe.notCalled);
     });
 

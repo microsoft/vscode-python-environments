@@ -8,8 +8,8 @@ import {
     CapabilityContext,
     defaultEnvironmentCapabilities,
     defaultPackageCapabilities,
-    EnvironmentCapability,
-    PackageCapability,
+    EnvironmentManagerCapability,
+    PackageManagerCapability,
     resolveEnvironmentManagerCapability,
     resolvePackageManagerCapability,
     Support,
@@ -44,7 +44,7 @@ function packageManager(overrides: Partial<PackageManager> = {}): PackageManager
     };
 }
 
-const environmentDefaults: Record<EnvironmentCapability, boolean> = {
+const environmentDefaults: Record<EnvironmentManagerCapability, boolean> = {
     'environments.list': true,
     'environments.refresh': true,
     'environments.resolve': true,
@@ -60,7 +60,7 @@ const environmentDefaults: Record<EnvironmentCapability, boolean> = {
     'environments.events.selectionChanged': false,
 };
 
-const packageDefaults: Record<PackageCapability, boolean> = {
+const packageDefaults: Record<PackageManagerCapability, boolean> = {
     'packages.list': true,
     'packages.list.skipCache': true,
     'packages.refresh': true,
@@ -82,7 +82,7 @@ const packageDefaults: Record<PackageCapability, boolean> = {
 suite('Manager capabilities', () => {
     const unsupported: Support = { supported: false, reason: 'Not supported by this provider' };
 
-    for (const key of Object.keys(environmentDefaults) as EnvironmentCapability[]) {
+    for (const key of Object.keys(environmentDefaults) as EnvironmentManagerCapability[]) {
         test(`environment default and explicit overrides: ${key}`, async () => {
             for (const capabilities of [undefined, {}]) {
                 const manager = environmentManager({ capabilities });
@@ -110,7 +110,7 @@ suite('Manager capabilities', () => {
         });
     }
 
-    for (const key of Object.keys(packageDefaults) as PackageCapability[]) {
+    for (const key of Object.keys(packageDefaults) as PackageManagerCapability[]) {
         test(`package default and explicit overrides: ${key}`, async () => {
             for (const capabilities of [undefined, {}]) {
                 const manager = packageManager({ capabilities });
@@ -164,11 +164,11 @@ suite('Manager capabilities', () => {
             onDidChangePackages: unexpectedOperation,
         });
         const wrapped = new InternalEnvironmentManager('test:environment', env);
-        for (const key of Object.keys(environmentDefaults) as EnvironmentCapability[]) {
+        for (const key of Object.keys(environmentDefaults) as EnvironmentManagerCapability[]) {
             assert.strictEqual((await resolveEnvironmentManagerCapability(env, key)).supported, true, key);
             assert.strictEqual((await wrapped.getCapability(key)).supported, true, key);
         }
-        for (const key of Object.keys(packageDefaults) as PackageCapability[]) {
+        for (const key of Object.keys(packageDefaults) as PackageManagerCapability[]) {
             assert.strictEqual((await resolvePackageManagerCapability(pkg, key)).supported, true, key);
         }
     });
@@ -408,7 +408,7 @@ suite('Manager capabilities', () => {
 
     test('detects self and indirect cycles with a useful chain', async () => {
         const manager = packageManager();
-        const capabilities: Capabilities<PackageCapability> = {
+        const capabilities: Capabilities<PackageManagerCapability> = {
             'packages.list': (context) => resolvePackageManagerCapability(manager, 'packages.list', context),
             'packages.manage': (context) => resolvePackageManagerCapability(manager, 'packages.manage.upgrade', context),
         };
@@ -462,7 +462,7 @@ suite('Manager capabilities', () => {
     test('arrow advertisements retain their instance when extracted and are not cached', async () => {
         class Advertiser {
             enabled = false;
-            readonly capabilities: Capabilities<PackageCapability> = {
+            readonly capabilities: Capabilities<PackageManagerCapability> = {
                 'packages.list': async () => (this.enabled ? { supported: true } : unsupported),
             };
         }
@@ -479,10 +479,10 @@ suite('Manager capabilities', () => {
     test('wrapper fallbacks do not enable optional capabilities', async () => {
         const env = new InternalEnvironmentManager('test:environment', environmentManager());
         const pkg = new InternalPackageManager('test:packages', packageManager());
-        for (const key of Object.keys(environmentDefaults) as EnvironmentCapability[]) {
+        for (const key of Object.keys(environmentDefaults) as EnvironmentManagerCapability[]) {
             assert.strictEqual((await env.getCapability(key)).supported, environmentDefaults[key]);
         }
-        for (const key of Object.keys(packageDefaults) as PackageCapability[]) {
+        for (const key of Object.keys(packageDefaults) as PackageManagerCapability[]) {
             assert.strictEqual((await pkg.getCapability(key)).supported, packageDefaults[key]);
         }
         pkg.dispose();
@@ -499,7 +499,7 @@ suite('Manager capabilities', () => {
         });
         const wrapped = new InternalPackageManager('test:packages', manager);
         try {
-            for (const key of Object.keys(packageDefaults) as PackageCapability[]) {
+            for (const key of Object.keys(packageDefaults) as PackageManagerCapability[]) {
                 assert.deepStrictEqual(await wrapped.getCapability(key), { supported: true }, key);
             }
         } finally {

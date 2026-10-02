@@ -2,9 +2,9 @@ import type {
     Capabilities,
     CapabilityContext,
     DefaultCapabilityCheck,
-    EnvironmentCapability,
+    EnvironmentManagerCapability,
     EnvironmentManager,
-    PackageCapability,
+    PackageManagerCapability,
     PackageManager,
     Pep440Version,
     PythonEnvironment,
@@ -85,7 +85,7 @@ const legacyEnvironmentManager: EnvironmentManager = {
     set: async () => {},
     resolve: async () => undefined,
 };
-const advertised: Capabilities<PackageCapability> = {
+const advertised: Capabilities<PackageManagerCapability> = {
     'packages.manage.install': (context: CapabilityContext) =>
         resolvePackageManagerCapability(legacyPackageManager, 'packages.manage', context),
     'packages.direct': async (_context) => ({ supported: false, reason: 'Unavailable' }),
@@ -99,9 +99,9 @@ const packageDefault: Promise<Support> = defaultPackageCapabilities['packages.li
 const environmentDefault: Promise<Support> =
     defaultEnvironmentCapabilities['environments.list'](legacyEnvironmentManager, {});
 declare const fullApi: PythonEnvironmentApi;
-const routedPackageSupport: Promise<Support> = fullApi.getPackageCapability(environment, 'packages.list');
+const routedPackageSupport: Promise<Support> = fullApi.getPackageManagerCapability(environment, 'packages.list');
 const routedEnvironmentSupport: Promise<Support> =
-    fullApi.getEnvironmentCapability('example:legacy', 'environments.list', { scope: 'all' });
+    fullApi.getEnvironmentManagerCapability('example:legacy', 'environments.list', { scope: 'all' });
 declare const support: Support;
 if (!support.supported) {
     const unsupportedReason: string = support.reason;
@@ -109,11 +109,11 @@ if (!support.supported) {
 }
 
 // @ts-expect-error Package keys do not belong to the environment capability domain.
-const invalidEnvironmentKey: EnvironmentCapability = 'packages.list';
+const invalidEnvironmentKey: EnvironmentManagerCapability = 'packages.list';
 // @ts-expect-error Environment keys do not belong to the package capability domain.
-const invalidPackageKey: PackageCapability = 'environments.list';
+const invalidPackageKey: PackageManagerCapability = 'environments.list';
 // @ts-expect-error Advertisements must be asynchronous functions, not static Support values.
-const invalidMap: Capabilities<PackageCapability> = { 'packages.list': { supported: true } };
+const invalidMap: Capabilities<PackageManagerCapability> = { 'packages.list': { supported: true } };
 // @ts-expect-error Operation options are not capability query context.
 const invalidContext: CapabilityContext = { createOptions: { quickCreate: true } };
 // @ts-expect-error Named creation is deferred rather than an enabled capability.
@@ -125,18 +125,18 @@ resolveEnvironmentManagerCapability(legacyEnvironmentManager, arbitraryKey);
 // @ts-expect-error A general string is not a declared package capability.
 resolvePackageManagerCapability(legacyPackageManager, arbitraryKey);
 // @ts-expect-error Public environment queries require a catalog key.
-fullApi.getEnvironmentCapability('example:legacy', arbitraryKey);
+fullApi.getEnvironmentManagerCapability('example:legacy', arbitraryKey);
 // @ts-expect-error Public package queries require a catalog key.
-fullApi.getPackageCapability(environment, arbitraryKey);
+fullApi.getPackageManagerCapability(environment, arbitraryKey);
 // @ts-expect-error Default dictionaries have no arbitrary string index signature.
 defaultPackageCapabilities[arbitraryKey];
 // @ts-expect-error Default dictionaries have no arbitrary string index signature.
 defaultEnvironmentCapabilities[arbitraryKey];
 // @ts-expect-error Advertisements cannot introduce arbitrary keys.
-const unknownCapabilityMap: Capabilities<PackageCapability> = { 'packages.unknown': async () => ({ supported: true }) };
+const unknownCapabilityMap: Capabilities<PackageManagerCapability> = { 'packages.unknown': async () => ({ supported: true }) };
 
-const environmentDefaultsAreComplete: Equal<keyof typeof defaultEnvironmentCapabilities, EnvironmentCapability> = true;
-const packageDefaultsAreComplete: Equal<keyof typeof defaultPackageCapabilities, PackageCapability> = true;
+const environmentDefaultsAreComplete: Equal<keyof typeof defaultEnvironmentCapabilities, EnvironmentManagerCapability> = true;
+const packageDefaultsAreComplete: Equal<keyof typeof defaultPackageCapabilities, PackageManagerCapability> = true;
 const environmentDefaultSignatureIsExact: Equal<
     (typeof defaultEnvironmentCapabilities)['environments.create.quick'],
     DefaultCapabilityCheck<EnvironmentManager>

@@ -1,5 +1,5 @@
 import { Disposable, Event, EventEmitter, l10n, TaskExecution, Terminal, Uri } from 'vscode';
-import type { CapabilityContext, EnvironmentCapability, PackageCapability, Support } from './capabilities';
+import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCapability, Support } from './capabilities';
 import type {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -156,9 +156,9 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
      * @param capability Feature to query.
      * @param context Optional scope, environment, and project forwarded to the provider.
      */
-    async getEnvironmentCapability(
+    async getEnvironmentManagerCapability(
         managerId: string,
-        capability: EnvironmentCapability,
+        capability: EnvironmentManagerCapability,
         context?: CapabilityContext,
     ): Promise<Support> {
         if (context?.environment && context.environment.envId.managerId !== managerId) {
@@ -179,9 +179,9 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
      * @param capability Feature to query.
      * @param project Optional project selecting its configured, project-bound provider.
      */
-    async getPackageCapability(
+    async getPackageManagerCapability(
         environment: PythonEnvironment,
-        capability: PackageCapability,
+        capability: PackageManagerCapability,
         project?: PythonProject,
     ): Promise<Support> {
         const unavailable = (): Support => ({
