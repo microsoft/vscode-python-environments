@@ -132,38 +132,24 @@ async function resolvePriorityChainCore(
                 );
             }
         } else {
-            const expandedInterpreterPath = resolveVariables(userInterpreterPath, scope);
-            if (expandedInterpreterPath.includes('${')) {
-                traceWarn(
-                    `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' contains unresolved variables, falling back to auto-discovery`,
-                );
-                const error: SettingResolutionError = {
-                    setting: 'defaultInterpreterPath',
-                    kind: 'pathUnresolvedVariables',
-                    configuredValue: userInterpreterPath,
-                };
-                errors.push(error);
-            } else {
-                const resolved = await tryResolveInterpreterPath(
-                    nativeFinder,
-                    api,
-                    expandedInterpreterPath,
-                    envManagers,
-                );
-                if (resolved) {
-                    traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
-                    return { result: resolved, errors };
-                }
-                const error: SettingResolutionError = {
-                    setting: 'defaultInterpreterPath',
-                    kind: 'pathCannotResolve',
-                    configuredValue: userInterpreterPath,
-                };
-                errors.push(error);
-                traceWarn(
-                    `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' unresolvable, falling back to auto-discovery`,
-                );
+            // Resolve relative paths against the workspace folder so the native finder doesn't
+            // resolve them against an unrelated current working directory (which can produce a
+            // malformed, duplicated path such as <workspace>/<workspace-name>/.venv/...).
+            const absoluteInterpreterPath = toAbsoluteInterpreterPath(expandedInterpreterPath, scope);
+            const resolved = await tryResolveInterpreterPath(nativeFinder, api, absoluteInterpreterPath, envManagers);
+            if (resolved) {
+                traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
+                return { result: resolved, errors };
             }
+            const error: SettingResolutionError = {
+                setting: 'defaultInterpreterPath',
+                kind: 'pathCannotResolve',
+                configuredValue: userInterpreterPath,
+            };
+            errors.push(error);
+            traceWarn(
+                `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' unresolvable, falling back to auto-discovery`,
+            );
         }
     }
 
@@ -543,6 +529,27 @@ function getProjectSpecificEnvManager(projectManager: PythonProjectManager, scop
         }
     }
     return undefined;
+}
+
+/**
+ * Resolve a (variable-expanded) interpreter path to an absolute path.
+ *
+ * `python.defaultInterpreterPath` may be configured as a relative path (e.g. `.venv/bin/python`).
+ * The native finder resolves relative paths against its own working directory, which is unrelated
+ * to the workspace and can produce malformed paths (including a duplicated workspace segment).
+ * To avoid this, relative paths are resolved against the workspace folder identified by the scope.
+ * Global relative paths are left unchanged because there is no workspace context to resolve against.
+ *
+ * @param interpreterPath - The interpreter path after variable substitution.
+ * @param scope - The workspace folder URI, or undefined for global scope.
+ * @returns An absolute interpreter path when possible, otherwise the input unchanged.
+ */
+function toAbsoluteInterpreterPath(interpreterPath: string, scope: Uri | undefined): string {
+    if (path.isAbsolute(interpreterPath) || !scope) {
+        return interpreterPath;
+    }
+    const workspaceFolder = getWorkspaceFolder(scope);
+    return path.resolve(workspaceFolder?.uri.fsPath ?? scope.fsPath, interpreterPath);
 }
 
 /**
