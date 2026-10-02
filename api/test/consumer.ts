@@ -1,7 +1,6 @@
 import type {
     Capabilities,
     CapabilityContext,
-    DefaultCapabilityCheck,
     EnvironmentManager,
     EnvironmentManagerCapability,
     PackageManager,
@@ -83,7 +82,6 @@ resolveEnvironmentManagerCapability(legacyEnvironmentManager, 'environments.crea
 }) satisfies Promise<Support>;
 
 // Shared default checkers.
-defaultPackageCapabilities['packages.list'] satisfies DefaultCapabilityCheck<PackageManager>;
 defaultPackageCapabilities['packages.list'](legacyPackageManager, {}) satisfies Promise<Support>;
 defaultEnvironmentCapabilities['environments.list'](legacyEnvironmentManager, {}) satisfies Promise<Support>;
 

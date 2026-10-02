@@ -17,7 +17,7 @@ export type EnvironmentManagerCapability = keyof typeof defaultEnvironmentCapabi
 /** Package capability keys derived from the canonical default dictionary. */
 export type PackageManagerCapability = keyof typeof defaultPackageCapabilities;
 
-export type ManagerCapability = EnvironmentManagerCapability | PackageManagerCapability;
+type ManagerCapability = EnvironmentManagerCapability | PackageManagerCapability;
 
 /** General feature support, not a guarantee that a particular operation will succeed. */
 export type Support =
@@ -38,7 +38,7 @@ export type CapabilityCheck = (context: CapabilityContext) => Promise<Support>;
 export type Capabilities<C extends ManagerCapability> = Readonly<Partial<Record<C, CapabilityCheck>>>;
 
 /** Shared defaults use the raw provider when resolving advertised prerequisites. */
-export type DefaultCapabilityCheck<M> = (manager: M, context: CapabilityContext) => Promise<Support>;
+type DefaultCapabilityCheck<M> = (manager: M, context: CapabilityContext) => Promise<Support>;
 
 /**
  * Environment capability catalog and compatibility defaults.
