@@ -15,6 +15,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentCapability } from '../../capabilities';
 import { PoetryStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -41,6 +42,12 @@ import {
 } from './poetryUtils';
 
 export class PoetryManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.clearCache': async () => ({ supported: true }),
+        'environments.events.changed': async () => ({ supported: true }),
+        'environments.events.selectionChanged': async () => ({ supported: true }),
+    };
+
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

@@ -26,6 +26,7 @@ import {
     PythonProject,
 } from '../../api';
 import { Capabilities, CapabilityContext, PackageCapability, Support } from '../../capabilities';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
 import { PackageManagerRequiresProjectError } from '../common/errors';
@@ -43,6 +44,8 @@ import { getPoetry } from './poetryUtils';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageCapability> = {
+        'packages.version': async () => ({ supported: true }),
+        'packages.events.changed': async () => ({ supported: true }),
         'packages.list': async (context) => this.checkProjectSupport(context),
         'packages.direct': async (context) => this.checkProjectSupport(context),
         'packages.manage': async (context) => this.checkProjectSupport(context),
@@ -65,8 +68,19 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         if (!this.project) {
             return { supported: false, reason: l10n.t('Poetry package management requires a project-bound manager.') };
         }
-        if (context.project && context.project.uri.toString() !== this.project.uri.toString()) {
-            return { supported: false, reason: l10n.t('The Poetry package manager is bound to a different project.') };
+        if (context.project) {
+            const requested = context.project.uri;
+            const bound = this.project.uri;
+            const sameProject =
+                requested.scheme === 'file' && bound.scheme === 'file'
+                    ? requested.authority === bound.authority &&
+                      requested.query === bound.query &&
+                      requested.fragment === bound.fragment &&
+                      normalizePath(path.resolve(requested.fsPath)) === normalizePath(path.resolve(bound.fsPath))
+                    : requested.toString() === bound.toString();
+            if (!sameProject) {
+                return { supported: false, reason: l10n.t('The Poetry package manager is bound to a different project.') };
+            }
         }
         return { supported: true };
     }

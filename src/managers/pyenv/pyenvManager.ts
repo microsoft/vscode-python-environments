@@ -15,6 +15,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentCapability } from '../../capabilities';
 import { PYENV_MANAGER_ID } from '../../common/constants';
 import { PyenvStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
@@ -43,6 +44,12 @@ import {
 } from './pyenvUtils';
 
 export class PyEnvManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.clearCache': async () => ({ supported: true }),
+        'environments.events.changed': async () => ({ supported: true }),
+        'environments.events.selectionChanged': async () => ({ supported: true }),
+    };
+
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

@@ -37,6 +37,10 @@ import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToIns
 
 export class SysPythonManager implements EnvironmentManager {
     readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.create': async () => ({ supported: true }),
+        'environments.clearCache': async () => ({ supported: true }),
+        'environments.events.changed': async () => ({ supported: true }),
+        'environments.events.selectionChanged': async () => ({ supported: true }),
         'environments.create.quick': async () => ({
             supported: false,
             reason: l10n.t('Installing a global Python requires interactive version selection.'),

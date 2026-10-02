@@ -282,6 +282,10 @@ interface SavedMetadataSnapshot {
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.remove': async () => ({ supported: true }),
+        'environments.clearCache': async () => ({ supported: true }),
+        'environments.events.changed': async () => ({ supported: true }),
+        'environments.events.selectionChanged': async () => ({ supported: true }),
         'environments.create': async ({ scope }) => {
             const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
             if (!scriptUri) {
@@ -290,7 +294,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     reason: l10n.t('Inline-script creation requires exactly one local file URI.'),
                 };
             }
-            return (await readInlineScriptMetadataFromFile(scriptUri))
+            return (await readInlineScriptMetadataFromFile(scriptUri, { strict: true }))
                 ? { supported: true }
                 : { supported: false, reason: l10n.t('The script must contain valid PEP 723 metadata.') };
         },

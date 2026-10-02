@@ -1956,8 +1956,12 @@ entry, otherwise `{ supported: false, reason: "Capability not implemented" }`.
 An explicit unsupported result or thrown error never triggers fallback.
 Unknown runtime keys are unsupported.
 
-Required operations default supported. Optional hooks use raw method/event
-presence, not wrapper fallbacks. Existing option defaults resolve their parent,
+Required operations default supported. Environment creation and removal default
+supported when the raw manager implements `create` or `remove`; no operation is
+invoked to determine support. Explicit opt-outs still take precedence. Other
+optional methods/events and quick creation default unsupported, even when the
+corresponding hook exists; managers must explicitly advertise these features.
+Existing option defaults resolve their parent,
 so a parent opt-out disables omitted child entries. Explicit child overrides
 are responsible for their own prerequisites.
 
@@ -1968,14 +1972,14 @@ are responsible for their own prerequisites.
 | `environments.resolve` | `resolve`; target URI in `scope` | Supported |
 | `environments.getSelected` | `get` | Supported |
 | `environments.setSelected` | `set`, including clearing selection | Supported |
-| `environments.create` | `create` | Raw method exists |
-| `environments.create.quick` | `quickCreate` | Create supported and raw `quickCreateConfig` exists |
+| `environments.create` | `create` | Supported when the raw method exists |
+| `environments.create.quick` | `quickCreate` | Unsupported |
 | `environments.create.additionalPackages` | `additionalPackages` | Inherit create |
-| `environments.remove` | `remove` | Raw method exists |
+| `environments.remove` | `remove` | Supported when the raw method exists |
 | `environments.remove.headless` | `runHeadless` | Inherit remove |
-| `environments.clearCache` | `clearCache` | Raw method exists |
-| `environments.events.changed` | `onDidChangeEnvironments` | Raw event exists |
-| `environments.events.selectionChanged` | `onDidChangeEnvironment` | Raw event exists |
+| `environments.clearCache` | `clearCache` | Unsupported |
+| `environments.events.changed` | `onDidChangeEnvironments` | Unsupported |
+| `environments.events.selectionChanged` | `onDidChangeEnvironment` | Unsupported |
 
 | Package capability | Covered surface | Default when omitted |
 | --- | --- | --- |
@@ -1988,24 +1992,30 @@ are responsible for their own prerequisites.
 | `packages.manage.upgrade` | `upgrade` | Inherit install |
 | `packages.manage.headless` | `runHeadless` | Inherit manage |
 | `packages.manage.showSkipOption` | Interactive skip option | Inherit manage |
-| `packages.direct` | `getDirectPackageNames` / enrichment | Raw method exists |
-| `packages.version` | Tool version via `getVersion` | Raw method exists |
-| `packages.availableVersions` | `getPackageAvailableVersions` | Raw method exists |
+| `packages.direct` | `getDirectPackageNames` / enrichment | Unsupported |
+| `packages.version` | Tool version via `getVersion` | Unsupported |
+| `packages.availableVersions` | `getPackageAvailableVersions` | Unsupported |
 | `packages.formatInstallSpec` | Versioned install syntax | Supported via `name==version` fallback |
-| `packages.clearCache` | `clearCache` | Raw method exists |
-| `packages.watchTargets` | Custom `getPackageWatchTargets` | Raw method exists |
-| `packages.events.changed` | `onDidChangePackages` | Raw event exists |
+| `packages.clearCache` | `clearCache` | Unsupported |
+| `packages.watchTargets` | Custom `getPackageWatchTargets` | Unsupported |
+| `packages.events.changed` | `onDidChangePackages` | Unsupported |
 
 ### Compatibility and built-in limitations
 
-Legacy presence/option defaults are deliberately optimistic. A method may still
-ignore an option or reject; explicit advertisements refine that compatibility
-inference. Legacy providers need not add a map or change inheritance.
+Legacy providers need not add a map or change inheritance to keep existing
+operations working. Creation/removal support follows their raw methods unless
+overridden. Other optional features report unsupported until explicitly
+advertised, even when callable. Required operations and inherited option defaults
+remain deliberately optimistic: support does not guarantee that a method honors
+every request or will succeed. Built-in managers explicitly advertise their
+supported optional features.
 
 Venv and Conda support additional packages in quick creation only. Quick-path
 support does not certify a prompt-free invocation: venv dependency validation
 can require interaction. System Python creation prompts and ignores additional
-packages. Inline-script creation requires an applicable local script context.
+packages. Inline-script creation requires an applicable local script context;
+unexpected metadata I/O failures reject rather than being reported as invalid
+metadata. Conda quick support does not generate or reserve an environment name.
 Headless removal permits progress/error UI; Conda and inline-script removal
 already need no confirmation.
 

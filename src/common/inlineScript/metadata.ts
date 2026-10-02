@@ -651,11 +651,19 @@ export function sliceHeaderBytes(text: string): string {
  * Returns `undefined` for:
  *  - any URI scheme other than `file:` (notebook cells, untitled
  *    buffers, git: revisions, etc. are out of scope);
- *  - any I/O error (logged at `traceVerbose`);
+ *  - any I/O error (logged at `traceVerbose`), unless strict mode is requested;
  *  - any of the malformed-metadata cases handled by
  *    `readInlineScriptMetadata`.
+ *
+ * @param uri Local script to read, bounded by `MAX_HEADER_BYTES`.
+ * @param options Strict mode rejects unexpected I/O failures and rejects metadata with parse errors.
+ * Missing files, non-directory path components, and directories still return `undefined`.
+ * Discovery callers retain the legacy best-effort behavior by omitting this option.
  */
-export async function readInlineScriptMetadataFromFile(uri: Uri): Promise<InlineScriptMetadata | undefined> {
+export async function readInlineScriptMetadataFromFile(
+    uri: Uri,
+    options: { readonly strict?: boolean } = {},
+): Promise<InlineScriptMetadata | undefined> {
     if (uri.scheme !== 'file') {
         traceVerbose(`inline script metadata: skipping non-file URI scheme '${uri.scheme}'`);
         return undefined;
@@ -671,10 +679,20 @@ export async function readInlineScriptMetadataFromFile(uri: Uri): Promise<Inline
             await handle.close();
         }
     } catch (err) {
+        const code = err && typeof err === 'object' && 'code' in err ? err.code : undefined;
+        if (options.strict && code !== 'ENOENT' && code !== 'ENOTDIR' && code !== 'EISDIR') {
+            throw err;
+        }
         traceVerbose(`inline script metadata: failed to read ${uri.fsPath}:`, err);
         return undefined;
     }
 
+    if (options.strict) {
+        const result = parseInlineScriptMetadata(text, uri.fsPath);
+        return result.kind === 'parsed' && !result.problems.some((problem) => problem.severity === 'error')
+            ? result.metadata
+            : undefined;
+    }
     return readInlineScriptMetadata(text, uri.fsPath);
 }
 

@@ -45,7 +45,6 @@ import {
     getCondaForWorkspace,
     getCondaPathSetting,
     getDefaultCondaPrefix,
-    getKnownCondaCreationPrefix,
     quickCreateConda,
     refreshCondaEnvs,
     resolveCondaPath,
@@ -56,6 +55,11 @@ import {
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.create': async () => ({ supported: true }),
+        'environments.remove': async () => ({ supported: true }),
+        'environments.clearCache': async () => ({ supported: true }),
+        'environments.events.changed': async () => ({ supported: true }),
+        'environments.events.selectionChanged': async () => ({ supported: true }),
         'environments.create.quick': async (context) => {
             const create = await resolveEnvironmentManagerCapability(this, 'environments.create', context);
             if (!create.supported) {
@@ -63,25 +67,13 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
             }
             const { scope } = context;
             if (scope === 'global' || (Array.isArray(scope) && scope.length > 1)) {
-                const root = await getKnownCondaCreationPrefix();
-                if (!root) {
-                    return { supported: false, reason: l10n.t('Quick Conda creation requires a creation location.') };
-                }
-                return (await generateName(root))
-                    ? { supported: true }
-                    : { supported: false, reason: l10n.t('Quick Conda creation requires an available environment name.') };
+                return { supported: true };
             }
             const uri = scope instanceof Uri ? scope : Array.isArray(scope) ? scope[0] : undefined;
             return uri && this.api.getPythonProject(uri)?.uri.fsPath
                 ? { supported: true }
                 : { supported: false, reason: l10n.t('Quick Conda creation requires a Python project location.') };
         },
-        // Additional packages are forwarded only with explicit quickCreate, not by interactive creation.
-        'environments.create.additionalPackages': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.create', context),
-        // Removal already uses env remove --yes; it needs no separate headless implementation.
-        'environments.remove.headless': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.remove', context),
     };
 
     private collection: PythonEnvironment[] = [];
