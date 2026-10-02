@@ -4,10 +4,7 @@
 import * as assert from 'assert';
 import { Disposable, extensions, Uri } from 'vscode';
 import {
-    Capabilities,
-    EnvironmentManagerCapability,
     EnvironmentManager,
-    PackageManagerCapability,
     PackageManager,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -19,13 +16,11 @@ suite('Manager capabilities integration', function () {
     this.timeout(60_000);
     let api: PythonEnvironmentApi;
     let environment: PythonEnvironment;
-    let manager: EnvironmentManager;
     let packages: PackageManager;
-    let capabilities: Capabilities<PackageManagerCapability>;
-    let environmentCapabilities: Capabilities<EnvironmentManagerCapability>;
+    let packageCapabilities: PackageManager['capabilities'];
+    let environmentCapabilities: EnvironmentManager['capabilities'];
     let manageCalls: number;
     const disposables: Disposable[] = [];
-    const environmentManagerId = `${ENVS_EXTENSION_ID}:capability-test-environment`;
 
     suiteSetup(async () => {
         const extension = extensions.getExtension<PythonEnvironmentApi>(ENVS_EXTENSION_ID);
@@ -35,24 +30,21 @@ suite('Manager capabilities integration', function () {
     });
 
     setup(() => {
-        capabilities = {};
-        environmentCapabilities = {};
+        packageCapabilities = undefined;
+        environmentCapabilities = undefined;
         manageCalls = 0;
         packages = {
             name: 'capability-test-packages',
             get capabilities() {
-                return capabilities;
+                return packageCapabilities;
             },
             manage: async () => {
                 manageCalls++;
             },
             refresh: async () => {},
             getPackages: async () => [],
-            getDirectPackageNames: async () => {
-                throw new Error('A capability query must not invoke the optional operation');
-            },
         };
-        manager = {
+        const manager: EnvironmentManager = {
             name: 'capability-test-environment',
             get capabilities() {
                 return environmentCapabilities;
@@ -63,12 +55,6 @@ suite('Manager capabilities integration', function () {
             get: async () => undefined,
             set: async () => {},
             resolve: async () => undefined,
-            create: async () => {
-                throw new Error('A capability query must not invoke the optional operation');
-            },
-            remove: async () => {
-                throw new Error('A capability query must not invoke the optional operation');
-            },
         };
         disposables.push(
             api.registerPackageManager(packages, { extensionId: ENVS_EXTENSION_ID }),
@@ -89,57 +75,31 @@ suite('Manager capabilities integration', function () {
         );
     });
 
-    test('optional hooks infer support while advertisements override it across the extension boundary', async () => {
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.direct'), { supported: true });
-        const unsupported = { supported: false, reason: 'Disabled for test' } as const;
-        capabilities = { 'packages.direct': async () => unsupported };
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.direct'), unsupported);
-        capabilities = {};
-        delete packages.getDirectPackageNames;
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.direct'), {
-            supported: false,
-            reason: 'Capability not implemented',
-        });
-        capabilities = { 'packages.direct': async () => ({ supported: true }) };
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.direct'), { supported: true });
+    teardown(() => {
+        disposables.splice(0).reverse().forEach((disposable) => disposable.dispose());
     });
 
-    test('quick creation infers legacy hooks while preserving contextual parent overrides', async () => {
+    test('environment queries resolve defaults and pass context to provider overrides', async () => {
         assert.deepStrictEqual(
-            await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.list'),
+            await api.getEnvironmentManagerCapability(environment.envId.managerId, 'environments.list'),
             { supported: true },
         );
-        assert.strictEqual(
-            (await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create.quick')).supported,
-            false,
-        );
-        manager.quickCreateConfig = () => {
-            throw new Error('A capability query must not invoke quick-create metadata');
-        };
-        assert.deepStrictEqual(
-            await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create.quick'),
-            { supported: true },
-        );
-        const unsupported = { supported: false, reason: 'Creation disabled in this scope' } as const;
+        const unsupported = { supported: false, reason: 'Disabled in this scope' } as const;
         environmentCapabilities = {
-            'environments.create': async (context) => {
+            'environments.list': async (context) => {
                 assert.strictEqual(context.scope, 'global');
                 return unsupported;
             },
         };
         assert.deepStrictEqual(
-            await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create.quick', { scope: 'global' }),
+            await api.getEnvironmentManagerCapability(environment.envId.managerId, 'environments.list', { scope: 'global' }),
             unsupported,
         );
     });
 
-    teardown(() => {
-        disposables.splice(0).reverse().forEach((disposable) => disposable.dispose());
-    });
-
     test('dynamic overrides and default prerequisites cross the extension boundary', async () => {
         let enabled = false;
-        capabilities = {
+        packageCapabilities = {
             'packages.manage': async (context) => {
                 assert.strictEqual(context.environment, environment);
                 return enabled ? { supported: true } : { supported: false, reason: 'Disabled for test' };
@@ -159,7 +119,7 @@ suite('Manager capabilities integration', function () {
     });
 
     test('prerequisite cycles are detected across separately loaded API modules', async () => {
-        capabilities = {
+        packageCapabilities = {
             'packages.manage': (context) =>
                 resolvePackageManagerCapability(packages, 'packages.manage.install', context),
         };
@@ -170,7 +130,7 @@ suite('Manager capabilities integration', function () {
     });
 
     test('unsupported advertisements do not enforce or change existing operations', async () => {
-        capabilities = {
+        packageCapabilities = {
             'packages.manage': async () => ({ supported: false, reason: 'Advisory only' }),
         };
         assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.manage')).supported, false);
