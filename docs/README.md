@@ -1917,7 +1917,7 @@ interface CapabilityContext {
 }
 
 type CapabilityCheck = (context: CapabilityContext) => Promise<Support>;
-type Capabilities<C extends ManagerCapability> =
+type Capabilities<C extends EnvironmentManagerCapability | PackageManagerCapability> =
     Readonly<Partial<Record<C, CapabilityCheck>>>;
 ```
 
