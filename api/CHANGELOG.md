@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Optional dynamic `capabilities` maps on the existing `EnvironmentManager` and `PackageManager` interfaces. No inheritance or migration is required for legacy providers.
 - `Support`, `CapabilityContext`, typed capability keys/maps, and external default dictionaries covering 13 environment and 16 package capabilities.
+- Required operations default supported. Environment creation/removal default to raw method availability; other optional methods/events and quick creation require explicit advertisements. Explicit overrides always take precedence. Built-in managers advertise their supported optional features.
 - `resolveEnvironmentManagerCapability` and `resolvePackageManagerCapability` for raw-provider support checks with shared defaults and prerequisite-cycle detection.
 - `getEnvironmentCapability` and `getPackageCapability` on the extension API for noninteractive, context-aware routed queries. Queries are advisory: existing operations and error behavior remain unchanged. Feature-detect these methods on older installed extension runtimes.
 

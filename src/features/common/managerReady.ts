@@ -13,6 +13,56 @@ import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../set
 
 export const MANAGER_READY_TIMEOUT_MS = 30_000;
 
+/**
+ * Waits for one capability-query provider without prompts or shared readiness state.
+ * @param managers The live registry, including providers registered before readiness initialization.
+ * @param managerId The exact provider to activate and await.
+ * @param kind Whether to watch environment or package registration.
+ * @returns Whether the provider is still registered; activation failures reject.
+ */
+export async function waitForManagerForQuery(
+    managers: EnvironmentManagers,
+    managerId: string,
+    kind: 'environment' | 'package',
+): Promise<boolean> {
+    const isRegistered = () =>
+        kind === 'environment'
+            ? managers.getEnvironmentManager(managerId) !== undefined
+            : managers.getPackageManager(managerId) !== undefined;
+    if (isRegistered()) {
+        return true;
+    }
+
+    const registered = createDeferred<void>();
+    const changed =
+        kind === 'environment' ? managers.onDidChangeEnvironmentManager : managers.onDidChangePackageManager;
+    const subscription = changed((event) => {
+        if (event.kind === 'registered' && event.manager.id === managerId) {
+            registered.resolve();
+        }
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+        const timedOut = new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(false), MANAGER_READY_TIMEOUT_MS);
+        });
+        const activation = Promise.resolve().then(async () => {
+            const extensionId = getExtensionId(managerId);
+            const extension = extensionId ? getExtension(extensionId) : undefined;
+            if (extension && !extension.isActive) {
+                await extension.activate();
+            }
+            if (isRegistered()) {
+                registered.resolve();
+            }
+        });
+        return await Promise.race([timedOut, Promise.all([registered.promise, activation]).then(() => isRegistered())]);
+    } finally {
+        clearTimeout(timer);
+        subscription.dispose();
+    }
+}
+
 interface ManagerReady extends Disposable {
     waitForEnvManager(uris?: Uri[]): Promise<void>;
     waitForEnvManagerId(managerIds: string[]): Promise<void>;

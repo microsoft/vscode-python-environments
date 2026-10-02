@@ -53,6 +53,8 @@ import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageCapability> = {
+        'packages.version': async () => ({ supported: true }),
+        'packages.events.changed': async () => ({ supported: true }),
         'packages.availableVersions': async ({ environment }) => {
             const pythonExecutable = environment?.execInfo?.run?.executable;
             if (!environment || !pythonExecutable || !PythonVersion.tryParse(environment.version)) {

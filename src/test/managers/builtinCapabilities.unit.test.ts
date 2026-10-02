@@ -2,11 +2,11 @@
 // Licensed under the MIT License.
 
 import assert from 'assert';
-import * as os from 'os';
+import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { Disposable, Memento, Uri } from 'vscode';
-import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import { EnvironmentManager, PackageManager, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import {
     CapabilityContext,
     EnvironmentCapability,
@@ -17,7 +17,7 @@ import {
 } from '../../capabilities';
 import * as childProcessApis from '../../common/childProcess.apis';
 import * as metadata from '../../common/inlineScript/metadata';
-import * as persistentState from '../../common/persistentState';
+import * as platformUtils from '../../common/utils/platformUtils';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import * as helpers from '../../managers/builtin/helpers';
@@ -29,8 +29,10 @@ import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 import { CondaEnvManager } from '../../managers/conda/condaEnvManager';
 import { CondaPackageManager } from '../../managers/conda/condaPackageManager';
 import * as condaUtils from '../../managers/conda/condaUtils';
+import { PipenvManager } from '../../managers/pipenv/pipenvManager';
 import { PoetryManager } from '../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../managers/poetry/poetryPackageManager';
+import { PyEnvManager } from '../../managers/pyenv/pyenvManager';
 import { createMockLogOutputChannel } from '../mocks/helper';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
@@ -152,32 +154,17 @@ suite('Built-in manager capabilities', () => {
         assert.ok(create.notCalled && remove.notCalled);
     });
 
-    test('Conda global and multi-root quick creation inspect location and name without creating', async () => {
+    test('Conda global and multi-root quick support does not preflight creation or discover tool state', async () => {
         const manager = new CondaEnvManager({} as NativePythonFinder, api, log);
         disposables.push(manager);
-        const prefix = sinon.stub(condaUtils, 'getKnownCondaCreationPrefix').resolves(path.join(root, 'envs'));
-        const name = sinon.stub(condaUtils, 'generateName').resolves('env_test');
+        const prefix = sinon.stub(condaUtils, 'getDefaultCondaPrefix').rejects(new Error('Unexpected prefix probe'));
+        const name = sinon.stub(condaUtils, 'generateName').rejects(new Error('Unexpected name probe'));
+        const discovery = sinon.stub(condaUtils, 'getConda').rejects(new Error('Unexpected tool discovery'));
         const create = sinon.stub(condaUtils, 'quickCreateConda');
         for (const scope of ['global', [project.uri, otherProject.uri]] as CapabilityContext['scope'][]) {
             assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.quick', { scope }), { supported: true });
         }
-        name.resolves(undefined);
-        assertUnsupported(await environmentCapability(manager, 'environments.create.quick', { scope: 'global' }));
-        prefix.resolves('');
-        assertUnsupported(await environmentCapability(manager, 'environments.create.quick', { scope: 'global' }));
-        prefix.rejects(new Error('Read failed'));
-        await assert.rejects(environmentCapability(manager, 'environments.create.quick', { scope: 'global' }), /Read failed/);
-        assert.ok(create.notCalled);
-    });
-
-    test('Conda capability prefix inspection never discovers or persists tool state', async () => {
-        await condaUtils.clearCondaCache();
-        const state = { get: sinon.stub().resolves([path.join(root, 'envs')]), set: sinon.stub(), clear: sinon.stub() };
-        sinon.stub(persistentState, 'getWorkspacePersistentState').resolves(state);
-        assert.strictEqual(await condaUtils.getKnownCondaCreationPrefix(), path.join(root, 'envs'));
-        state.get.resolves(undefined);
-        assert.strictEqual(await condaUtils.getKnownCondaCreationPrefix(), path.join(os.homedir(), '.conda', 'envs'));
-        assert.ok(state.set.notCalled && state.clear.notCalled);
+        assert.ok(prefix.notCalled && name.notCalled && discovery.notCalled && create.notCalled);
     });
 
     suite('inline scripts', () => {
@@ -213,6 +200,7 @@ suite('Built-in manager capabilities', () => {
             assert.deepStrictEqual(await environmentCapability(manager, 'environments.remove.headless'), { supported: true });
             assert.ok(create.notCalled && remove.notCalled && select.notCalled && stateUpdate.notCalled);
             assert.ok((api.getEnvironments as sinon.SinonStub).notCalled);
+            assert.ok(readMetadata.alwaysCalledWithExactly(script));
         });
 
         test('invalid scopes and invalid metadata disable all creation variants', async () => {
@@ -232,6 +220,25 @@ suite('Built-in manager capabilities', () => {
             await assert.rejects(environmentCapability(manager, 'environments.create.quick', { scope: script }), /Metadata probe failed/);
             assert.ok(stateUpdate.notCalled);
         });
+
+        for (const code of ['EACCES', 'EIO', 'ENOENT', 'ENOTDIR', 'EISDIR']) {
+            test(`real metadata reader handles ${code} during capability queries`, async () => {
+                readMetadata.restore();
+                const error = Object.assign(new Error(`File open failed: ${code}`), { code });
+                const open = sinon.stub(fs, 'open').rejects(error);
+                for (const key of ['environments.create', 'environments.create.quick', 'environments.create.additionalPackages'] as const) {
+                    const result = environmentCapability(manager, key, { scope: script });
+                    if (code === 'EACCES' || code === 'EIO') {
+                        await assert.rejects(result, (failure) => failure === error);
+                    } else {
+                        assertUnsupported(await result);
+                    }
+                }
+                assert.strictEqual(open.callCount, 3);
+                assert.ok(open.alwaysCalledWithExactly(script.fsPath, 'r'));
+                assert.ok(stateUpdate.notCalled);
+            });
+        }
     });
 
     for (const [version, supported] of [['21.1.3', false], ['21.2', true], ['21.2.0', true], ['25.0', true], ['25.1', true], ['26.0', true]] as const) {
@@ -319,7 +326,47 @@ suite('Built-in manager capabilities', () => {
         assert.ok(lookup.notCalled && manage.notCalled);
     });
 
-    test('Conda package defaults preserve absent direct names and implemented lookup/watch hooks', async () => {
+    for (const windows of [true, false]) {
+        test(`Poetry project identities respect ${windows ? 'Windows' : 'POSIX'} path casing`, async () => {
+            sinon.stub(platformUtils, 'isWindows').returns(windows);
+            const mixedCase = { ...project, uri: Uri.file(path.join(root, 'MixedCaseProject')) };
+            const manager = poetry().createForProject(mixedCase);
+            disposables.push(manager);
+            const otherCase = { ...mixedCase, uri: Uri.file(path.join(root, 'mixedcaseproject')) };
+            assert.strictEqual((await packageCapability(manager, 'packages.list', { project: otherCase })).supported, windows);
+            const equivalent = {
+                ...mixedCase,
+                uri: Uri.file(path.join(mixedCase.uri.fsPath, 'child', '..')),
+            };
+            assert.deepStrictEqual(await packageCapability(manager, 'packages.list', { project: equivalent }), { supported: true });
+            for (const uri of [
+                otherProject.uri,
+                mixedCase.uri.with({ scheme: 'vscode-remote' }),
+                mixedCase.uri.with({ authority: 'different-host' }),
+                mixedCase.uri.with({ query: 'revision=1' }),
+                mixedCase.uri.with({ fragment: 'different' }),
+            ]) {
+                assertUnsupported(await packageCapability(manager, 'packages.list', { project: { ...project, uri } }));
+            }
+        });
+    }
+
+    test('Poetry non-file project identities preserve URI casing, scheme and authority', async () => {
+        sinon.stub(platformUtils, 'isWindows').returns(true);
+        const remote = { ...project, uri: project.uri.with({ scheme: 'vscode-remote', authority: 'host', path: '/Project' }) };
+        const manager = poetry().createForProject(remote);
+        disposables.push(manager);
+        assert.deepStrictEqual(await packageCapability(manager, 'packages.list', { project: remote }), { supported: true });
+        for (const uri of [
+            remote.uri.with({ path: '/project' }),
+            remote.uri.with({ authority: 'other-host' }),
+            remote.uri.with({ scheme: 'other' }),
+        ]) {
+            assertUnsupported(await packageCapability(manager, 'packages.list', { project: { ...remote, uri } }));
+        }
+    });
+
+    test('Conda package advertisements preserve absent direct names and implemented lookup/watch hooks', async () => {
         const manager = new CondaPackageManager(api, log);
         disposables.push(manager);
         const lookup = sinon.stub(manager, 'getPackageAvailableVersions');
@@ -329,5 +376,157 @@ suite('Built-in manager capabilities', () => {
             assert.deepStrictEqual(await packageCapability(manager, key, { environment: environment() }), { supported: true });
         }
         assert.ok(lookup.notCalled && watch.notCalled);
+    });
+
+    suite('exhaustive optional advertisements', () => {
+        const environmentKeys: EnvironmentCapability[] = [
+            'environments.create', 'environments.create.quick', 'environments.create.additionalPackages',
+            'environments.remove', 'environments.remove.headless', 'environments.clearCache',
+            'environments.events.changed', 'environments.events.selectionChanged',
+        ];
+        const commonEnvironmentKeys: EnvironmentCapability[] = [
+            'environments.clearCache', 'environments.events.changed', 'environments.events.selectionChanged',
+        ];
+        const environmentManagers: {
+            name: string;
+            create: () => EnvironmentManager;
+            supported: EnvironmentCapability[];
+        }[] = [
+            {
+                name: 'venv',
+                create: () => {
+                    const manager = venv();
+                    (manager as unknown as { globalEnv: PythonEnvironment }).globalEnv = environment();
+                    return manager;
+                },
+                supported: environmentKeys,
+            },
+            {
+                name: 'system',
+                create: () => new SysPythonManager({} as NativePythonFinder, api, log),
+                supported: [...commonEnvironmentKeys, 'environments.create'],
+            },
+            {
+                name: 'inline-script',
+                create: () => {
+                    sinon.stub(workspaceApis, 'onDidDeleteFiles').returns(new Disposable(() => undefined));
+                    sinon.stub(workspaceApis, 'onDidRenameFiles').returns(new Disposable(() => undefined));
+                    sinon.stub(metadata, 'readInlineScriptMetadataFromFile').resolves({ range: { start: 0, end: 20 } });
+                    const manager = new InlineScriptEnvManager(
+                        {} as NativePythonFinder, api, {} as EnvironmentManager, Uri.file(path.join(root, 'storage')), log,
+                        { get: sinon.stub().returns(undefined), update: sinon.stub().resolves(), keys: () => [] } as Memento,
+                    );
+                    disposables.push(manager);
+                    return manager;
+                },
+                supported: environmentKeys,
+            },
+            {
+                name: 'conda',
+                create: () => {
+                    const manager = new CondaEnvManager({} as NativePythonFinder, api, log);
+                    disposables.push(manager);
+                    return manager;
+                },
+                supported: environmentKeys,
+            },
+            ...[
+                { name: 'poetry', constructor: PoetryManager },
+                { name: 'pipenv', constructor: PipenvManager },
+                { name: 'pyenv', constructor: PyEnvManager },
+            ].map(({ name, constructor }) => ({
+                name,
+                create: () => {
+                    const manager = new constructor({} as NativePythonFinder, api);
+                    disposables.push(manager);
+                    return manager;
+                },
+                supported: commonEnvironmentKeys,
+            })),
+        ];
+
+        for (const row of environmentManagers) {
+            test(`${row.name} advertises every supported optional environment hook`, async () => {
+                const manager = row.create();
+                const context: CapabilityContext = { scope: project.uri, project, environment: environment() };
+                for (const key of environmentKeys) {
+                    const result = await environmentCapability(manager, key, context);
+                    assert.strictEqual(result.supported, row.supported.includes(key), key);
+                    if (!result.supported) {
+                        assertUnsupported(result);
+                    }
+                    if (row.supported.includes(key) && !['environments.create.additionalPackages', 'environments.remove.headless'].includes(key)) {
+                        assert.ok(Object.prototype.hasOwnProperty.call(manager.capabilities, key), `Missing explicit ${key}`);
+                        const check = manager.capabilities![key]!;
+                        assert.deepStrictEqual(await check(context), { supported: true }, `Unbound ${key}`);
+                    }
+                    const denied: Support = { supported: false, reason: 'Provider disabled this feature' };
+                    const advertisement = sinon.stub(manager, 'capabilities').value({ ...manager.capabilities, [key]: async () => denied });
+                    assert.strictEqual(await environmentCapability(manager, key, context), denied, `Opt-out ${key}`);
+                    advertisement.restore();
+                }
+            });
+        }
+
+        const packageKeys: PackageCapability[] = [
+            'packages.direct', 'packages.version', 'packages.availableVersions', 'packages.formatInstallSpec',
+            'packages.clearCache', 'packages.watchTargets', 'packages.events.changed',
+        ];
+        const packageManagers: {
+            name: string;
+            create: () => PackageManager;
+            supported: PackageCapability[];
+        }[] = [
+            {
+                name: 'pip',
+                create: () => {
+                    sinon.stub(helpers, 'shouldUseUv').resolves(false);
+                    sinon.stub(helpers, 'runPython').resolves('pip 25.1 from pip (python 3.12)');
+                    return pip();
+                },
+                supported: ['packages.direct', 'packages.version', 'packages.availableVersions', 'packages.formatInstallSpec', 'packages.events.changed'],
+            },
+            {
+                name: 'conda',
+                create: () => {
+                    const manager = new CondaPackageManager(api, log);
+                    disposables.push(manager);
+                    return manager;
+                },
+                supported: ['packages.version', 'packages.availableVersions', 'packages.formatInstallSpec', 'packages.watchTargets', 'packages.events.changed'],
+            },
+            {
+                name: 'poetry',
+                create: () => {
+                    const manager = poetry().createForProject(project);
+                    disposables.push(manager);
+                    return manager;
+                },
+                supported: ['packages.direct', 'packages.version', 'packages.formatInstallSpec', 'packages.events.changed'],
+            },
+        ];
+
+        for (const row of packageManagers) {
+            test(`${row.name} advertises every supported optional package hook`, async () => {
+                const manager = row.create();
+                const context: CapabilityContext = { scope: project.uri, project, environment: environment() };
+                for (const key of packageKeys) {
+                    const result = await packageCapability(manager, key, context);
+                    assert.strictEqual(result.supported, row.supported.includes(key), key);
+                    if (!result.supported) {
+                        assertUnsupported(result);
+                    }
+                    if (row.supported.includes(key) && key !== 'packages.formatInstallSpec') {
+                        assert.ok(Object.prototype.hasOwnProperty.call(manager.capabilities, key), `Missing explicit ${key}`);
+                        const check = manager.capabilities![key]!;
+                        assert.deepStrictEqual(await check(context), { supported: true }, `Unbound ${key}`);
+                    }
+                    const denied: Support = { supported: false, reason: 'Provider disabled this feature' };
+                    const advertisement = sinon.stub(manager, 'capabilities').value({ ...manager.capabilities, [key]: async () => denied });
+                    assert.strictEqual(await packageCapability(manager, key, context), denied, `Opt-out ${key}`);
+                    advertisement.restore();
+                }
+            });
+        }
     });
 });

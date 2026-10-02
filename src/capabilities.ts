@@ -66,12 +66,13 @@ export type CapabilityCheck = (context: CapabilityContext) => Promise<Support>;
 /** Advertise only overrides; absent entries are resolved through the external default dictionaries. */
 export type Capabilities<C extends ManagerCapability> = Readonly<Partial<Record<C, CapabilityCheck>>>;
 
-/** Shared defaults inspect the raw provider, not wrapper-supplied fallback methods. */
+/** Shared defaults use the raw provider when resolving advertised prerequisites. */
 export type DefaultCapabilityCheck<M> = (manager: M, context: CapabilityContext) => Promise<Support>;
 
 /**
  * Environment capability catalog and compatibility defaults.
- * Optional hooks are inspected without invoking them. Options inherit their parent's effective support.
+ * Creation/removal follow raw method availability; other optional features require explicit opt-in.
+ * Existing options inherit their parent's effective support.
  */
 export const defaultEnvironmentCapabilities = Object.freeze({
     /** getEnvironments: required. An empty result is valid. */
@@ -84,29 +85,24 @@ export const defaultEnvironmentCapabilities = Object.freeze({
     'environments.getSelected': async (_manager, _context) => supportIf(true),
     /** set: required, including clearing the selection. */
     'environments.setSelected': async (_manager, _context) => supportIf(true),
-    /** create: optional raw method. */
+    /** create: supported when the raw provider implements the operation. */
     'environments.create': async (manager, _context) => supportIf(typeof manager.create === 'function'),
     /** Availability of the quick path, not a guarantee that every request is prompt-free. */
-    'environments.create.quick': async (manager, context): Promise<Support> => {
-        const create = await resolveEnvironmentManagerCapability(manager, 'environments.create', context);
-        return create.supported ? supportIf(typeof manager.quickCreateConfig === 'function') : create;
-    },
+    'environments.create.quick': async (_manager, _context) => supportIf(false),
     /** Additional packages in a documented creation mode, not necessarily every mode. */
     'environments.create.additionalPackages': async (manager, context): Promise<Support> =>
         resolveEnvironmentManagerCapability(manager, 'environments.create', context),
-    /** remove: optional raw method. */
+    /** remove: supported when the raw provider implements the operation. */
     'environments.remove': async (manager, _context) => supportIf(typeof manager.remove === 'function'),
     /** Removal without confirmation/input; progress and error UI are not suppressed. */
     'environments.remove.headless': async (manager, context): Promise<Support> =>
         resolveEnvironmentManagerCapability(manager, 'environments.remove', context),
-    /** clearCache: optional raw method. */
-    'environments.clearCache': async (manager, _context) => supportIf(typeof manager.clearCache === 'function'),
+    /** clearCache: requires explicit opt-in. */
+    'environments.clearCache': async (_manager, _context) => supportIf(false),
     /** Provider notifications, not events synthesized by the extension. */
-    'environments.events.changed': async (manager, _context) =>
-        supportIf(typeof manager.onDidChangeEnvironments === 'function'),
+    'environments.events.changed': async (_manager, _context) => supportIf(false),
     /** Provider selection notifications, not events synthesized by the extension. */
-    'environments.events.selectionChanged': async (manager, _context) =>
-        supportIf(typeof manager.onDidChangeEnvironment === 'function'),
+    'environments.events.selectionChanged': async (_manager, _context) => supportIf(false),
 } satisfies Record<EnvironmentCapability, DefaultCapabilityCheck<EnvironmentManager>>);
 
 /**
@@ -139,21 +135,19 @@ export const defaultPackageCapabilities = Object.freeze({
     'packages.manage.showSkipOption': async (manager, context): Promise<Support> =>
         resolvePackageManagerCapability(manager, 'packages.manage', context),
     /** Best-effort direct/transitive classification, not exact user installation intent. */
-    'packages.direct': async (manager, _context) => supportIf(typeof manager.getDirectPackageNames === 'function'),
+    'packages.direct': async (_manager, _context) => supportIf(false),
     /** Package-manager tool version, not Python or an installed package's version. */
-    'packages.version': async (manager, _context) => supportIf(typeof manager.getVersion === 'function'),
-    /** Available package versions; presence inference may be refined for tool/version restrictions. */
-    'packages.availableVersions': async (manager, _context) =>
-        supportIf(typeof manager.getPackageAvailableVersions === 'function'),
+    'packages.version': async (_manager, _context) => supportIf(false),
+    /** Available package versions; requires explicit opt-in, including tool/version restrictions. */
+    'packages.availableVersions': async (_manager, _context) => supportIf(false),
     /** Supported through the extension's name==version fallback even without a custom formatter. */
     'packages.formatInstallSpec': async (_manager, _context) => supportIf(true),
-    /** clearCache: optional raw method. */
-    'packages.clearCache': async (manager, _context) => supportIf(typeof manager.clearCache === 'function'),
+    /** clearCache: requires explicit opt-in. */
+    'packages.clearCache': async (_manager, _context) => supportIf(false),
     /** Custom watch patterns, not general package-change watching. */
-    'packages.watchTargets': async (manager, _context) =>
-        supportIf(typeof manager.getPackageWatchTargets === 'function'),
+    'packages.watchTargets': async (_manager, _context) => supportIf(false),
     /** Provider notifications, not extension-owned watchers or synthesized events. */
-    'packages.events.changed': async (manager, _context) => supportIf(typeof manager.onDidChangePackages === 'function'),
+    'packages.events.changed': async (_manager, _context) => supportIf(false),
 } satisfies Record<PackageCapability, DefaultCapabilityCheck<PackageManager>>);
 
 /**
