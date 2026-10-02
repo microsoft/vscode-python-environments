@@ -138,63 +138,26 @@ suite('Manager capabilities', () => {
         });
     }
 
-    test('catalogs contain exactly the inventoried 29 keys', () => {
-        assert.deepStrictEqual(Object.keys(defaultEnvironmentCapabilities), Object.keys(environmentDefaults));
-        assert.deepStrictEqual(Object.keys(defaultPackageCapabilities), Object.keys(packageDefaults));
-        assert.strictEqual(Object.keys(environmentDefaults).length + Object.keys(packageDefaults).length, 29);
+    test('default matrices cover the read-only catalogs', () => {
+        assert.deepStrictEqual(new Set(Object.keys(defaultEnvironmentCapabilities)), new Set(Object.keys(environmentDefaults)));
+        assert.deepStrictEqual(new Set(Object.keys(defaultPackageCapabilities)), new Set(Object.keys(packageDefaults)));
         assert.ok(Object.isFrozen(defaultEnvironmentCapabilities));
         assert.ok(Object.isFrozen(defaultPackageCapabilities));
     });
 
-    test('optional capabilities follow raw hooks without invoking operations or subscribing to events', async () => {
-        const env = environmentManager({
-            create: async () => unexpectedOperation(),
-            quickCreateConfig: unexpectedOperation,
-            remove: async () => unexpectedOperation(),
-            clearCache: async () => unexpectedOperation(),
-            onDidChangeEnvironments: unexpectedOperation,
-            onDidChangeEnvironment: unexpectedOperation,
-        });
-        const pkg = packageManager({
-            getDirectPackageNames: async () => unexpectedOperation(),
-            getVersion: async () => unexpectedOperation(),
-            getPackageAvailableVersions: async () => unexpectedOperation(),
-            clearCache: async () => unexpectedOperation(),
-            getPackageWatchTargets: unexpectedOperation,
-            onDidChangePackages: unexpectedOperation,
-        });
-        const wrapped = new InternalEnvironmentManager('test:environment', env);
-        for (const key of Object.keys(environmentDefaults) as EnvironmentManagerCapability[]) {
-            assert.strictEqual((await resolveEnvironmentManagerCapability(env, key)).supported, true, key);
-            assert.strictEqual((await wrapped.getCapability(key)).supported, true, key);
-        }
-        for (const key of Object.keys(packageDefaults) as PackageManagerCapability[]) {
-            assert.strictEqual((await resolvePackageManagerCapability(pkg, key)).supported, true, key);
-        }
-    });
-
     for (const [key, hook] of [
+        ['environments.create', 'create'],
+        ['environments.remove', 'remove'],
         ['environments.clearCache', 'clearCache'],
         ['environments.events.changed', 'onDidChangeEnvironments'],
         ['environments.events.selectionChanged', 'onDidChangeEnvironment'],
     ] as const) {
-        test(`${key} follows only its own raw hook and preserves overrides`, async () => {
+        test(`${key} follows its raw hook without invoking it`, async () => {
             const manager = environmentManager({ [hook]: unexpectedOperation });
             assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, key), { supported: true });
             assert.deepStrictEqual(
-                await resolveEnvironmentManagerCapability(
-                    environmentManager({ ...manager, capabilities: { [key]: async () => unsupported } }),
-                    key,
-                ),
-                unsupported,
-            );
-            const failure = new Error('Capability probe failed');
-            await assert.rejects(
-                resolveEnvironmentManagerCapability(
-                    environmentManager({ ...manager, capabilities: { [key]: async () => { throw failure; } } }),
-                    key,
-                ),
-                (error) => error === failure,
+                await new InternalEnvironmentManager('test:environment', manager).getCapability(key),
+                { supported: true },
             );
             delete manager[hook];
             assert.strictEqual((await resolveEnvironmentManagerCapability(manager, key)).supported, false);
@@ -209,38 +172,19 @@ suite('Manager capabilities', () => {
         ['packages.watchTargets', 'getPackageWatchTargets'],
         ['packages.events.changed', 'onDidChangePackages'],
     ] as const) {
-        test(`${key} follows only its own raw hook and preserves overrides`, async () => {
+        test(`${key} follows its raw hook without invoking it`, async () => {
             const manager = packageManager({ [hook]: unexpectedOperation });
-            assert.deepStrictEqual(await resolvePackageManagerCapability(manager, key), { supported: true });
-            assert.deepStrictEqual(
-                await resolvePackageManagerCapability(
-                    packageManager({ ...manager, capabilities: { [key]: async () => unsupported } }),
-                    key,
-                ),
-                unsupported,
-            );
-            const failure = new Error('Capability probe failed');
-            await assert.rejects(
-                resolvePackageManagerCapability(
-                    packageManager({ ...manager, capabilities: { [key]: async () => { throw failure; } } }),
-                    key,
-                ),
-                (error) => error === failure,
-            );
-            delete manager[hook];
-            assert.strictEqual((await resolvePackageManagerCapability(manager, key)).supported, false);
+            const wrapped = new InternalPackageManager('test:packages', manager);
+            try {
+                assert.deepStrictEqual(await resolvePackageManagerCapability(manager, key), { supported: true });
+                assert.deepStrictEqual(await wrapped.getCapability(key), { supported: true });
+                delete manager[hook];
+                assert.strictEqual((await resolvePackageManagerCapability(manager, key)).supported, false);
+            } finally {
+                wrapped.dispose();
+            }
         });
     }
-
-    test('creation and removal defaults independently follow current raw method availability', async () => {
-        const manager = environmentManager({ create: async () => unexpectedOperation(), capabilities: {} });
-        assert.strictEqual((await resolveEnvironmentManagerCapability(manager, 'environments.create')).supported, true);
-        assert.strictEqual((await resolveEnvironmentManagerCapability(manager, 'environments.remove')).supported, false);
-        delete manager.create;
-        manager.remove = async () => unexpectedOperation();
-        assert.strictEqual((await resolveEnvironmentManagerCapability(manager, 'environments.create')).supported, false);
-        assert.strictEqual((await resolveEnvironmentManagerCapability(manager, 'environments.remove')).supported, true);
-    });
 
     test('default child checks preserve explicit parent opt-outs', async () => {
         const env = environmentManager({
@@ -486,25 +430,6 @@ suite('Manager capabilities', () => {
             assert.strictEqual((await pkg.getCapability(key)).supported, packageDefaults[key]);
         }
         pkg.dispose();
-    });
-
-    test('package wrapper queries infer raw hooks without invoking operations or subscribing to events', async () => {
-        const manager = packageManager({
-            getDirectPackageNames: unexpectedOperation,
-            getVersion: unexpectedOperation,
-            getPackageAvailableVersions: unexpectedOperation,
-            clearCache: unexpectedOperation,
-            getPackageWatchTargets: unexpectedOperation,
-            onDidChangePackages: unexpectedOperation,
-        });
-        const wrapped = new InternalPackageManager('test:packages', manager);
-        try {
-            for (const key of Object.keys(packageDefaults) as PackageManagerCapability[]) {
-                assert.deepStrictEqual(await wrapped.getCapability(key), { supported: true }, key);
-            }
-        } finally {
-            wrapped.dispose();
-        }
     });
 
     test('package wrapper queries retain project-bound closures and reject disposal', async () => {

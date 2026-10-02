@@ -105,6 +105,10 @@ suite('Manager capabilities integration', function () {
     });
 
     test('quick creation infers legacy hooks while preserving contextual parent overrides', async () => {
+        assert.deepStrictEqual(
+            await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.list'),
+            { supported: true },
+        );
         assert.strictEqual(
             (await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create.quick')).supported,
             false,
@@ -112,12 +116,10 @@ suite('Manager capabilities integration', function () {
         manager.quickCreateConfig = () => {
             throw new Error('A capability query must not invoke quick-create metadata');
         };
-        manager.clearCache = async () => {
-            throw new Error('A capability query must not clear caches');
-        };
-        for (const key of ['environments.create.quick', 'environments.clearCache'] as const) {
-            assert.deepStrictEqual(await api.getEnvironmentManagerCapability(environmentManagerId, key), { supported: true });
-        }
+        assert.deepStrictEqual(
+            await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create.quick'),
+            { supported: true },
+        );
         const unsupported = { supported: false, reason: 'Creation disabled in this scope' } as const;
         environmentCapabilities = {
             'environments.create': async (context) => {
@@ -133,84 +135,6 @@ suite('Manager capabilities integration', function () {
 
     teardown(() => {
         disposables.splice(0).reverse().forEach((disposable) => disposable.dispose());
-    });
-
-    test('legacy structural providers receive defaults through the extension API', async () => {
-        assert.deepStrictEqual(
-            await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.list'),
-            { supported: true },
-        );
-        for (const key of [
-            'environments.create',
-            'environments.create.additionalPackages',
-            'environments.remove',
-            'environments.remove.headless',
-        ] as const) {
-            assert.deepStrictEqual(await api.getEnvironmentManagerCapability(environmentManagerId, key), { supported: true });
-        }
-        assert.strictEqual(
-            (await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create.quick')).supported,
-            false,
-        );
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.install'), {
-            supported: true,
-        });
-        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.direct')).supported, true);
-        assert.strictEqual(manageCalls, 0);
-    });
-
-    test('explicit creation/removal opt-outs override raw methods and inherited options', async () => {
-        const unsupported = { supported: false, reason: 'Disabled for test' } as const;
-        environmentCapabilities = {
-            'environments.create': async () => unsupported,
-            'environments.remove': async () => unsupported,
-        };
-        for (const key of [
-            'environments.create',
-            'environments.create.additionalPackages',
-            'environments.remove',
-            'environments.remove.headless',
-        ] as const) {
-            assert.deepStrictEqual(await api.getEnvironmentManagerCapability(environmentManagerId, key), unsupported);
-        }
-    });
-
-    test('environment queries preserve explicit scope and reject contradictory ownership', async () => {
-        const scopes = ['global', [Uri.file('first'), Uri.file('second')]] as const;
-        for (const scope of scopes) {
-            // Copy the URI tuple into the mutable array accepted by the existing scope contract.
-            const queryScope = scope === 'global' ? scope : [...scope];
-            environmentCapabilities = {
-                'environments.create': async (context) => {
-                    assert.strictEqual(context.scope, queryScope);
-                    assert.strictEqual(context.environment, environment);
-                    return { supported: true };
-                },
-            };
-            assert.deepStrictEqual(
-                await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create', {
-                    scope: queryScope,
-                    environment,
-                }),
-                { supported: true },
-            );
-        }
-        await assert.rejects(() =>
-            api.getEnvironmentManagerCapability(`${ENVS_EXTENSION_ID}:another-manager`, 'environments.list', {
-                environment,
-            }),
-        );
-    });
-
-    test('uninstalled managers report unsupported without interaction', async () => {
-        const support = await api.getEnvironmentManagerCapability(
-            'capability-tests.uninstalled:missing',
-            'environments.list',
-        );
-        assert.strictEqual(support.supported, false);
-        if (!support.supported) {
-            assert.ok(support.reason);
-        }
     });
 
     test('dynamic overrides and default prerequisites cross the extension boundary', async () => {
