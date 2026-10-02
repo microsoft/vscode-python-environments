@@ -1,6 +1,12 @@
 export enum EventNames {
     EXTENSION_ACTIVATION_DURATION = 'EXTENSION.ACTIVATION_DURATION',
     EXTENSION_MANAGER_REGISTRATION_DURATION = 'EXTENSION.MANAGER_REGISTRATION_DURATION',
+    EXPERIMENTATION_INITIALIZATION = 'EXPERIMENTATION.INITIALIZATION',
+    EXPERIMENTATION_QUERY = 'query-expfeature',
+    EXPERIMENTATION_TAS_CALL = 'tas-call',
+    EXPERIMENTATION_ASSIGNMENTS_VALIDATION = 'assignments-validation',
+    EXPERIMENTATION_LEGACY_ERROR = 'call-tas-error',
+    EXPERIMENTATION_ASSIGNMENTS_ERROR = 'call-assignments-error',
 
     ENVIRONMENT_MANAGER_REGISTERED = 'ENVIRONMENT_MANAGER.REGISTERED',
     PACKAGE_MANAGER_REGISTERED = 'PACKAGE_MANAGER.REGISTERED',
@@ -272,6 +278,67 @@ export type InlineScriptEnvErrorCategory =
 
 // Map all events to their properties
 export interface IEventNamePropertyMapping {
+    /* __GDPR__
+        "experimentation.initialization": {
+            "result": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "StellaHuang95" },
+            "cacheState": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "StellaHuang95" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.EXPERIMENTATION_INITIALIZATION]: {
+        result: 'notConfigured' | 'disabled' | 'cacheReady' | 'error' | 'timeout';
+        cacheState: 'present' | 'absent' | 'unknown';
+    };
+    /* __GDPR__
+        "query-expfeature": {
+            "ABExp.queriedFeature": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.EXPERIMENTATION_QUERY]: {
+        'ABExp.queriedFeature': string;
+    };
+    /* __GDPR__
+        "tas-call": {
+            "callType": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "StellaHuang95" },
+            "outcome": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "StellaHuang95" },
+            "extensionName": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "assignmentContext": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.EXPERIMENTATION_TAS_CALL]: {
+        callType: 'legacy' | 'assignments';
+        outcome: 'Success' | 'ServerError' | 'NoResponse' | 'GenericError';
+        extensionName: string;
+        assignmentContext?: string;
+    };
+    /* __GDPR__
+        "assignments-validation": {
+            "FeatureVariableCount": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "StellaHuang95" },
+            "AssignedVariantCount": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "isMeasurement": true, "owner": "StellaHuang95" },
+            "DataVersion": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "StellaHuang95" },
+            "AssignmentContext": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.EXPERIMENTATION_ASSIGNMENTS_VALIDATION]: {
+        DataVersion?: string;
+        AssignmentContext?: string;
+    };
+    /* __GDPR__
+        "call-tas-error": {
+            "ErrorType": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.EXPERIMENTATION_LEGACY_ERROR]: {
+        ErrorType: 'ServerError' | 'NoResponse' | 'GenericError';
+    };
+    /* __GDPR__
+        "call-assignments-error": {
+            "ErrorType": { "classification": "SystemMetaData", "purpose": "PerformanceAndHealth", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.EXPERIMENTATION_ASSIGNMENTS_ERROR]: {
+        ErrorType: 'ServerError' | 'NoResponse' | 'GenericError';
+    };
     /* __GDPR__
         "terminal.activation_outcome": {
             "operation": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
