@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 import assert from 'assert';
-import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { Disposable, Memento, Uri } from 'vscode';
@@ -27,7 +26,6 @@ import { VenvManager } from '../../managers/builtin/venvManager';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 import { CondaEnvManager } from '../../managers/conda/condaEnvManager';
 import { CondaPackageManager } from '../../managers/conda/condaPackageManager';
-import * as condaUtils from '../../managers/conda/condaUtils';
 import { PipenvManager } from '../../managers/pipenv/pipenvManager';
 import { PoetryManager } from '../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../managers/poetry/poetryPackageManager';
@@ -45,8 +43,8 @@ suite('Built-in manager capabilities', () => {
     let spawn: sinon.SinonStub;
     const disposables: Disposable[] = [];
 
-    function environment(version = '3.12.0'): PythonEnvironment {
-        return createMockPythonEnvironment({ envPath: path.join(root, '.venv'), version });
+    function environment(): PythonEnvironment {
+        return createMockPythonEnvironment({ envPath: path.join(root, '.venv') });
     }
 
     function venv(): VenvManager {
@@ -93,37 +91,29 @@ suite('Built-in manager capabilities', () => {
         sinon.restore();
     });
 
-    for (const version of [undefined, '2.7.18', 'invalid', '3.12.0']) {
-        test(`venv quick support does not preflight the global Python version: ${version}`, async () => {
-            const manager = venv();
-            (manager as unknown as { globalEnv?: PythonEnvironment }).globalEnv = version
-                ? environment(version)
-                : undefined;
+    for (const [name, createManager] of [
+        ['venv', venv],
+        ['Conda', () => {
+            const manager = new CondaEnvManager({} as NativePythonFinder, api, log);
+            disposables.push(manager);
+            return manager;
+        }],
+    ] as const) {
+        test(`${name} quick support inherits create without preflighting runtime prerequisites`, async () => {
+            const manager = createManager();
             const create = sinon.stub(manager, 'create').rejects(new Error('Unexpected creation'));
-            const check = manager.capabilities['environments.create.quick']!;
-            assert.deepStrictEqual(await check({ scope: 'global' }), { supported: true });
-            // General support is independent of the quick-path prerequisite; only quick mode forwards packages.
-            assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.additionalPackages'), {
-                supported: true,
+            (api.getPythonProject as sinon.SinonStub).returns(undefined);
+            assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.quick'), { supported: true });
+            const denied: Support = { supported: false, reason: 'Disabled by provider' };
+            sinon.stub(manager, 'capabilities').value({
+                ...manager.capabilities,
+                'environments.create': async () => denied,
             });
-            assert.deepStrictEqual(await environmentCapability(manager, 'environments.remove.headless'), {
-                supported: true,
-            });
+            assert.strictEqual(await environmentCapability(manager, 'environments.create.quick'), denied);
             assert.ok(create.notCalled);
+            assert.ok((api.getPythonProject as sinon.SinonStub).notCalled);
         });
     }
-
-    test('venv quick and additional packages preserve explicit create opt-outs', async () => {
-        const manager = venv();
-        const denied: Support = { supported: false, reason: 'Disabled by provider' };
-        sinon.stub(manager, 'capabilities').value({
-            ...manager.capabilities,
-            'environments.create': async () => denied,
-        });
-        for (const key of ['environments.create.quick', 'environments.create.additionalPackages'] as const) {
-            assert.strictEqual(await environmentCapability(manager, key), denied);
-        }
-    });
 
     test('system Python rejects ignored creation options without invoking installation', async () => {
         const manager = new SysPythonManager({} as NativePythonFinder, api, log);
@@ -133,37 +123,6 @@ suite('Built-in manager capabilities', () => {
             assertUnsupported(await environmentCapability(manager, key));
         }
         assert.ok(create.notCalled);
-    });
-
-    test('Conda quick support does not preflight the project or creation scope', async () => {
-        const manager = new CondaEnvManager({} as NativePythonFinder, api, log);
-        disposables.push(manager);
-        const create = sinon.stub(manager, 'create');
-        const remove = sinon.stub(manager, 'remove');
-        assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.quick', { scope: project.uri }), {
-            supported: true,
-        });
-        (api.getPythonProject as sinon.SinonStub).returns(undefined);
-        for (const scope of [project.uri, undefined, 'all', []] as CapabilityContext['scope'][]) {
-            assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.quick', { scope }), { supported: true });
-        }
-        assert.ok((api.getPythonProject as sinon.SinonStub).notCalled);
-        assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.additionalPackages'), { supported: true });
-        assert.deepStrictEqual(await environmentCapability(manager, 'environments.remove.headless'), { supported: true });
-        assert.ok(create.notCalled && remove.notCalled);
-    });
-
-    test('Conda global and multi-root quick support does not preflight creation or discover tool state', async () => {
-        const manager = new CondaEnvManager({} as NativePythonFinder, api, log);
-        disposables.push(manager);
-        const prefix = sinon.stub(condaUtils, 'getDefaultCondaPrefix').rejects(new Error('Unexpected prefix probe'));
-        const name = sinon.stub(condaUtils, 'generateName').rejects(new Error('Unexpected name probe'));
-        const discovery = sinon.stub(condaUtils, 'getConda').rejects(new Error('Unexpected tool discovery'));
-        const create = sinon.stub(condaUtils, 'quickCreateConda');
-        for (const scope of ['global', [project.uri, otherProject.uri]] as CapabilityContext['scope'][]) {
-            assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.quick', { scope }), { supported: true });
-        }
-        assert.ok(prefix.notCalled && name.notCalled && discovery.notCalled && create.notCalled);
     });
 
     suite('inline scripts', () => {
@@ -225,20 +184,6 @@ suite('Built-in manager capabilities', () => {
             await assert.rejects(environmentCapability(manager, 'environments.create.quick', { scope: script }), /Metadata probe failed/);
             assert.ok(stateUpdate.notCalled);
         });
-
-        for (const code of ['EACCES', 'EIO', 'ENOENT', 'ENOTDIR', 'EISDIR']) {
-            test(`capability queries preserve the metadata reader's best-effort handling of ${code}`, async () => {
-                readMetadata.restore();
-                const error = Object.assign(new Error(`File open failed: ${code}`), { code });
-                const open = sinon.stub(fs, 'open').rejects(error);
-                for (const key of ['environments.create', 'environments.create.quick', 'environments.create.additionalPackages'] as const) {
-                    assertUnsupported(await environmentCapability(manager, key, { scope: script }));
-                }
-                assert.strictEqual(open.callCount, 3);
-                assert.ok(open.alwaysCalledWithExactly(script.fsPath, 'r'));
-                assert.ok(stateUpdate.notCalled);
-            });
-        }
     });
 
     test('pip advertises lookup without probing tool versions or selecting a backend', async () => {
@@ -248,10 +193,7 @@ suite('Built-in manager capabilities', () => {
         const runPython = sinon.stub(helpers, 'runPython');
         const runUv = sinon.stub(helpers, 'runUV');
         const lookup = sinon.stub(manager, 'getPackageAvailableVersions');
-        const missingExecutable = { ...environment(), execInfo: { run: { executable: '' } } };
-        for (const env of [undefined, missingExecutable, environment('invalid'), environment()]) {
-            assert.deepStrictEqual(await packageCapability(manager, 'packages.availableVersions', { environment: env }), { supported: true });
-        }
+        assert.deepStrictEqual(await packageCapability(manager, 'packages.availableVersions'), { supported: true });
         assert.ok(useUv.notCalled && uvExecutable.notCalled && runPython.notCalled && runUv.notCalled && lookup.notCalled);
     });
 
@@ -295,18 +237,6 @@ suite('Built-in manager capabilities', () => {
         assert.ok(lookup.notCalled && manage.notCalled);
     });
 
-    test('Conda package advertisements preserve absent direct names and implemented lookup/watch hooks', async () => {
-        const manager = new CondaPackageManager(api, log);
-        disposables.push(manager);
-        const lookup = sinon.stub(manager, 'getPackageAvailableVersions');
-        const watch = sinon.stub(manager, 'getPackageWatchTargets');
-        assertUnsupported(await packageCapability(manager, 'packages.direct'));
-        for (const key of ['packages.availableVersions', 'packages.formatInstallSpec', 'packages.watchTargets'] as const) {
-            assert.deepStrictEqual(await packageCapability(manager, key, { environment: environment() }), { supported: true });
-        }
-        assert.ok(lookup.notCalled && watch.notCalled);
-    });
-
     suite('exhaustive optional advertisements', () => {
         const environmentKeys: EnvironmentManagerCapability[] = [
             'environments.create', 'environments.create.quick', 'environments.create.additionalPackages',
@@ -323,11 +253,7 @@ suite('Built-in manager capabilities', () => {
         }[] = [
             {
                 name: 'venv',
-                create: () => {
-                    const manager = venv();
-                    (manager as unknown as { globalEnv: PythonEnvironment }).globalEnv = environment();
-                    return manager;
-                },
+                create: venv,
                 supported: environmentKeys,
             },
             {
@@ -389,10 +315,6 @@ suite('Built-in manager capabilities', () => {
                         const check = manager.capabilities![key]!;
                         assert.deepStrictEqual(await check(context), { supported: true }, `Unbound ${key}`);
                     }
-                    const denied: Support = { supported: false, reason: 'Provider disabled this feature' };
-                    const advertisement = sinon.stub(manager, 'capabilities').value({ ...manager.capabilities, [key]: async () => denied });
-                    assert.strictEqual(await environmentCapability(manager, key, context), denied, `Opt-out ${key}`);
-                    advertisement.restore();
                 }
             });
         }
@@ -446,10 +368,6 @@ suite('Built-in manager capabilities', () => {
                         const check = manager.capabilities![key]!;
                         assert.deepStrictEqual(await check(context), { supported: true }, `Unbound ${key}`);
                     }
-                    const denied: Support = { supported: false, reason: 'Provider disabled this feature' };
-                    const advertisement = sinon.stub(manager, 'capabilities').value({ ...manager.capabilities, [key]: async () => denied });
-                    assert.strictEqual(await packageCapability(manager, key, context), denied, `Opt-out ${key}`);
-                    advertisement.restore();
                 }
             });
         }

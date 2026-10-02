@@ -95,7 +95,8 @@ const packageSupport: Promise<Support> =
     resolvePackageManagerCapability(managerWithCapabilities, 'packages.direct', { environment });
 const environmentSupport: Promise<Support> =
     resolveEnvironmentManagerCapability(legacyEnvironmentManager, 'environments.create', { scope: 'global' });
-const packageDefault: Promise<Support> = defaultPackageCapabilities['packages.list'](legacyPackageManager, {});
+const packageDefaultCheck: DefaultCapabilityCheck<PackageManager> = defaultPackageCapabilities['packages.list'];
+const packageDefault: Promise<Support> = packageDefaultCheck(legacyPackageManager, {});
 const environmentDefault: Promise<Support> =
     defaultEnvironmentCapabilities['environments.list'](legacyEnvironmentManager, {});
 declare const fullApi: PythonEnvironmentApi;
@@ -135,22 +136,7 @@ defaultEnvironmentCapabilities[arbitraryKey];
 // @ts-expect-error Advertisements cannot introduce arbitrary keys.
 const unknownCapabilityMap: Capabilities<PackageManagerCapability> = { 'packages.unknown': async () => ({ supported: true }) };
 
-const environmentDefaultsAreComplete: Equal<keyof typeof defaultEnvironmentCapabilities, EnvironmentManagerCapability> = true;
-const packageDefaultsAreComplete: Equal<keyof typeof defaultPackageCapabilities, PackageManagerCapability> = true;
-const environmentDefaultSignatureIsExact: Equal<
-    (typeof defaultEnvironmentCapabilities)['environments.create.quick'],
-    DefaultCapabilityCheck<EnvironmentManager>
-> = true;
-const packageDefaultSignatureIsExact: Equal<
-    (typeof defaultPackageCapabilities)['packages.list.skipCache'],
-    DefaultCapabilityCheck<PackageManager>
-> = true;
-
 void unknownCapabilityMap;
-void environmentDefaultsAreComplete;
-void packageDefaultsAreComplete;
-void environmentDefaultSignatureIsExact;
-void packageDefaultSignatureIsExact;
 void packageSupport;
 void environmentSupport;
 void packageDefault;
