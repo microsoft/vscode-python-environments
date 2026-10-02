@@ -1848,10 +1848,9 @@ directly on the single flat API object.
 
 ## Manager capabilities
 
-Capabilities describe general support for manager operations and meaningful
-options. They do not validate a particular request, enforce permissions, or
-guarantee success. Existing operations, errors, selection UI, and synchronous UI
-support checks are unchanged.
+Capabilities report whether an environment or package manager generally supports
+an operation. They are advisory: they do not validate one request, guarantee that
+an operation succeeds, or change operation dispatch and errors.
 
 ### Querying support
 
@@ -1871,14 +1870,9 @@ getPackageManagerCapability(
 
 Environment queries target one explicit manager, without picking or aggregating
 managers. Package queries follow existing manager selection and project-scoped
-routing. Supply a project to select that project's manager; without one, a
-project-aware manager requires a uniquely identifiable owning project.
-Unresolved managers or ambiguous routing return unsupported with a specific
-reason. Queries inspect currently registered managers: they do not activate
-extensions, wait for registration, or prompt to install missing tools or
-extensions. An unavailable result may be temporary during startup; query again
-after the provider registers. Contradictory environment ownership, unexpected
-lookup/probe errors, and prerequisite cycles reject.
+routing. Queries use currently registered managers without activating extensions,
+waiting for registration, or prompting. Missing managers and ambiguous routing
+return `{ supported: false, reason }`; probe failures reject.
 
 Feature-detect the query methods when supporting older extension runtimes:
 
@@ -1891,46 +1885,16 @@ if (typeof api.getPackageManagerCapability === 'function') {
 }
 ```
 
-### Types and authoring
+### Advertising manager support
 
-`EnvironmentManagerCapability` and `PackageManagerCapability` are string-literal unions derived
-from the keys of their default dictionaries using `keyof typeof`. Each dictionary
-is the single source of truth for its capability keys, descriptions, and defaults;
-adding a capability means adding one documented default entry. There are no
-separate handwritten key unions or runtime key arrays.
-Maps and resolver/query parameters accept only the corresponding keys, not an
-arbitrary `string`. The dictionaries use `satisfies Record<string, ...>` to validate
-checker signatures without widening their literal keys, and explicit
-`Promise<Support>` return types avoid circular inference through prerequisite
-resolvers. JavaScript callers still receive an unsupported result for unknown
-runtime keys.
-
-```typescript
-type Support =
-    | { readonly supported: true }
-    | { readonly supported: false; readonly reason: string };
-
-interface CapabilityContext {
-    readonly scope?: CreateEnvironmentScope | GetEnvironmentsScope;
-    readonly environment?: PythonEnvironment;
-    readonly project?: PythonProject;
-}
-
-type CapabilityCheck = (context: CapabilityContext) => Promise<Support>;
-type Capabilities<C extends EnvironmentManagerCapability | PackageManagerCapability> =
-    Readonly<Partial<Record<C, CapabilityCheck>>>;
-```
-
-Both manager contracts remain interfaces. Advertise only overrides through an
-optional `capabilities` property. For a class, use instance-field arrow functions
-so extracted checkers retain `this`; plain-object providers can use closures.
-No base class, constructor changes, or registration-time binding is needed:
+Managers remain interfaces. Their optional `capabilities` map contains only
+overrides; omitted entries use the defaults below. Checks receive
+`CapabilityContext` and return `Promise<Support>`.
 
 ```typescript
 // Members of a PackageManager implementation:
 readonly capabilities: Capabilities<PackageManagerCapability> = {
-    'packages.availableVersions': async (context) =>
-        this.checkVersionLookupSupport(context),
+    'packages.availableVersions': async (context) => this.checkVersionLookupSupport(context),
     'packages.manage.upgrade': async (_context) => ({
         supported: false,
         reason: l10n.t('This manager does not support upgrading packages.'),
@@ -1938,136 +1902,63 @@ readonly capabilities: Capabilities<PackageManagerCapability> = {
 };
 ```
 
-Use `resolvePackageManagerCapability(manager, capability, context?)` or
-`resolveEnvironmentManagerCapability(manager, capability, context?)` for a raw
-provider. Inside a checker, pass `this` and forward the received context unchanged
-when resolving a real prerequisite. This preserves cycle detection across
-bundled copies of the API. Independent concurrent queries are supported.
+To change one manager:
 
-Checks may inspect tool versions and contextual prerequisites, but must not
-install, delete, select, prompt, or invoke an operation to test it. Known
-limitations return unsupported; unexpected probe failures propagate. Results
-are not permanently cached. `createOptions` and other operation arguments are
-intentionally absent from the context.
+- **Add an override** when its support differs from the default or depends on
+  context or tool state.
+- **Remove an override** to restore the default. Removing an entry does not mean
+  unsupported.
+- **Disable support** with an explicit `{ supported: false, reason }` result.
+- Keep checks read-only and noninteractive. Do not invoke the operation to test
+  it. Let unexpected probe errors reject.
+- When one check depends on another, call
+  `resolveEnvironmentManagerCapability` or `resolvePackageManagerCapability` and
+  forward the received context unchanged.
 
-### External defaults
+Built-in environment managers share cache and event declarations from
+`src/managers/common/capabilityDeclarations.ts`; manager-specific overrides stay
+on the manager class.
 
-The exported `defaultEnvironmentCapabilities` and `defaultPackageCapabilities`
-dictionaries are shared, read-only catalogs of async default functions. Default
-functions receive `(rawManager, context)`; manager-advertised functions receive
-only `(context)`. Do not copy defaults into each provider.
+### Defaults
 
-The resolvers choose the advertised checker first, otherwise the dictionary
-entry, otherwise `{ supported: false, reason: "Capability not implemented" }`.
-An explicit unsupported result or thrown error never triggers fallback.
-An advertisement must be a checker function or `undefined` (use defaults).
-Other values reject with a `TypeError` rather than silently using defaults.
+The exported `defaultEnvironmentCapabilities` and
+`defaultPackageCapabilities` dictionaries are the source of truth. Required
+operations default supported. The optional methods and events listed under
+**Raw hook** follow raw hook presence. Option capabilities inherit their parent
+unless explicitly overridden; install-spec formatting uses an extension fallback.
+
+| Default | Environment capabilities |
+| --- | --- |
+| Supported | `environments.list`, `environments.refresh`, `environments.resolve`, `environments.getSelected`, `environments.setSelected` |
+| Raw hook | `environments.create`, `environments.remove`, `environments.clearCache`, `environments.events.changed`, `environments.events.selectionChanged` |
+| Inherited | `environments.create.additionalPackages` from `environments.create`; `environments.remove.headless` from `environments.remove` |
+| Special | `environments.create.quick` requires raw `create` and `quickCreateConfig`, then inherits `environments.create` |
+
+| Default | Package capabilities |
+| --- | --- |
+| Supported | `packages.list`, `packages.refresh`, `packages.manage`, `packages.formatInstallSpec` |
+| Raw hook | `packages.direct`, `packages.version`, `packages.availableVersions`, `packages.clearCache`, `packages.watchTargets`, `packages.events.changed` |
+| Inherited | `packages.list.skipCache` from `packages.list`; install, uninstall, headless, and show-skip from `packages.manage`; upgrade from `packages.manage.install` |
+
+Legacy providers do not need a capability map. Advertisements must be plain
+objects whose values are checker functions or `undefined`; malformed maps reject.
 Unknown runtime keys are unsupported.
 
-The defaults use compatibility-first heuristics:
+### Adding or removing catalog capabilities
 
-1. Required contract methods default supported.
-2. Optional methods/events default supported when the corresponding raw hook is
-   callable (`typeof hook === 'function'`), otherwise unsupported. Wrapper methods
-   do not establish raw provider support.
-3. Existing options inherit their parent's effective support, including explicit
-   parent opt-outs. Quick creation additionally requires callable raw `create`
-   and `quickCreateConfig` hooks, matching the legacy support predicate.
-4. Features with an extension-provided fallback default supported.
+Capability key types are derived from the default dictionary keys. To add a
+public capability:
 
-No operation, event subscription, or quick-create metadata hook is invoked to
-infer support. Explicit child advertisements own their prerequisites and can
-support implementations that do not use the default hooks. Newly introduced
-capabilities should remain unsupported until their compatibility rule is
-deliberately defined.
+1. Add a documented entry to the appropriate default dictionary in
+   `src/capabilities.ts`.
+2. Choose a backward-compatible default. New behavior should default unsupported
+   unless an existing contract or fallback proves support.
+3. Add manager overrides only where the default is inaccurate.
+4. Update capability tests and this summary.
 
-In the tables, **Hook** means callable raw method/event presence, and **Inherit**
-means resolving the named parent capability. An optional input lets callers omit
-that argument; it is not proof that an implementation honors it. Inherited
-option defaults are optimistic compatibility assumptions.
-
-| Environment capability | Covered surface | Contract requirement | Default when omitted |
-| --- | --- | --- | --- |
-| `environments.list` | `getEnvironments` | Required method | Supported |
-| `environments.refresh` | `refresh` | Required method | Supported |
-| `environments.resolve` | `resolve`; target URI in `scope` | Required method | Supported |
-| `environments.getSelected` | `get` | Required method | Supported |
-| `environments.setSelected` | `set`, including clearing selection | Required method | Supported |
-| `environments.create` | `create` | Optional method | Hook |
-| `environments.create.quick` | `quickCreate`; `quickCreateConfig` metadata | Optional input on optional `create`; optional metadata method | Raw `create` and `quickCreateConfig` hooks, then inherit create |
-| `environments.create.additionalPackages` | `additionalPackages` | Optional input on optional `create` | Inherit create |
-| `environments.remove` | `remove` | Optional method | Hook |
-| `environments.remove.headless` | `runHeadless` | Optional input on optional `remove` | Inherit remove |
-| `environments.clearCache` | `clearCache` | Optional method | Hook |
-| `environments.events.changed` | `onDidChangeEnvironments` | Optional event | Hook |
-| `environments.events.selectionChanged` | `onDidChangeEnvironment` | Optional event | Hook |
-
-| Package capability | Covered surface | Contract requirement | Default when omitted |
-| --- | --- | --- | --- |
-| `packages.list` | `getPackages` | Required method | Supported |
-| `packages.list.skipCache` | `skipCache` | Optional input on required `getPackages` | Inherit list |
-| `packages.refresh` | `refresh` | Required method | Supported |
-| `packages.manage` | `manage` | Required method | Supported |
-| `packages.manage.install` | `install` array | Input on required `manage`; union requires install or uninstall | Inherit manage |
-| `packages.manage.uninstall` | `uninstall` array | Input on required `manage`; union requires install or uninstall | Inherit manage |
-| `packages.manage.upgrade` | `upgrade` | Optional input on required `manage` | Inherit install |
-| `packages.manage.headless` | `runHeadless` | Optional input on required `manage` | Inherit manage |
-| `packages.manage.showSkipOption` | `showSkipOption` | Optional input on required `manage` | Inherit manage |
-| `packages.direct` | `getDirectPackageNames` / enrichment | Optional method | Hook |
-| `packages.version` | Tool version via `getVersion` | Optional method | Hook |
-| `packages.availableVersions` | `getPackageAvailableVersions` | Optional method | Hook |
-| `packages.formatInstallSpec` | `formatInstallSpec` | Optional method | Supported via `name==version` fallback |
-| `packages.clearCache` | `clearCache` | Optional method | Hook |
-| `packages.watchTargets` | Custom `getPackageWatchTargets` | Optional method | Hook |
-| `packages.events.changed` | `onDidChangePackages` | Optional event | Hook |
-
-### Compatibility and built-in limitations
-
-Legacy providers need not add a map or change inheritance to keep existing
-operations working. Optional support follows their raw hooks unless overridden.
-Required operations, hook presence, and inherited options are compatibility
-inferences, not guarantees that a method honors every request or will succeed.
-Advertise unsupported stubs explicitly; contextual/tool restrictions can be
-refined by future overrides without changing the capability API.
-Capability queries remain advisory: existing operation dispatch, synchronous
-support getters, prompts, and UI gating are unchanged.
-
-Venv and Conda support additional packages in quick creation only. Quick-path
-support does not certify a prompt-free invocation: venv dependency validation
-can require interaction. System Python creation prompts and ignores additional
-packages. Venv and Conda advertise quick creation without preflighting the
-interpreter, project, or creation scope. Inline-script creation requires an
-applicable local script context and uses the existing best-effort metadata reader;
-stricter metadata validation and I/O error handling are deferred.
-Headless removal permits progress/error UI; Conda and inline-script removal
-already need no confirmation.
-Inline-script explicitly advertises quick creation without `quickCreateConfig`,
-and reports URI resolution unsupported because its `resolve` method is a stub.
-
-Pip advertises its implemented lookup and direct-package hooks without probing
-tool versions, selecting a backend, or validating the executable. Operational
-requirements still apply (including pip >=21.2 for version lookup); a supported
-result is not a runtime readiness guarantee. Poetry version lookup, upgrade,
-and interactive skip are explicitly unsupported, even though its version-lookup
-method exists; project-sensitive checks require a scoped instance but do not
-validate request project identity. Runtime preflight refinements are deferred.
-Conda has no
-direct-name hook. Direct-package classification is
-best-effort, not exact installation intent; absent `isTransitive` remains unknown.
-
-`packages.clearCache` describes the optional provider contract hook. No built-in
-package manager implements it, and the internal package wrapper does not forward
-it; this capability does not introduce a public cache-clearing operation.
-
-Provider event keys describe provider hooks, not extension-generated events.
-Watch-target support means custom patterns, not general watching: default
-site-packages watchers do not depend on this hook. Scope
-variants, package names, combined operation arguments, lifecycle (`dispose`),
-project binding (`createForProject`), metadata, and version lookup `errorMode`
-are not additional capabilities. Project CRUD, execution, environment variables,
-registration, and item factories remain extension services. Named creation is
-deferred. Command-level restrictions, including inline-script package editing,
-remain distinct from raw manager support.
+Removing a key from a manager map only removes that manager's override. Removing
+a key from a default dictionary removes it from the public type union and is a
+breaking API change; deprecate it first and remove it only in a major release.
 
 ## Compatibility guidance
 
