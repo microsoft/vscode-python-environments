@@ -331,6 +331,16 @@ export async function applyInitialEnvironmentSelection(
     // Deferred to background when a workspace folder already resolved.
     const resolveGlobalScope = async (): Promise<SettingResolutionError[]> => {
         try {
+            // A previously selected default-context environment is authoritative: restore the
+            // manager AND the environment before publishing an automatic fallback.
+            const restored = await envManagers.restoreDefaultEnvironmentSelection().catch((err) => {
+                traceError(`[interpreterSelection] Failed to restore default environment selection: ${err}`);
+                return false;
+            });
+            if (restored) {
+                traceInfo('[interpreterSelection] global: restored previously selected environment');
+                return [];
+            }
             const globalStopWatch = new StopWatch();
             const { result, errors: globalErrors } = await resolvePriorityChainCore(
                 undefined,

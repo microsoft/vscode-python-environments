@@ -49,6 +49,7 @@ suite('Inline environment selection error feedback', () => {
             getEnvironment: async () => undefined,
             getEnvironmentManager: () => undefined,
             getProjectEnvManagers: () => [],
+            resolveContext: () => ({ kind: 'project', uri }),
             setEnvironments,
         };
         const projectMock: Partial<PythonProjectManager> = { getProjects: () => [project] };

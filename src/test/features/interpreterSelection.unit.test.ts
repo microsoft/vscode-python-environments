@@ -744,6 +744,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             getEnvironmentManager: sandbox.stub(),
             setEnvironment: sandbox.stub().resolves(),
             setEnvironments: sandbox.stub().resolves(),
+            restoreDefaultEnvironmentSelection: sandbox.stub().resolves(false),
             managers: [mockVenvManager, mockSystemManager],
         } as unknown as sinon.SinonStubbedInstance<EnvironmentManagers>;
 
@@ -1272,6 +1273,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
             getEnvironmentManager: sandbox.stub(),
             setEnvironment: sandbox.stub().resolves(),
             setEnvironments: sandbox.stub().resolves(),
+            restoreDefaultEnvironmentSelection: sandbox.stub().resolves(false),
             managers: [mockVenvManager, mockSystemManager],
         } as unknown as sinon.SinonStubbedInstance<EnvironmentManagers>;
 
@@ -1521,6 +1523,7 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
             getEnvironmentManager: sandbox.stub(),
             setEnvironment: sandbox.stub().resolves(),
             setEnvironments: sandbox.stub().resolves(),
+            restoreDefaultEnvironmentSelection: sandbox.stub().resolves(false),
             managers: [mockVenvManager, mockSystemManager],
         } as unknown as sinon.SinonStubbedInstance<EnvironmentManagers>;
 
@@ -1761,6 +1764,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
             getEnvironmentManager: sandbox.stub(),
             setEnvironment: sandbox.stub().resolves(),
             setEnvironments: sandbox.stub().resolves(),
+            restoreDefaultEnvironmentSelection: sandbox.stub().resolves(false),
             managers: [mockVenvManager, mockSystemManager, mockCondaManager],
         } as unknown as sinon.SinonStubbedInstance<EnvironmentManagers>;
 
@@ -1932,6 +1936,7 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
             getEnvironmentManager: sandbox.stub(),
             setEnvironment: sandbox.stub().resolves(),
             setEnvironments: sandbox.stub().resolves(),
+            restoreDefaultEnvironmentSelection: sandbox.stub().resolves(false),
             managers: [mockVenvManager, mockSystemManager],
         } as unknown as sinon.SinonStubbedInstance<EnvironmentManagers>;
 

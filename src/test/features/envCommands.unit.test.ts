@@ -7,6 +7,7 @@ import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../ap
 import * as commandApi from '../../common/command.api';
 import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import * as persistentState from '../../common/persistentState';
+import * as environmentPickers from '../../common/pickers/environments';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
 import * as windowApis from '../../common/window.apis';
@@ -20,6 +21,7 @@ import {
     revealEnvInManagerView,
     runInDedicatedTerminalCommand,
     runInTerminalCommand,
+    setEnvironmentCommand,
 } from '../../features/envCommands';
 import * as settingHelpers from '../../features/settings/settingHelpers';
 import * as terminalRunner from '../../features/terminal/runInTerminal';
@@ -170,7 +172,10 @@ suite('Create Any Environment Command Tests', () => {
             .returns(() => Promise.resolve(env.object))
             .verifiable(typeMoq.Times.once());
 
-        manager.setup((m) => m.set(undefined, env.object)).verifiable(typeMoq.Times.once());
+        // Creation-followed-by-selection goes through the authoritative default-context write
+        // path rather than calling the manager directly.
+        manager.setup((m) => m.set(typeMoq.It.isAny(), typeMoq.It.isAny())).verifiable(typeMoq.Times.never());
+        em.setup((e) => e.setEnvironment(undefined, env.object)).verifiable(typeMoq.Times.once());
 
         pickEnvironmentManagerStub.resolves(manager.object.id);
         pickProjectManyStub.resolves([]);
@@ -179,6 +184,7 @@ suite('Create Any Environment Command Tests', () => {
         // Add assertions to verify the result
         assert.strictEqual(result, env.object, 'Expected the created environment to match the mocked environment.');
         manager.verifyAll();
+        em.verifyAll();
     });
 
     test('Create workspace venv: no-select', async () => {
@@ -678,5 +684,62 @@ suite('Package command manager ownership', () => {
         await handlePackageUninstall(packageItem);
 
         assert.ok(manage.calledOnceWithExactly(environment, { uninstall: ['requests'], install: [] }));
+    });
+});
+
+suite('Set environment command targeting', () => {
+    const looseFile = Uri.file(path.join(process.cwd(), 'loose-selection.py'));
+    const environment = createMockPythonEnvironment({
+        envPath: path.join(process.cwd(), 'selected-env'),
+        managerId: 'ms-python.python:conda',
+    });
+    let setEnvironment: sinon.SinonStub;
+    let setEnvironments: sinon.SinonStub;
+    let pickEnvironment: sinon.SinonStub;
+    let managers: EnvironmentManagers;
+    let projects: PythonProjectManager;
+
+    setup(() => {
+        setEnvironment = sinon.stub().resolves();
+        setEnvironments = sinon.stub().resolves();
+        pickEnvironment = sinon.stub(environmentPickers, 'pickEnvironment').resolves(environment);
+        const managerMock: Partial<EnvironmentManagers> = {
+            managers: [],
+            getEnvironment: async () => undefined,
+            getEnvironmentManager: () => undefined,
+            getProjectEnvManagers: () => [],
+            resolveContext: () => ({ kind: 'default' }),
+            setEnvironment,
+            setEnvironments,
+        };
+        const projectMock: Partial<PythonProjectManager> = { getProjects: () => [] };
+        managers = managerMock as EnvironmentManagers;
+        projects = projectMock as PythonProjectManager;
+    });
+
+    teardown(() => sinon.restore());
+
+    test('routes a loose-file uri to the default context instead of an empty project list', async () => {
+        await setEnvironmentCommand(looseFile, managers, projects);
+
+        sinon.assert.calledOnceWithExactly(setEnvironment, undefined, environment);
+        sinon.assert.notCalled(setEnvironments);
+    });
+
+    test('does not change any selection when the picker is cancelled', async () => {
+        pickEnvironment.resolves(undefined);
+
+        await setEnvironmentCommand([looseFile], managers, projects);
+
+        sinon.assert.notCalled(setEnvironment);
+        sinon.assert.notCalled(setEnvironments);
+    });
+
+    test('treats an empty target array as a no-op', async () => {
+        await setEnvironmentCommand([], managers, projects);
+
+        sinon.assert.notCalled(pickEnvironment);
+        sinon.assert.notCalled(setEnvironment);
+        sinon.assert.notCalled(setEnvironments);
     });
 });
