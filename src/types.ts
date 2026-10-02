@@ -14,8 +14,8 @@ import type { Pep440Version } from '@renovatebot/pep440';
 import type {
     Capabilities,
     CapabilityContext,
-    EnvironmentCapability,
-    PackageCapability,
+    EnvironmentManagerCapability,
+    PackageManagerCapability,
     Support,
 } from './capabilities.js';
 import type {
@@ -384,7 +384,7 @@ export interface EnvironmentManager {
      * Quick creation additionally requires the raw create and quickCreateConfig hooks unless advertised.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
-    readonly capabilities?: Capabilities<EnvironmentCapability>;
+    readonly capabilities?: Capabilities<EnvironmentManagerCapability>;
 
     /**
      * The name of the environment manager. Allowed characters (a-z, A-Z, 0-9, -, _).
@@ -670,7 +670,7 @@ export interface PackageManager {
      * Advertise unsupported stubs and context/tool restrictions explicitly to refine these defaults.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
-    readonly capabilities?: Capabilities<PackageCapability>;
+    readonly capabilities?: Capabilities<PackageManagerCapability>;
 
     /**
      * The name of the package manager. Allowed characters (a-z, A-Z, 0-9, -, _).
@@ -1115,9 +1115,9 @@ export interface PythonEnvironmentsApi {
      * Unexpected readiness/probe errors and contradictory manager arguments reject.
      * Feature-detect this method when supporting older installed extension runtimes.
      */
-    getEnvironmentCapability(
+    getEnvironmentManagerCapability(
         managerId: string,
-        capability: EnvironmentCapability,
+        capability: EnvironmentManagerCapability,
         context?: CapabilityContext,
     ): Promise<Support>;
 
@@ -1221,9 +1221,9 @@ export interface PythonPackageGetterApi {
      * @returns Support, or a reason when routing is unresolved/ambiguous or the feature unsupported.
      * Unexpected readiness/probe errors reject. Feature-detect on older extension runtimes.
      */
-    getPackageCapability(
+    getPackageManagerCapability(
         environment: PythonEnvironment,
-        capability: PackageCapability,
+        capability: PackageManagerCapability,
         project?: PythonProject,
     ): Promise<Support>;
 

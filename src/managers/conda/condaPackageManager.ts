@@ -22,7 +22,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { Capabilities, PackageCapability } from '../../capabilities';
+import { Capabilities, PackageManagerCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
@@ -40,7 +40,7 @@ import {
 import { getCommonCondaPackagesToInstall } from './condaUtils';
 
 export class CondaPackageManager implements PackageManager, Disposable {
-    readonly capabilities: Capabilities<PackageCapability> = {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
         'packages.version': async () => ({ supported: true }),
         'packages.availableVersions': async () => ({ supported: true }),
         'packages.watchTargets': async () => ({ supported: true }),

@@ -17,7 +17,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentCapability } from '../../capabilities';
+import { Capabilities, EnvironmentManagerCapability } from '../../capabilities';
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -36,7 +36,7 @@ import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
 import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToInstall } from './uvPythonInstaller';
 
 export class SysPythonManager implements EnvironmentManager {
-    readonly capabilities: Capabilities<EnvironmentCapability> = {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         'environments.create': async () => ({ supported: true }),
         'environments.clearCache': async () => ({ supported: true }),
         'environments.events.changed': async () => ({ supported: true }),

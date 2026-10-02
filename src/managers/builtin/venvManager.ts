@@ -20,7 +20,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
 import { executeCommand } from '../../common/command.api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
@@ -52,7 +52,7 @@ import {
 } from './venvUtils';
 
 export class VenvManager implements EnvironmentManager {
-    readonly capabilities: Capabilities<EnvironmentCapability> = {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         'environments.create': async () => ({ supported: true }),
         'environments.remove': async () => ({ supported: true }),
         'environments.clearCache': async () => ({ supported: true }),

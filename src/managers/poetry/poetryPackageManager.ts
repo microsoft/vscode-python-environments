@@ -25,7 +25,7 @@ import {
     PythonEnvironmentApi,
     PythonProject,
 } from '../../api';
-import { Capabilities, CapabilityContext, PackageCapability, Support } from '../../capabilities';
+import { Capabilities, CapabilityContext, PackageManagerCapability, Support } from '../../capabilities';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
@@ -43,7 +43,7 @@ import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
-    readonly capabilities: Capabilities<PackageCapability> = {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
         'packages.version': async () => ({ supported: true }),
         'packages.events.changed': async () => ({ supported: true }),
         'packages.list': async (context) => this.checkProjectSupport(context),

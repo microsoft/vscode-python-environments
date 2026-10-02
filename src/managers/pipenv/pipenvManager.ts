@@ -14,7 +14,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentCapability } from '../../capabilities';
+import { Capabilities, EnvironmentManagerCapability } from '../../capabilities';
 import { PipenvStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -41,7 +41,7 @@ import {
 } from './pipenvUtils';
 
 export class PipenvManager implements EnvironmentManager, Disposable {
-    readonly capabilities: Capabilities<EnvironmentCapability> = {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         'environments.clearCache': async () => ({ supported: true }),
         'environments.events.changed': async () => ({ supported: true }),
         'environments.events.selectionChanged': async () => ({ supported: true }),

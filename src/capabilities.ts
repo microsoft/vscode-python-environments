@@ -12,12 +12,12 @@ import type {
 } from './types.js';
 
 /** Environment capability keys derived from the canonical default dictionary. */
-export type EnvironmentCapability = keyof typeof defaultEnvironmentCapabilities;
+export type EnvironmentManagerCapability = keyof typeof defaultEnvironmentCapabilities;
 
 /** Package capability keys derived from the canonical default dictionary. */
-export type PackageCapability = keyof typeof defaultPackageCapabilities;
+export type PackageManagerCapability = keyof typeof defaultPackageCapabilities;
 
-export type ManagerCapability = EnvironmentCapability | PackageCapability;
+export type ManagerCapability = EnvironmentManagerCapability | PackageManagerCapability;
 
 /** General feature support, not a guarantee that a particular operation will succeed. */
 export type Support =
@@ -141,7 +141,7 @@ export const defaultPackageCapabilities = Object.freeze({
  */
 export function resolveEnvironmentManagerCapability(
     manager: EnvironmentManager,
-    capability: EnvironmentCapability,
+    capability: EnvironmentManagerCapability,
     context: CapabilityContext = {},
 ): Promise<Support> {
     return resolveCapability(manager, capability, context, defaultEnvironmentCapabilities);
@@ -156,7 +156,7 @@ export function resolveEnvironmentManagerCapability(
  */
 export function resolvePackageManagerCapability(
     manager: PackageManager,
-    capability: PackageCapability,
+    capability: PackageManagerCapability,
     context: CapabilityContext = {},
 ): Promise<Support> {
     return resolveCapability(manager, capability, context, defaultPackageCapabilities);

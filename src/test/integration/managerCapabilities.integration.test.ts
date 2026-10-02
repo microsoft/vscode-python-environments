@@ -5,9 +5,9 @@ import * as assert from 'assert';
 import { Disposable, extensions, Uri } from 'vscode';
 import {
     Capabilities,
-    EnvironmentCapability,
+    EnvironmentManagerCapability,
     EnvironmentManager,
-    PackageCapability,
+    PackageManagerCapability,
     PackageManager,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -21,8 +21,8 @@ suite('Manager capabilities integration', function () {
     let environment: PythonEnvironment;
     let manager: EnvironmentManager;
     let packages: PackageManager;
-    let capabilities: Capabilities<PackageCapability>;
-    let environmentCapabilities: Capabilities<EnvironmentCapability>;
+    let capabilities: Capabilities<PackageManagerCapability>;
+    let environmentCapabilities: Capabilities<EnvironmentManagerCapability>;
     let manageCalls: number;
     const disposables: Disposable[] = [];
     const environmentManagerId = `${ENVS_EXTENSION_ID}:capability-test-environment`;
@@ -90,23 +90,23 @@ suite('Manager capabilities integration', function () {
     });
 
     test('optional hooks infer support while advertisements override it across the extension boundary', async () => {
-        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.direct'), { supported: true });
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.direct'), { supported: true });
         const unsupported = { supported: false, reason: 'Disabled for test' } as const;
         capabilities = { 'packages.direct': async () => unsupported };
-        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.direct'), unsupported);
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.direct'), unsupported);
         capabilities = {};
         delete packages.getDirectPackageNames;
-        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.direct'), {
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.direct'), {
             supported: false,
             reason: 'Capability not implemented',
         });
         capabilities = { 'packages.direct': async () => ({ supported: true }) };
-        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.direct'), { supported: true });
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.direct'), { supported: true });
     });
 
     test('quick creation infers legacy hooks while preserving contextual parent overrides', async () => {
         assert.strictEqual(
-            (await api.getEnvironmentCapability(environmentManagerId, 'environments.create.quick')).supported,
+            (await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create.quick')).supported,
             false,
         );
         manager.quickCreateConfig = () => {
@@ -116,7 +116,7 @@ suite('Manager capabilities integration', function () {
             throw new Error('A capability query must not clear caches');
         };
         for (const key of ['environments.create.quick', 'environments.clearCache'] as const) {
-            assert.deepStrictEqual(await api.getEnvironmentCapability(environmentManagerId, key), { supported: true });
+            assert.deepStrictEqual(await api.getEnvironmentManagerCapability(environmentManagerId, key), { supported: true });
         }
         const unsupported = { supported: false, reason: 'Creation disabled in this scope' } as const;
         environmentCapabilities = {
@@ -126,7 +126,7 @@ suite('Manager capabilities integration', function () {
             },
         };
         assert.deepStrictEqual(
-            await api.getEnvironmentCapability(environmentManagerId, 'environments.create.quick', { scope: 'global' }),
+            await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create.quick', { scope: 'global' }),
             unsupported,
         );
     });
@@ -137,7 +137,7 @@ suite('Manager capabilities integration', function () {
 
     test('legacy structural providers receive defaults through the extension API', async () => {
         assert.deepStrictEqual(
-            await api.getEnvironmentCapability(environmentManagerId, 'environments.list'),
+            await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.list'),
             { supported: true },
         );
         for (const key of [
@@ -146,16 +146,16 @@ suite('Manager capabilities integration', function () {
             'environments.remove',
             'environments.remove.headless',
         ] as const) {
-            assert.deepStrictEqual(await api.getEnvironmentCapability(environmentManagerId, key), { supported: true });
+            assert.deepStrictEqual(await api.getEnvironmentManagerCapability(environmentManagerId, key), { supported: true });
         }
         assert.strictEqual(
-            (await api.getEnvironmentCapability(environmentManagerId, 'environments.create.quick')).supported,
+            (await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create.quick')).supported,
             false,
         );
-        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.manage.install'), {
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.install'), {
             supported: true,
         });
-        assert.strictEqual((await api.getPackageCapability(environment, 'packages.direct')).supported, true);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.direct')).supported, true);
         assert.strictEqual(manageCalls, 0);
     });
 
@@ -171,7 +171,7 @@ suite('Manager capabilities integration', function () {
             'environments.remove',
             'environments.remove.headless',
         ] as const) {
-            assert.deepStrictEqual(await api.getEnvironmentCapability(environmentManagerId, key), unsupported);
+            assert.deepStrictEqual(await api.getEnvironmentManagerCapability(environmentManagerId, key), unsupported);
         }
     });
 
@@ -188,7 +188,7 @@ suite('Manager capabilities integration', function () {
                 },
             };
             assert.deepStrictEqual(
-                await api.getEnvironmentCapability(environmentManagerId, 'environments.create', {
+                await api.getEnvironmentManagerCapability(environmentManagerId, 'environments.create', {
                     scope: queryScope,
                     environment,
                 }),
@@ -196,14 +196,14 @@ suite('Manager capabilities integration', function () {
             );
         }
         await assert.rejects(() =>
-            api.getEnvironmentCapability(`${ENVS_EXTENSION_ID}:another-manager`, 'environments.list', {
+            api.getEnvironmentManagerCapability(`${ENVS_EXTENSION_ID}:another-manager`, 'environments.list', {
                 environment,
             }),
         );
     });
 
     test('uninstalled managers report unsupported without interaction', async () => {
-        const support = await api.getEnvironmentCapability(
+        const support = await api.getEnvironmentManagerCapability(
             'capability-tests.uninstalled:missing',
             'environments.list',
         );
@@ -223,12 +223,12 @@ suite('Manager capabilities integration', function () {
             'packages.manage.install': (context) =>
                 resolvePackageManagerCapability(packages, 'packages.manage', context),
         };
-        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.manage.upgrade'), {
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.upgrade'), {
             supported: false,
             reason: 'Disabled for test',
         });
         enabled = true;
-        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.manage.upgrade'), {
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.upgrade'), {
             supported: true,
         });
         assert.strictEqual(manageCalls, 0);
@@ -240,7 +240,7 @@ suite('Manager capabilities integration', function () {
                 resolvePackageManagerCapability(packages, 'packages.manage.install', context),
         };
         await assert.rejects(
-            () => api.getPackageCapability(environment, 'packages.manage'),
+            () => api.getPackageManagerCapability(environment, 'packages.manage'),
             /Capability dependency cycle/,
         );
     });
@@ -249,7 +249,7 @@ suite('Manager capabilities integration', function () {
         capabilities = {
             'packages.manage': async () => ({ supported: false, reason: 'Advisory only' }),
         };
-        assert.strictEqual((await api.getPackageCapability(environment, 'packages.manage')).supported, false);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.manage')).supported, false);
         await api.managePackages(environment, { install: ['example'], runHeadless: true });
         assert.strictEqual(manageCalls, 1);
     });

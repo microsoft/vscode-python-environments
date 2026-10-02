@@ -8,7 +8,7 @@ import {
     resolveEnvironmentManagerCapability,
     resolvePackageManagerCapability,
 } from '../../capabilities';
-import type { CapabilityContext, EnvironmentCapability, PackageCapability, Support } from '../../capabilities';
+import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCapability, Support } from '../../capabilities';
 import { ISSUES_URL } from '../../common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from '../../common/errors/NotSupportedError';
 import { traceWarn } from '../../common/logging';
@@ -80,7 +80,7 @@ export class InternalEnvironmentManager implements EnvironmentManager {
     }
 
     /** Resolves raw-provider advertisements and defaults, independently of operational fallbacks. */
-    public getCapability(capability: EnvironmentCapability, context?: CapabilityContext): Promise<Support> {
+    public getCapability(capability: EnvironmentManagerCapability, context?: CapabilityContext): Promise<Support> {
         return resolveEnvironmentManagerCapability(this.manager, capability, context);
     }
 
@@ -227,7 +227,7 @@ export class InternalPackageManager implements PackageManager {
     public readonly createForProject?: (project: PythonProject) => InternalPackageManager;
 
     /** Resolves support on this live raw instance, retaining any project-bound state. */
-    public getCapability(capability: PackageCapability, context: CapabilityContext = {}): Promise<Support> {
+    public getCapability(capability: PackageManagerCapability, context: CapabilityContext = {}): Promise<Support> {
         this.throwIfDisposed();
         return resolvePackageManagerCapability(this.manager, capability, {
             ...context,
