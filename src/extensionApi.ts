@@ -48,12 +48,7 @@ import type { ProjectCreators } from './features/creators/projectCreators';
 import type { PythonProjectManager } from './features/projectManager';
 import type { InternalEnvironmentManager } from './managers/common/registeredManagers';
 import { PythonEnvironmentImpl, PythonPackageImpl } from './managers/common/models';
-import {
-    waitForAllEnvManagers,
-    waitForEnvManager,
-    waitForEnvManagerId,
-    waitForManagerForQuery,
-} from './features/common/managerReady';
+import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './features/common/managerReady';
 import { EnvVarManager } from './features/execution/envVariableManager';
 import { runAsTask } from './features/execution/runAsTask';
 import { runInBackground } from './features/execution/runInBackground';
@@ -147,7 +142,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
 
     /**
-     * Queries one explicit environment provider without selecting a manager or prompting.
+     * Queries one registered environment provider without activation, waiting, or prompting.
      * @param managerId Exact registered environment manager ID.
      * @param capability Feature to query.
      * @param context Optional scope, environment, and project forwarded to the provider.
@@ -160,17 +155,15 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (context?.environment && context.environment.envId.managerId !== managerId) {
             throw new Error(l10n.t('The environment does not belong to environment manager {0}.', managerId));
         }
-        if (await waitForManagerForQuery(this.envManagers, managerId, 'environment')) {
-            const manager = this.envManagers.getEnvironmentManager(managerId);
-            if (manager) {
-                return manager.getCapability(capability, context);
-            }
+        const manager = this.envManagers.getEnvironmentManager(managerId);
+        if (manager) {
+            return manager.getCapability(capability, context);
         }
         return { supported: false, reason: l10n.t('Environment manager {0} is unavailable.', managerId) };
     }
 
     /**
-     * Queries the package provider routed for an environment or explicit project without prompting.
+     * Queries the registered package provider routed for an environment or explicit project without activation or waiting.
      * @param environment Environment whose packages would be managed.
      * @param capability Feature to query.
      * @param project Optional project selecting its configured, project-bound provider.
@@ -180,28 +173,13 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         capability: PackageManagerCapability,
         project?: PythonProject,
     ): Promise<Support> {
-        const unavailable = (): Support => ({
-            supported: false,
-            reason: l10n.t('No package manager is available for the environment and project context.'),
-        });
-        if (!project) {
-            if (!(await waitForManagerForQuery(this.envManagers, environment.envId.managerId, 'environment'))) {
-                return unavailable();
-            }
-            const preferredId = this.envManagers.getEnvironmentManager(environment)?.preferredPackageManagerId;
-            if (!preferredId || !(await waitForManagerForQuery(this.envManagers, preferredId, 'package'))) {
-                return unavailable();
-            }
-        }
-        const scope = project?.uri ?? environment;
-        const managerId = this.envManagers.getPackageManagerId(scope);
-        if (!managerId || !(await waitForManagerForQuery(this.envManagers, managerId, 'package'))) {
-            return unavailable();
-        }
-        const manager = this.envManagers.getPackageManager(scope);
+        const manager = this.envManagers.getPackageManager(project?.uri ?? environment);
         // A project-aware root is not a usable substitute for a missing scoped instance.
         if (!manager || (manager.createForProject && !manager.project)) {
-            return unavailable();
+            return {
+                supported: false,
+                reason: l10n.t('No package manager is available for the environment and project context.'),
+            };
         }
         return manager.getCapability(capability, { environment, project });
     }

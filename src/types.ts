@@ -1108,11 +1108,13 @@ export interface PythonEnvironmentManagementApi {
 export interface PythonEnvironmentsApi {
     /**
      * Queries one explicitly identified manager without picking or aggregating managers.
+     * Only currently registered managers are queried; no activation or registration wait occurs.
      * @param managerId Registered environment-manager ID.
      * @param capability Feature to query; general support does not validate operation arguments.
      * @param context Optional scope/environment/project. An environment must belong to managerId.
      * @returns Support, or a reason when the manager is missing or the feature unsupported.
-     * Unexpected readiness/probe errors and contradictory manager arguments reject.
+     * Unavailable managers can be queried again after registration.
+     * Unexpected lookup/probe errors and contradictory manager arguments reject.
      * Feature-detect this method when supporting older installed extension runtimes.
      */
     getEnvironmentManagerCapability(
@@ -1214,12 +1216,14 @@ export interface GetPackageAvailableVersionsOptions {
 export interface PythonPackageGetterApi {
     /**
      * Queries the package manager selected for an environment or explicit project, without prompting.
+     * Only currently registered managers are queried; no activation or registration wait occurs.
      * @param environment Environment used for the support check and default manager routing.
      * @param capability Feature to query; support does not guarantee a particular request succeeds.
      * @param project Explicit project for project-specific manager selection. If omitted, existing
      * routing must identify a unique project when the selected manager requires one.
      * @returns Support, or a reason when routing is unresolved/ambiguous or the feature unsupported.
-     * Unexpected readiness/probe errors reject. Feature-detect on older extension runtimes.
+     * Unavailable managers can be queried again after registration.
+     * Unexpected lookup/probe errors reject. Feature-detect on older extension runtimes.
      */
     getPackageManagerCapability(
         environment: PythonEnvironment,

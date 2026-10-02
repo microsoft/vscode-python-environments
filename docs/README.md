@@ -1874,9 +1874,11 @@ managers. Package queries follow existing manager selection and project-scoped
 routing. Supply a project to select that project's manager; without one, a
 project-aware manager requires a uniquely identifiable owning project.
 Unresolved managers or ambiguous routing return unsupported with a specific
-reason. Contradictory environment ownership, unexpected readiness/probe errors,
-and prerequisite cycles reject. Queries do not prompt to install missing tools
-or extensions.
+reason. Queries inspect currently registered managers: they do not activate
+extensions, wait for registration, or prompt to install missing tools or
+extensions. An unavailable result may be temporary during startup; query again
+after the provider registers. Contradictory environment ownership, unexpected
+lookup/probe errors, and prerequisite cycles reject.
 
 Feature-detect the query methods when supporting older extension runtimes:
 
