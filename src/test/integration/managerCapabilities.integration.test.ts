@@ -5,6 +5,7 @@ import * as assert from 'assert';
 import { Disposable, extensions, Uri } from 'vscode';
 import {
     Capabilities,
+    EnvironmentCapability,
     EnvironmentManager,
     PackageCapability,
     PackageManager,
@@ -20,6 +21,7 @@ suite('Manager capabilities integration', function () {
     let environment: PythonEnvironment;
     let packages: PackageManager;
     let capabilities: Capabilities<PackageCapability>;
+    let environmentCapabilities: Capabilities<EnvironmentCapability>;
     let manageCalls: number;
     const disposables: Disposable[] = [];
     const environmentManagerId = `${ENVS_EXTENSION_ID}:capability-test-environment`;
@@ -33,6 +35,7 @@ suite('Manager capabilities integration', function () {
 
     setup(() => {
         capabilities = {};
+        environmentCapabilities = {};
         manageCalls = 0;
         packages = {
             name: 'capability-test-packages',
@@ -44,15 +47,27 @@ suite('Manager capabilities integration', function () {
             },
             refresh: async () => {},
             getPackages: async () => [],
+            getDirectPackageNames: async () => {
+                throw new Error('A capability query must not invoke the optional operation');
+            },
         };
         const manager: EnvironmentManager = {
             name: 'capability-test-environment',
+            get capabilities() {
+                return environmentCapabilities;
+            },
             preferredPackageManagerId: `${ENVS_EXTENSION_ID}:${packages.name}`,
             refresh: async () => {},
             getEnvironments: async () => [],
             get: async () => undefined,
             set: async () => {},
             resolve: async () => undefined,
+            create: async () => {
+                throw new Error('A capability query must not invoke the optional operation');
+            },
+            remove: async () => {
+                throw new Error('A capability query must not invoke the optional operation');
+            },
         };
         disposables.push(
             api.registerPackageManager(packages, { extensionId: ENVS_EXTENSION_ID }),
@@ -73,6 +88,12 @@ suite('Manager capabilities integration', function () {
         );
     });
 
+    test('optional hooks require explicit advertisements across the extension boundary', async () => {
+        assert.strictEqual((await api.getPackageCapability(environment, 'packages.direct')).supported, false);
+        capabilities = { 'packages.direct': async () => ({ supported: true }) };
+        assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.direct'), { supported: true });
+    });
+
     teardown(() => {
         disposables.splice(0).reverse().forEach((disposable) => disposable.dispose());
     });
@@ -82,8 +103,16 @@ suite('Manager capabilities integration', function () {
             await api.getEnvironmentCapability(environmentManagerId, 'environments.list'),
             { supported: true },
         );
+        for (const key of [
+            'environments.create',
+            'environments.create.additionalPackages',
+            'environments.remove',
+            'environments.remove.headless',
+        ] as const) {
+            assert.deepStrictEqual(await api.getEnvironmentCapability(environmentManagerId, key), { supported: true });
+        }
         assert.strictEqual(
-            (await api.getEnvironmentCapability(environmentManagerId, 'environments.create')).supported,
+            (await api.getEnvironmentCapability(environmentManagerId, 'environments.create.quick')).supported,
             false,
         );
         assert.deepStrictEqual(await api.getPackageCapability(environment, 'packages.manage.install'), {
@@ -91,6 +120,60 @@ suite('Manager capabilities integration', function () {
         });
         assert.strictEqual((await api.getPackageCapability(environment, 'packages.direct')).supported, false);
         assert.strictEqual(manageCalls, 0);
+    });
+
+    test('explicit creation/removal opt-outs override raw methods and inherited options', async () => {
+        const unsupported = { supported: false, reason: 'Disabled for test' } as const;
+        environmentCapabilities = {
+            'environments.create': async () => unsupported,
+            'environments.remove': async () => unsupported,
+        };
+        for (const key of [
+            'environments.create',
+            'environments.create.additionalPackages',
+            'environments.remove',
+            'environments.remove.headless',
+        ] as const) {
+            assert.deepStrictEqual(await api.getEnvironmentCapability(environmentManagerId, key), unsupported);
+        }
+    });
+
+    test('environment queries preserve explicit scope and reject contradictory ownership', async () => {
+        const scopes = ['global', [Uri.file('first'), Uri.file('second')]] as const;
+        for (const scope of scopes) {
+            // Copy the URI tuple into the mutable array accepted by the existing scope contract.
+            const queryScope = scope === 'global' ? scope : [...scope];
+            environmentCapabilities = {
+                'environments.create': async (context) => {
+                    assert.strictEqual(context.scope, queryScope);
+                    assert.strictEqual(context.environment, environment);
+                    return { supported: true };
+                },
+            };
+            assert.deepStrictEqual(
+                await api.getEnvironmentCapability(environmentManagerId, 'environments.create', {
+                    scope: queryScope,
+                    environment,
+                }),
+                { supported: true },
+            );
+        }
+        await assert.rejects(() =>
+            api.getEnvironmentCapability(`${ENVS_EXTENSION_ID}:another-manager`, 'environments.list', {
+                environment,
+            }),
+        );
+    });
+
+    test('uninstalled managers report unsupported without interaction', async () => {
+        const support = await api.getEnvironmentCapability(
+            'capability-tests.uninstalled:missing',
+            'environments.list',
+        );
+        assert.strictEqual(support.supported, false);
+        if (!support.supported) {
+            assert.ok(support.reason);
+        }
     });
 
     test('dynamic overrides and default prerequisites cross the extension boundary', async () => {

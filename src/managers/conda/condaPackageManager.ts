@@ -22,6 +22,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { Capabilities, PackageCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
@@ -40,6 +41,13 @@ import { getCommonCondaPackagesToInstall } from './condaUtils';
 import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 
 export class CondaPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageCapability> = {
+        'packages.version': async () => ({ supported: true }),
+        'packages.availableVersions': async () => ({ supported: true }),
+        'packages.watchTargets': async () => ({ supported: true }),
+        'packages.events.changed': async () => ({ supported: true }),
+    };
+
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 

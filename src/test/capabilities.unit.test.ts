@@ -146,7 +146,7 @@ suite('Manager capabilities', () => {
         assert.ok(Object.isFrozen(defaultPackageCapabilities));
     });
 
-    test('optional raw hooks enable defaults without invoking operations', async () => {
+    test('create/remove follow raw hooks while other optional features remain opt-in without invoking operations', async () => {
         const env = environmentManager({
             create: async () => unexpectedOperation(),
             quickCreateConfig: unexpectedOperation,
@@ -163,12 +163,31 @@ suite('Manager capabilities', () => {
             getPackageWatchTargets: unexpectedOperation,
             onDidChangePackages: unexpectedOperation,
         });
+        const expectedEnvironmentDefaults = {
+            ...environmentDefaults,
+            'environments.create': true,
+            'environments.create.additionalPackages': true,
+            'environments.remove': true,
+            'environments.remove.headless': true,
+        };
+        const wrapped = new InternalEnvironmentManager('test:environment', env);
         for (const key of Object.keys(environmentDefaults) as EnvironmentCapability[]) {
-            assert.deepStrictEqual(await resolveEnvironmentManagerCapability(env, key), { supported: true });
+            assert.strictEqual((await resolveEnvironmentManagerCapability(env, key)).supported, expectedEnvironmentDefaults[key], key);
+            assert.strictEqual((await wrapped.getCapability(key)).supported, expectedEnvironmentDefaults[key], key);
         }
         for (const key of Object.keys(packageDefaults) as PackageCapability[]) {
-            assert.deepStrictEqual(await resolvePackageManagerCapability(pkg, key), { supported: true });
+            assert.strictEqual((await resolvePackageManagerCapability(pkg, key)).supported, packageDefaults[key]);
         }
+    });
+
+    test('creation and removal defaults independently follow current raw method availability', async () => {
+        const manager = environmentManager({ create: async () => unexpectedOperation(), capabilities: {} });
+        assert.strictEqual((await resolveEnvironmentManagerCapability(manager, 'environments.create')).supported, true);
+        assert.strictEqual((await resolveEnvironmentManagerCapability(manager, 'environments.remove')).supported, false);
+        delete manager.create;
+        manager.remove = async () => unexpectedOperation();
+        assert.strictEqual((await resolveEnvironmentManagerCapability(manager, 'environments.create')).supported, false);
+        assert.strictEqual((await resolveEnvironmentManagerCapability(manager, 'environments.remove')).supported, true);
     });
 
     test('default child checks preserve explicit parent opt-outs', async () => {
@@ -182,8 +201,9 @@ suite('Manager capabilities', () => {
             },
         });
         for (const key of [
-            'environments.create.quick',
+            'environments.create',
             'environments.create.additionalPackages',
+            'environments.remove',
             'environments.remove.headless',
         ] as const) {
             assert.strictEqual(await resolveEnvironmentManagerCapability(env, key), unsupported);
@@ -204,6 +224,25 @@ suite('Manager capabilities', () => {
         ] as const) {
             assert.strictEqual(await resolvePackageManagerCapability(pkg, key), unsupported);
         }
+    });
+
+    test('optional parent opt-ins enable inherited options but not quick creation', async () => {
+        const manager = environmentManager({
+            create: async () => unexpectedOperation(),
+            quickCreateConfig: unexpectedOperation,
+            remove: async () => unexpectedOperation(),
+            capabilities: {
+                'environments.create': async () => ({ supported: true }),
+                'environments.remove': async () => ({ supported: true }),
+            },
+        });
+        for (const key of ['environments.create.additionalPackages', 'environments.remove.headless'] as const) {
+            assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, key), { supported: true });
+        }
+        assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, 'environments.create.quick'), {
+            supported: false,
+            reason: 'Capability not implemented',
+        });
     });
 
     test('explicit child advertisements decide their own prerequisites', async () => {
@@ -335,7 +374,7 @@ suite('Manager capabilities', () => {
         assert.deepStrictEqual(await resolvePackageManagerCapability(manager, 'packages.list'), { supported: true });
     });
 
-    test('wrappers inspect raw hooks instead of their operational fallbacks', async () => {
+    test('wrapper fallbacks do not enable optional capabilities', async () => {
         const env = new InternalEnvironmentManager('test:environment', environmentManager());
         const pkg = new InternalPackageManager('test:packages', packageManager());
         for (const key of Object.keys(environmentDefaults) as EnvironmentCapability[]) {

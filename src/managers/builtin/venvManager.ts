@@ -71,6 +71,11 @@ import {
 
 export class VenvManager implements EnvironmentManager {
     readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.create': async () => ({ supported: true }),
+        'environments.remove': async () => ({ supported: true }),
+        'environments.clearCache': async () => ({ supported: true }),
+        'environments.events.changed': async () => ({ supported: true }),
+        'environments.events.selectionChanged': async () => ({ supported: true }),
         'environments.create.quick': async (context) => {
             const create = await resolveEnvironmentManagerCapability(this, 'environments.create', context);
             if (!create.supported) {
@@ -80,10 +85,6 @@ export class VenvManager implements EnvironmentManager {
                 ? { supported: true }
                 : { supported: false, reason: l10n.t('Quick creation requires a global Python 3 environment.') };
         },
-        // Additional packages are forwarded only by explicit quick creation. This describes general
-        // support, not request preflight: editable dependencies can still trigger validation prompts.
-        'environments.create.additionalPackages': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.create', context),
     };
 
     private collection: PythonEnvironment[] = [];
