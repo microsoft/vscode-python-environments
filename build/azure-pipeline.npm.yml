@@ -86,7 +86,7 @@ extends:
 
               - script: npm run copy:sources
                 workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Copy src/api.ts, src/types.ts, src/publicErrors.ts to API package sources
+                displayName: Copy API facade, types, errors, and capabilities to API package sources
 
               - script: npm run compile
                 workingDirectory: $(Build.SourcesDirectory)/api

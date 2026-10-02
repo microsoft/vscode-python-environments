@@ -25,6 +25,7 @@ import {
     PythonEnvironmentApi,
     PythonProject,
 } from '../../api';
+import { Capabilities, CapabilityContext, PackageCapability, Support } from '../../capabilities';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
 import { PackageManagerRequiresProjectError } from '../common/errors';
@@ -41,6 +42,35 @@ import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageCapability> = {
+        'packages.list': async (context) => this.checkProjectSupport(context),
+        'packages.direct': async (context) => this.checkProjectSupport(context),
+        'packages.manage': async (context) => this.checkProjectSupport(context),
+        'packages.refresh': async (context) => this.checkProjectSupport(context),
+        'packages.availableVersions': async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package version lookup is not supported by this extension.'),
+        }),
+        'packages.manage.upgrade': async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package management does not support the upgrade option.'),
+        }),
+        'packages.manage.showSkipOption': async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package management does not support the skip option.'),
+        }),
+    };
+
+    private checkProjectSupport(context: CapabilityContext): Support {
+        if (!this.project) {
+            return { supported: false, reason: l10n.t('Poetry package management requires a project-bound manager.') };
+        }
+        if (context.project && context.project.uri.toString() !== this.project.uri.toString()) {
+            return { supported: false, reason: l10n.t('The Poetry package manager is bound to a different project.') };
+        }
+        return { supported: true };
+    }
+
     private readonly packagesChangedEmitter = new EventEmitter<DidChangePackagesEventArgs>();
     readonly onDidChangePackages: Event<DidChangePackagesEventArgs> = this.packagesChangedEmitter.event;
 

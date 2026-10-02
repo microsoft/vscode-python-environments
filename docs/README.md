@@ -16,6 +16,8 @@ Use this manual to:
 The runtime facade is [`src/api.ts`](../src/api.ts). The authoritative public
 contracts are in [`src/types.ts`](../src/types.ts), with public errors and type
 guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
+Capability types, catalogs, default dictionaries, and raw-provider resolvers are
+in [`src/capabilities.ts`](../src/capabilities.ts).
 
 > [!IMPORTANT]
 > The API is flat. Call `api.getEnvironments()`, not
@@ -46,6 +48,7 @@ guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
     - [Extensibility data types](#extensibility-data-types)
     - [Extensibility methods](#extensibility-methods)
 - [API interface groups](#api-interface-groups)
+- [Manager capabilities](#manager-capabilities)
 - [Compatibility guidance](#compatibility-guidance)
 - [Related documentation](#related-documentation)
 
@@ -1552,6 +1555,7 @@ trigger, as the specification.
 | `name` | `string` | Yes | Manager name. Allowed characters: `a-z`, `A-Z`, `0-9`, `-`, `_`. |
 | `displayName` | `string` | No | Name shown in the UI. |
 | `preferredPackageManagerId` | `string` | Yes | Package manager to pair with, formatted `<publisher>.<extension>:<manager-name>`, for example `ms-python.python:pip`. |
+| `capabilities` | `Capabilities<EnvironmentCapability>` | No | Dynamic support overrides; omitted entries use the [external defaults](#manager-capabilities). |
 | `description` | `string` | No | Secondary text shown in the UI. |
 | `tooltip` | `string \| MarkdownString` | No | Hover text for the manager. |
 | `iconPath` | [`IconPath`](#iconpath) | No | Icon shown for the manager. |
@@ -1620,6 +1624,7 @@ Reports and changes the packages of an environment.
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
 | `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
+| `capabilities` | `Capabilities<PackageCapability>` | No | Dynamic support overrides evaluated on the correct project-bound instance; see [capabilities](#manager-capabilities). |
 | `dispose()` | `() => void` | No | Releases resources owned by the manager. The extension disposes project-scoped managers when their project is removed or replaced, their provider is unregistered, or the extension shuts down. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
@@ -1818,13 +1823,13 @@ directly on the single flat API object.
 
 | Interface | Members grouped by the interface | Description |
 | --- | --- | --- |
-| `PythonEnvironmentsApi` | Environment discovery and resolution | Lists and refreshes discovered environments, resolves environment URIs, and reports discovery changes. |
+| `PythonEnvironmentsApi` | Environment discovery, resolution, and capabilities | Lists and refreshes discovered environments, resolves environment URIs, queries manager support, and reports discovery changes. |
 | `PythonProjectEnvironmentApi` | Selected environment get/set | Reads, updates, and observes the selected environment for URI or global scopes. |
 | `PythonEnvironmentManagementApi` | Environment creation/removal | Creates and removes environments through their associated environment managers. |
 | `PythonEnvironmentItemApi` | Environment item creation | Converts provider-supplied environment information into an identified `PythonEnvironment`. |
 | `PythonEnvironmentManagerRegistrationApi` | Environment manager registration | Registers an `EnvironmentManager` implementation with the extension. |
 | `PythonEnvironmentManagerApi` | Combined environment API | Combines environment registration, item creation, lifecycle, discovery, and selection interfaces. |
-| `PythonPackageGetterApi` | Package retrieval and version lookup | Retrieves and refreshes packages, looks up available versions, and reports package changes. |
+| `PythonPackageGetterApi` | Package retrieval, version lookup, and capabilities | Retrieves and refreshes packages, looks up available versions, queries routed manager support, and reports package changes. |
 | `PythonPackageManagementApi` | Package installation/removal | Installs, upgrades, or uninstalls packages in an environment. |
 | `PythonPackageItemApi` | Package item creation | Converts provider-supplied package information into an identified `Package`. |
 | `PythonPackageManagerRegistrationApi` | Package manager registration | Registers a `PackageManager` implementation with the extension. |
@@ -1840,6 +1845,184 @@ directly on the single flat API object.
 | `PythonExecutionApi` | Combined execution API | Combines terminal creation, terminal execution, task execution, and background execution. |
 | `PythonEnvironmentVariablesApi` | Environment variable lookup/events | Resolves effective environment variables and reports source changes. |
 | `PythonEnvironmentApi` | Complete flat public API | Combines all environment, package, project, execution, and environment-variable APIs exposed at runtime. |
+
+## Manager capabilities
+
+Capabilities describe general support for manager operations and meaningful
+options. They do not validate a particular request, enforce permissions, or
+guarantee success. Existing operations, errors, selection UI, and synchronous UI
+support checks are unchanged.
+
+### Querying support
+
+```typescript
+getEnvironmentCapability(
+    managerId: string,
+    capability: EnvironmentCapability,
+    context?: CapabilityContext,
+): Promise<Support>;
+
+getPackageCapability(
+    environment: PythonEnvironment,
+    capability: PackageCapability,
+    project?: PythonProject,
+): Promise<Support>;
+```
+
+Environment queries target one explicit manager, without picking or aggregating
+managers. Package queries follow existing manager selection and project-scoped
+routing. Supply a project to select that project's manager; without one, a
+project-aware manager requires a uniquely identifiable owning project.
+Unresolved managers or ambiguous routing return unsupported with a specific
+reason. Contradictory environment ownership, unexpected readiness/probe errors,
+and prerequisite cycles reject. Queries do not prompt to install missing tools
+or extensions.
+
+Feature-detect the query methods when supporting older extension runtimes:
+
+```typescript
+if (typeof api.getPackageCapability === 'function') {
+    const support = await api.getPackageCapability(environment, 'packages.direct');
+    if (!support.supported) {
+        // support.reason explains why this feature is unavailable.
+    }
+}
+```
+
+### Types and authoring
+
+`EnvironmentCapability` and `PackageCapability` are explicit string literal
+union types defining the allowed keys, independent of the default implementations.
+There are no separate runtime key arrays or objects.
+Maps and resolver/query parameters accept only the corresponding keys, not an
+arbitrary `string`. Default dictionaries must cover every union member and cannot
+introduce unlisted keys. JavaScript callers still receive an unsupported result
+for unknown runtime keys.
+
+```typescript
+type Support =
+    | { readonly supported: true }
+    | { readonly supported: false; readonly reason: string };
+
+interface CapabilityContext {
+    readonly scope?: CreateEnvironmentScope | GetEnvironmentsScope;
+    readonly environment?: PythonEnvironment;
+    readonly project?: PythonProject;
+}
+
+type CapabilityCheck = (context: CapabilityContext) => Promise<Support>;
+type Capabilities<C extends ManagerCapability> =
+    Readonly<Partial<Record<C, CapabilityCheck>>>;
+```
+
+Both manager contracts remain interfaces. Advertise only overrides through an
+optional `capabilities` property. For a class, use instance-field arrow functions
+so extracted checkers retain `this`; plain-object providers can use closures.
+No base class, constructor changes, or registration-time binding is needed:
+
+```typescript
+// Members of a PackageManager implementation:
+readonly capabilities: Capabilities<PackageCapability> = {
+    'packages.availableVersions': async (context) =>
+        this.checkVersionLookupSupport(context),
+    'packages.manage.upgrade': async (_context) => ({
+        supported: false,
+        reason: l10n.t('This manager does not support upgrading packages.'),
+    }),
+};
+```
+
+Use `resolvePackageManagerCapability(manager, capability, context?)` or
+`resolveEnvironmentManagerCapability(manager, capability, context?)` for a raw
+provider. Inside a checker, pass `this` and forward the received context unchanged
+when resolving a real prerequisite. This preserves cycle detection across
+bundled copies of the API. Independent concurrent queries are supported.
+
+Checks may inspect tool versions and contextual prerequisites, but must not
+install, delete, select, prompt, or invoke an operation to test it. Known
+limitations return unsupported; unexpected probe failures propagate. Results
+are not permanently cached. `createOptions` and other operation arguments are
+intentionally absent from the context.
+
+### External defaults
+
+The exported `defaultEnvironmentCapabilities` and `defaultPackageCapabilities`
+dictionaries are shared, read-only catalogs of async default functions. Default
+functions receive `(rawManager, context)`; manager-advertised functions receive
+only `(context)`. Do not copy defaults into each provider.
+
+The resolvers choose the advertised checker first, otherwise the dictionary
+entry, otherwise `{ supported: false, reason: "Capability not implemented" }`.
+An explicit unsupported result or thrown error never triggers fallback.
+Unknown runtime keys are unsupported.
+
+Required operations default supported. Optional hooks use raw method/event
+presence, not wrapper fallbacks. Existing option defaults resolve their parent,
+so a parent opt-out disables omitted child entries. Explicit child overrides
+are responsible for their own prerequisites.
+
+| Environment capability | Covered surface | Default when omitted |
+| --- | --- | --- |
+| `environments.list` | `getEnvironments` | Supported |
+| `environments.refresh` | `refresh` | Supported |
+| `environments.resolve` | `resolve`; target URI in `scope` | Supported |
+| `environments.getSelected` | `get` | Supported |
+| `environments.setSelected` | `set`, including clearing selection | Supported |
+| `environments.create` | `create` | Raw method exists |
+| `environments.create.quick` | `quickCreate` | Create supported and raw `quickCreateConfig` exists |
+| `environments.create.additionalPackages` | `additionalPackages` | Inherit create |
+| `environments.remove` | `remove` | Raw method exists |
+| `environments.remove.headless` | `runHeadless` | Inherit remove |
+| `environments.clearCache` | `clearCache` | Raw method exists |
+| `environments.events.changed` | `onDidChangeEnvironments` | Raw event exists |
+| `environments.events.selectionChanged` | `onDidChangeEnvironment` | Raw event exists |
+
+| Package capability | Covered surface | Default when omitted |
+| --- | --- | --- |
+| `packages.list` | `getPackages` | Supported |
+| `packages.list.skipCache` | `skipCache` | Inherit list |
+| `packages.refresh` | `refresh` | Supported |
+| `packages.manage` | `manage` | Supported |
+| `packages.manage.install` | `install` array | Inherit manage |
+| `packages.manage.uninstall` | `uninstall` array | Inherit manage |
+| `packages.manage.upgrade` | `upgrade` | Inherit install |
+| `packages.manage.headless` | `runHeadless` | Inherit manage |
+| `packages.manage.showSkipOption` | Interactive skip option | Inherit manage |
+| `packages.direct` | `getDirectPackageNames` / enrichment | Raw method exists |
+| `packages.version` | Tool version via `getVersion` | Raw method exists |
+| `packages.availableVersions` | `getPackageAvailableVersions` | Raw method exists |
+| `packages.formatInstallSpec` | Versioned install syntax | Supported via `name==version` fallback |
+| `packages.clearCache` | `clearCache` | Raw method exists |
+| `packages.watchTargets` | Custom `getPackageWatchTargets` | Raw method exists |
+| `packages.events.changed` | `onDidChangePackages` | Raw event exists |
+
+### Compatibility and built-in limitations
+
+Legacy presence/option defaults are deliberately optimistic. A method may still
+ignore an option or reject; explicit advertisements refine that compatibility
+inference. Legacy providers need not add a map or change inheritance.
+
+Venv and Conda support additional packages in quick creation only. Quick-path
+support does not certify a prompt-free invocation: venv dependency validation
+can require interaction. System Python creation prompts and ignores additional
+packages. Inline-script creation requires an applicable local script context.
+Headless removal permits progress/error UI; Conda and inline-script removal
+already need no confirmation.
+
+Pip version lookup depends on the selected backend and tool version (pip >=21.2;
+pip >=25.1 changes parsing, not the capability). Poetry version lookup, upgrade,
+and interactive skip are unsupported; project-sensitive checks use its scoped
+instance. Conda has no direct-name hook. Direct-package classification is
+best-effort, not exact installation intent; absent `isTransitive` remains unknown.
+
+Provider event keys describe provider hooks, not extension-generated events.
+Watch-target support means custom patterns, not general watching. Scope
+variants, package names, combined operation arguments, lifecycle (`dispose`),
+project binding (`createForProject`), metadata, and version lookup `errorMode`
+are not additional capabilities. Project CRUD, execution, environment variables,
+registration, and item factories remain extension services. Named creation is
+deferred. Command-level restrictions, including inline-script package editing,
+remain distinct from raw manager support.
 
 ## Compatibility guidance
 

@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri, window } from 'vscode';
+import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri, window } from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -17,6 +17,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentCapability } from '../../capabilities';
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -35,6 +36,17 @@ import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
 import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToInstall } from './uvPythonInstaller';
 
 export class SysPythonManager implements EnvironmentManager {
+    readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.create.quick': async () => ({
+            supported: false,
+            reason: l10n.t('Installing a global Python requires interactive version selection.'),
+        }),
+        'environments.create.additionalPackages': async () => ({
+            supported: false,
+            reason: l10n.t('Installing a global Python does not install additional packages.'),
+        }),
+    };
+
     private collection: PythonEnvironment[] = [];
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

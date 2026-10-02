@@ -32,6 +32,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
+import { Capabilities, EnvironmentCapability, resolveEnvironmentManagerCapability } from '../../../capabilities';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -280,6 +281,24 @@ interface SavedMetadataSnapshot {
 
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.create': async ({ scope }) => {
+            const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
+            if (!scriptUri) {
+                return {
+                    supported: false,
+                    reason: l10n.t('Inline-script creation requires exactly one local file URI.'),
+                };
+            }
+            return (await readInlineScriptMetadataFromFile(scriptUri))
+                ? { supported: true }
+                : { supported: false, reason: l10n.t('The script must contain valid PEP 723 metadata.') };
+        },
+        // Inline creation has a quick path even though it has no quickCreateConfig UI hook.
+        'environments.create.quick': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
+    };
+
     private readonly pendingSetups = new Map<string, Promise<PythonEnvironment | undefined>>();
     private readonly pendingCreations = new Map<string, PendingCreationContext>();
     private readonly directlyResolvedBaseInterpreters = new Map<string, PythonEnvironment>();
