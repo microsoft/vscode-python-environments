@@ -32,6 +32,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
+import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../../capabilities';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -88,6 +89,7 @@ import { PythonVersion } from '../../../common/pythonVersion';
 import { PythonVersionSpecifier, splitClause } from '../../../common/pythonVersionSpecifier';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import { getOpenTextDocuments, onDidDeleteFiles, onDidRenameFiles } from '../../../common/workspace.apis';
+import { environmentManagerCacheAndEventCapabilities } from '../../common/capabilityDeclarations';
 import { NativePythonFinder } from '../../common/nativePythonFinder';
 import { sortEnvironments } from '../../common/utils';
 import { resolveSystemPythonEnvironmentPath } from '../utils';
@@ -280,6 +282,31 @@ interface SavedMetadataSnapshot {
 
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        ...environmentManagerCacheAndEventCapabilities,
+        'environments.resolve': async () => ({
+            supported: false,
+            reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),
+        }),
+        'environments.remove': async () => ({ supported: true }),
+        'environments.create': async ({ scope }) => {
+            const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
+            if (!scriptUri) {
+                return {
+                    supported: false,
+                    reason: l10n.t('Inline-script creation requires exactly one local file URI.'),
+                };
+            }
+            // Read the bounded header afresh so saved metadata edits affect the next query.
+            return (await readInlineScriptMetadataFromFile(scriptUri))
+                ? { supported: true }
+                : { supported: false, reason: l10n.t('The script must contain valid PEP 723 metadata.') };
+        },
+        // Inline creation has a quick path even though it has no quickCreateConfig UI hook.
+        'environments.create.quick': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
+    };
+
     private readonly pendingSetups = new Map<string, Promise<PythonEnvironment | undefined>>();
     private readonly pendingCreations = new Map<string, PendingCreationContext>();
     private readonly directlyResolvedBaseInterpreters = new Map<string, PythonEnvironment>();

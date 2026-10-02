@@ -25,6 +25,7 @@ import {
     PythonEnvironmentApi,
     PythonProject,
 } from '../../api';
+import { Capabilities, PackageManagerCapability, Support } from '../../capabilities';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
 import { PackageManagerRequiresProjectError } from '../common/errors';
@@ -41,6 +42,34 @@ import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
+        'packages.version': async () => ({ supported: true }),
+        'packages.events.changed': async () => ({ supported: true }),
+        'packages.list': async () => this.checkProjectSupport(),
+        'packages.direct': async () => this.checkProjectSupport(),
+        'packages.manage': async () => this.checkProjectSupport(),
+        'packages.refresh': async () => this.checkProjectSupport(),
+        'packages.availableVersions': async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package version lookup is not supported by this extension.'),
+        }),
+        'packages.manage.upgrade': async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package management does not support the upgrade option.'),
+        }),
+        'packages.manage.showSkipOption': async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package management does not support the skip option.'),
+        }),
+    };
+
+    private checkProjectSupport(): Support {
+        if (!this.project) {
+            return { supported: false, reason: l10n.t('Poetry package management requires a project-bound manager.') };
+        }
+        return { supported: true };
+    }
+
     private readonly packagesChangedEmitter = new EventEmitter<DidChangePackagesEventArgs>();
     readonly onDidChangePackages: Event<DidChangePackagesEventArgs> = this.packagesChangedEmitter.event;
 

@@ -25,6 +25,7 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { environmentManagerCacheAndEventCapabilities } from '../common/capabilityDeclarations';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
 import {
@@ -41,6 +42,8 @@ import {
 } from './poetryUtils';
 
 export class PoetryManager implements EnvironmentManager, Disposable {
+    readonly capabilities = environmentManagerCacheAndEventCapabilities;
+
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

@@ -19,6 +19,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
 import { CondaStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -29,6 +30,7 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { environmentManagerCacheAndEventCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { notifyMissingManagerIfDefault } from '../common/utils';
@@ -53,6 +55,14 @@ import {
 } from './condaUtils';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        ...environmentManagerCacheAndEventCapabilities,
+        'environments.create': async () => ({ supported: true }),
+        'environments.remove': async () => ({ supported: true }),
+        'environments.create.quick': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
+    };
+
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

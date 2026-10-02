@@ -4,6 +4,11 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
 import { PackageVersionLookupNotSupportedError } from '../../publicErrors';
+import {
+    resolveEnvironmentManagerCapability,
+    resolvePackageManagerCapability,
+} from '../../capabilities';
+import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCapability, Support } from '../../capabilities';
 import { ISSUES_URL } from '../../common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from '../../common/errors/NotSupportedError';
 import { traceWarn } from '../../common/logging';
@@ -72,6 +77,11 @@ export class InternalEnvironmentManager implements EnvironmentManager {
 
     public get supportsCreate(): boolean {
         return this.manager.create !== undefined;
+    }
+
+    /** Resolves raw-provider advertisements and defaults, independently of operational fallbacks. */
+    public getCapability(capability: EnvironmentManagerCapability, context?: CapabilityContext): Promise<Support> {
+        return resolveEnvironmentManagerCapability(this.manager, capability, context);
     }
 
     create(
@@ -215,6 +225,15 @@ export class InternalPackageManager implements PackageManager {
     private readonly packageChangeEventValue: Event<DidChangePackagesEventArgs> | undefined;
     private isDisposed = false;
     public readonly createForProject?: (project: PythonProject) => InternalPackageManager;
+
+    /** Resolves support on this live raw instance, retaining any project-bound state. */
+    public getCapability(capability: PackageManagerCapability, context: CapabilityContext = {}): Promise<Support> {
+        this.throwIfDisposed();
+        return resolvePackageManagerCapability(this.manager, capability, {
+            ...context,
+            project: this.project ?? context.project,
+        });
+    }
 
     public constructor(
         public readonly id: string,

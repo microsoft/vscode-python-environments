@@ -23,6 +23,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { Capabilities, PackageManagerCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -49,6 +50,14 @@ import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
+        'packages.version': async () => ({ supported: true }),
+        'packages.events.changed': async () => ({ supported: true }),
+        'packages.availableVersions': async () => ({ supported: true }),
+        // Dependency roots are best-effort classification, not exact user install intent.
+        'packages.direct': async () => ({ supported: true }),
+    };
+
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 

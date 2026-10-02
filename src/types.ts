@@ -12,6 +12,13 @@
 
 import type { Pep440Version } from '@renovatebot/pep440';
 import type {
+    Capabilities,
+    CapabilityContext,
+    EnvironmentManagerCapability,
+    PackageManagerCapability,
+    Support,
+} from './capabilities.js';
+import type {
     Disposable,
     Event,
     FileChangeType,
@@ -372,6 +379,14 @@ export interface RemoveEnvironmentOptions {
  */
 export interface EnvironmentManager {
     /**
+     * Dynamic support overrides. Missing entries use the external environment capability defaults.
+     * Optional methods/events default to raw hook availability; existing options inherit parent support.
+     * Quick creation additionally requires the raw create and quickCreateConfig hooks unless advertised.
+     * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
+     */
+    readonly capabilities?: Capabilities<EnvironmentManagerCapability>;
+
+    /**
      * The name of the environment manager. Allowed characters (a-z, A-Z, 0-9, -, _).
      */
     readonly name: string;
@@ -649,6 +664,14 @@ export interface DidChangePackagesEventArgs {
  * Interface representing a package manager.
  */
 export interface PackageManager {
+    /**
+     * Dynamic support overrides. Missing entries use the external package capability defaults.
+     * Optional methods/events default to raw hook availability; existing options inherit parent support.
+     * Advertise unsupported stubs and context/tool restrictions explicitly to refine these defaults.
+     * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
+     */
+    readonly capabilities?: Capabilities<PackageManagerCapability>;
+
     /**
      * The name of the package manager. Allowed characters (a-z, A-Z, 0-9, -, _).
      */
@@ -1084,6 +1107,23 @@ export interface PythonEnvironmentManagementApi {
 
 export interface PythonEnvironmentsApi {
     /**
+     * Queries one explicitly identified manager without picking or aggregating managers.
+     * Only currently registered managers are queried; no activation or registration wait occurs.
+     * @param managerId Registered environment-manager ID.
+     * @param capability Feature to query; general support does not validate operation arguments.
+     * @param context Optional scope/environment/project. An environment must belong to managerId.
+     * @returns Support, or a reason when the manager is missing or the feature unsupported.
+     * Unavailable managers can be queried again after registration.
+     * Unexpected lookup/probe errors and contradictory manager arguments reject.
+     * Feature-detect this method when supporting older installed extension runtimes.
+     */
+    getEnvironmentManagerCapability(
+        managerId: string,
+        capability: EnvironmentManagerCapability,
+        context?: CapabilityContext,
+    ): Promise<Support>;
+
+    /**
      * Initiates a refresh of Python environments within the specified scope.
      * @param scope - The scope within which to search for environments.
      * @returns A promise that resolves when the search is complete.
@@ -1174,6 +1214,23 @@ export interface GetPackageAvailableVersionsOptions {
 }
 
 export interface PythonPackageGetterApi {
+    /**
+     * Queries the package manager selected for an environment or explicit project, without prompting.
+     * Only currently registered managers are queried; no activation or registration wait occurs.
+     * @param environment Environment used for the support check and default manager routing.
+     * @param capability Feature to query; support does not guarantee a particular request succeeds.
+     * @param project Explicit project for project-specific manager selection. If omitted, existing
+     * routing must identify a unique project when the selected manager requires one.
+     * @returns Support, or a reason when routing is unresolved/ambiguous or the feature unsupported.
+     * Unavailable managers can be queried again after registration.
+     * Unexpected lookup/probe errors reject. Feature-detect on older extension runtimes.
+     */
+    getPackageManagerCapability(
+        environment: PythonEnvironment,
+        capability: PackageManagerCapability,
+        project?: PythonProject,
+    ): Promise<Support>;
+
     /**
      * Refresh the list of packages in a Python Environment.
      *

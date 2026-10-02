@@ -24,6 +24,7 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { environmentManagerCacheAndEventCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { notifyMissingManagerIfDefault } from '../common/utils';
@@ -40,6 +41,8 @@ import {
 } from './pipenvUtils';
 
 export class PipenvManager implements EnvironmentManager, Disposable {
+    readonly capabilities = environmentManagerCacheAndEventCapabilities;
+
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

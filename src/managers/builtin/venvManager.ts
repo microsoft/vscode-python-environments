@@ -20,6 +20,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
 import { executeCommand } from '../../common/command.api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
@@ -29,6 +30,7 @@ import { normalizePath } from '../../common/utils/pathUtils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
+import { environmentManagerCacheAndEventCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
@@ -51,6 +53,14 @@ import {
 } from './venvUtils';
 
 export class VenvManager implements EnvironmentManager {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        ...environmentManagerCacheAndEventCapabilities,
+        'environments.create': async () => ({ supported: true }),
+        'environments.remove': async () => ({ supported: true }),
+        'environments.create.quick': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
+    };
+
     private collection: PythonEnvironment[] = [];
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

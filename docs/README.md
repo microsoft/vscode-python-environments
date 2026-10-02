@@ -16,6 +16,8 @@ Use this manual to:
 The runtime facade is [`src/api.ts`](../src/api.ts). The authoritative public
 contracts are in [`src/types.ts`](../src/types.ts), with public errors and type
 guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
+Capability types, catalogs, default dictionaries, and raw-provider resolvers are
+in [`src/capabilities.ts`](../src/capabilities.ts).
 
 > [!IMPORTANT]
 > The API is flat. Call `api.getEnvironments()`, not
@@ -46,6 +48,7 @@ guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
     - [Extensibility data types](#extensibility-data-types)
     - [Extensibility methods](#extensibility-methods)
 - [API interface groups](#api-interface-groups)
+- [Manager capabilities](#manager-capabilities)
 - [Compatibility guidance](#compatibility-guidance)
 - [Related documentation](#related-documentation)
 
@@ -1552,6 +1555,7 @@ trigger, as the specification.
 | `name` | `string` | Yes | Manager name. Allowed characters: `a-z`, `A-Z`, `0-9`, `-`, `_`. |
 | `displayName` | `string` | No | Name shown in the UI. |
 | `preferredPackageManagerId` | `string` | Yes | Package manager to pair with, formatted `<publisher>.<extension>:<manager-name>`, for example `ms-python.python:pip`. |
+| `capabilities` | `Capabilities<EnvironmentManagerCapability>` | No | Dynamic support overrides; omitted entries use the [external defaults](#manager-capabilities). |
 | `description` | `string` | No | Secondary text shown in the UI. |
 | `tooltip` | `string \| MarkdownString` | No | Hover text for the manager. |
 | `iconPath` | [`IconPath`](#iconpath) | No | Icon shown for the manager. |
@@ -1620,6 +1624,7 @@ Reports and changes the packages of an environment.
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
 | `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
+| `capabilities` | `Capabilities<PackageManagerCapability>` | No | Dynamic support overrides evaluated on the correct project-bound instance; see [capabilities](#manager-capabilities). |
 | `dispose()` | `() => void` | No | Releases resources owned by the manager. The extension disposes project-scoped managers when their project is removed or replaced, their provider is unregistered, or the extension shuts down. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
@@ -1818,13 +1823,13 @@ directly on the single flat API object.
 
 | Interface | Members grouped by the interface | Description |
 | --- | --- | --- |
-| `PythonEnvironmentsApi` | Environment discovery and resolution | Lists and refreshes discovered environments, resolves environment URIs, and reports discovery changes. |
+| `PythonEnvironmentsApi` | Environment discovery, resolution, and capabilities | Lists and refreshes discovered environments, resolves environment URIs, queries manager support, and reports discovery changes. |
 | `PythonProjectEnvironmentApi` | Selected environment get/set | Reads, updates, and observes the selected environment for URI or global scopes. |
 | `PythonEnvironmentManagementApi` | Environment creation/removal | Creates and removes environments through their associated environment managers. |
 | `PythonEnvironmentItemApi` | Environment item creation | Converts provider-supplied environment information into an identified `PythonEnvironment`. |
 | `PythonEnvironmentManagerRegistrationApi` | Environment manager registration | Registers an `EnvironmentManager` implementation with the extension. |
 | `PythonEnvironmentManagerApi` | Combined environment API | Combines environment registration, item creation, lifecycle, discovery, and selection interfaces. |
-| `PythonPackageGetterApi` | Package retrieval and version lookup | Retrieves and refreshes packages, looks up available versions, and reports package changes. |
+| `PythonPackageGetterApi` | Package retrieval, version lookup, and capabilities | Retrieves and refreshes packages, looks up available versions, queries routed manager support, and reports package changes. |
 | `PythonPackageManagementApi` | Package installation/removal | Installs, upgrades, or uninstalls packages in an environment. |
 | `PythonPackageItemApi` | Package item creation | Converts provider-supplied package information into an identified `Package`. |
 | `PythonPackageManagerRegistrationApi` | Package manager registration | Registers a `PackageManager` implementation with the extension. |
@@ -1840,6 +1845,120 @@ directly on the single flat API object.
 | `PythonExecutionApi` | Combined execution API | Combines terminal creation, terminal execution, task execution, and background execution. |
 | `PythonEnvironmentVariablesApi` | Environment variable lookup/events | Resolves effective environment variables and reports source changes. |
 | `PythonEnvironmentApi` | Complete flat public API | Combines all environment, package, project, execution, and environment-variable APIs exposed at runtime. |
+
+## Manager capabilities
+
+Capabilities report whether an environment or package manager generally supports
+an operation. They are advisory: they do not validate one request, guarantee that
+an operation succeeds, or change operation dispatch and errors.
+
+### Querying support
+
+```typescript
+getEnvironmentManagerCapability(
+    managerId: string,
+    capability: EnvironmentManagerCapability,
+    context?: CapabilityContext,
+): Promise<Support>;
+
+getPackageManagerCapability(
+    environment: PythonEnvironment,
+    capability: PackageManagerCapability,
+    project?: PythonProject,
+): Promise<Support>;
+```
+
+Environment queries target one explicit manager, without picking or aggregating
+managers. Package queries follow existing manager selection and project-scoped
+routing. Queries use currently registered managers without activating extensions,
+waiting for registration, or prompting. Missing managers and ambiguous routing
+return `{ supported: false, reason }`; probe failures reject.
+
+Feature-detect the query methods when supporting older extension runtimes:
+
+```typescript
+if (typeof api.getPackageManagerCapability === 'function') {
+    const support = await api.getPackageManagerCapability(environment, 'packages.direct');
+    if (!support.supported) {
+        // support.reason explains why this feature is unavailable.
+    }
+}
+```
+
+### Advertising manager support
+
+Managers remain interfaces. Their optional `capabilities` map contains only
+overrides; omitted entries use the defaults below. Checks receive
+`CapabilityContext` and return `Promise<Support>`.
+
+```typescript
+// Members of a PackageManager implementation:
+readonly capabilities: Capabilities<PackageManagerCapability> = {
+    'packages.availableVersions': async (context) => this.checkVersionLookupSupport(context),
+    'packages.manage.upgrade': async (_context) => ({
+        supported: false,
+        reason: l10n.t('This manager does not support upgrading packages.'),
+    }),
+};
+```
+
+To change one manager:
+
+- **Add an override** when its support differs from the default or depends on
+  context or tool state.
+- **Remove an override** to restore the default. Removing an entry does not mean
+  unsupported.
+- **Disable support** with an explicit `{ supported: false, reason }` result.
+- Keep checks read-only and noninteractive. Do not invoke the operation to test
+  it. Let unexpected probe errors reject.
+- When one check depends on another, call
+  `resolveEnvironmentManagerCapability` or `resolvePackageManagerCapability` and
+  forward the received context unchanged.
+
+Built-in environment managers share cache and event declarations from
+`src/managers/common/capabilityDeclarations.ts`; manager-specific overrides stay
+on the manager class.
+
+### Defaults
+
+The exported `defaultEnvironmentCapabilities` and
+`defaultPackageCapabilities` dictionaries are the source of truth. Required
+operations default supported. The optional methods and events listed under
+**Raw hook** follow raw hook presence. Option capabilities inherit their parent
+unless explicitly overridden; install-spec formatting uses an extension fallback.
+
+| Default | Environment capabilities |
+| --- | --- |
+| Supported | `environments.list`, `environments.refresh`, `environments.resolve`, `environments.getSelected`, `environments.setSelected` |
+| Raw hook | `environments.create`, `environments.remove`, `environments.clearCache`, `environments.events.changed`, `environments.events.selectionChanged` |
+| Inherited | `environments.create.additionalPackages` from `environments.create`; `environments.remove.headless` from `environments.remove` |
+| Special | `environments.create.quick` requires raw `create` and `quickCreateConfig`, then inherits `environments.create` |
+
+| Default | Package capabilities |
+| --- | --- |
+| Supported | `packages.list`, `packages.refresh`, `packages.manage`, `packages.formatInstallSpec` |
+| Raw hook | `packages.direct`, `packages.version`, `packages.availableVersions`, `packages.clearCache`, `packages.watchTargets`, `packages.events.changed` |
+| Inherited | `packages.list.skipCache` from `packages.list`; install, uninstall, headless, and show-skip from `packages.manage`; upgrade from `packages.manage.install` |
+
+Legacy providers do not need a capability map. Advertisements must be plain
+objects whose values are checker functions or `undefined`; malformed maps reject.
+Unknown runtime keys are unsupported.
+
+### Adding or removing catalog capabilities
+
+Capability key types are derived from the default dictionary keys. To add a
+public capability:
+
+1. Add a documented entry to the appropriate default dictionary in
+   `src/capabilities.ts`.
+2. Choose a backward-compatible default. New behavior should default unsupported
+   unless an existing contract or fallback proves support.
+3. Add manager overrides only where the default is inaccurate.
+4. Update capability tests and this summary.
+
+Removing a key from a manager map only removes that manager's override. Removing
+a key from a default dictionary removes it from the public type union and is a
+breaking API change; deprecate it first and remove it only in a major release.
 
 ## Compatibility guidance
 
