@@ -14,7 +14,6 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentManagerCapability } from '../../capabilities';
 import { PipenvStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -26,6 +25,7 @@ import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
 import { getConfiguration } from '../../common/workspace.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { environmentManagerCacheAndEventCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonEnvironmentKind, NativePythonFinder } from '../common/nativePythonFinder';
 import { notifyMissingManagerIfDefault } from '../common/utils';
@@ -47,11 +47,7 @@ import {
 } from './pipenvUtils';
 
 export class PipenvManager implements EnvironmentManager, Disposable {
-    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
-        'environments.clearCache': async () => ({ supported: true }),
-        'environments.events.changed': async () => ({ supported: true }),
-        'environments.events.selectionChanged': async () => ({ supported: true }),
-    };
+    readonly capabilities = environmentManagerCacheAndEventCapabilities;
 
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();

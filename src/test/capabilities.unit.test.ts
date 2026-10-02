@@ -188,6 +188,31 @@ suite('Manager capabilities', () => {
             }
         });
 
+        test('malformed capability maps reject instead of silently using defaults', async () => {
+            for (const value of [null, true, [], () => {}]) {
+                const env = environmentManager();
+                const pkg = packageManager();
+                Reflect.set(env, 'capabilities', value);
+                Reflect.set(pkg, 'capabilities', value);
+                await assert.rejects(
+                    environmentCapability(env, 'environments.list'),
+                    (error) => error instanceof TypeError && error.message.includes('capabilities'),
+                );
+                await assert.rejects(
+                    packageCapability(pkg, 'packages.list'),
+                    (error) => error instanceof TypeError && error.message.includes('capabilities'),
+                );
+            }
+        });
+
+        test('capability maps with a null prototype are supported', async () => {
+            const capabilities = Object.create(null);
+            capabilities['packages.list'] = async () => denied;
+            const manager = packageManager();
+            Reflect.set(manager, 'capabilities', capabilities);
+            assert.strictEqual(await packageCapability(manager, 'packages.list'), denied);
+        });
+
         test('environment overrides win in either direction; omitted entries keep defaults', async () => {
             const manager = environmentManager({
                 capabilities: {
@@ -333,6 +358,25 @@ suite('Manager capabilities', () => {
                 capabilities: { 'packages.list': (context) => packageCapability(other, 'packages.list', context) },
             });
             assert.deepStrictEqual(await packageCapability(manager, 'packages.list'), supported);
+        });
+
+        test('package wrappers preserve dependency ancestry while adding project context', async () => {
+            const project = { name: 'project', uri: Uri.file('.') };
+            let wrapper: InternalPackageManager;
+            const manager = packageManager({
+                capabilities: {
+                    'packages.manage': (context) => wrapper.getCapability('packages.manage.install', context),
+                },
+            });
+            wrapper = new InternalPackageManager('test:packages', manager, project);
+            try {
+                await assert.rejects(
+                    wrapper.getCapability('packages.manage'),
+                    /packages.manage -> packages.manage.install -> packages.manage/,
+                );
+            } finally {
+                wrapper.dispose();
+            }
         });
 
         test('disposed package wrappers reject capability queries', () => {
