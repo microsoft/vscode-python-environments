@@ -4,7 +4,7 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { It, Mock } from 'typemoq';
-import { Disposable, EventEmitter, Extension, Uri } from 'vscode';
+import { Disposable, EventEmitter, Uri } from 'vscode';
 import type {
     DidChangeEnvironmentVariablesEventArgs,
     EnvironmentManager,
@@ -16,15 +16,7 @@ import type { CapabilityContext, Support } from '../capabilities';
 import * as extensionApis from '../common/extension.apis';
 import * as frameUtils from '../common/utils/frameUtils';
 import * as windowApis from '../common/window.apis';
-import { createDeferred } from '../common/utils/deferred';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
-import {
-    _resetManagerReadyForTesting,
-    createManagerReady,
-    MANAGER_READY_TIMEOUT_MS,
-    waitForEnvManagerId,
-    waitForManagerForQuery,
-} from '../features/common/managerReady';
 import { PythonEnvironmentManagers } from '../features/envManagers';
 import type { PythonProjectManager } from '../features/projectManager';
 import * as settings from '../features/settings/settingHelpers';
@@ -58,7 +50,6 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
 
     setup(() => {
         clock = sinon.useFakeTimers();
-        _resetManagerReadyForTesting();
         disposables = [];
         projects = [project];
         getExtension = sinon.stub(extensionApis, 'getExtension').returns(undefined);
@@ -95,12 +86,15 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     });
 
     teardown(() => {
-        managers.dispose();
-        disposables.forEach((item) => item.dispose());
-        assert.ok((windowApis.showErrorMessage as sinon.SinonStub).notCalled);
-        assert.ok((windowApis.showQuickPick as sinon.SinonStub).notCalled);
-        sinon.restore();
-        _resetManagerReadyForTesting();
+        try {
+            managers.dispose();
+            disposables.forEach((item) => item.dispose());
+            assert.ok((windowApis.showErrorMessage as sinon.SinonStub).notCalled);
+            assert.ok((windowApis.showQuickPick as sinon.SinonStub).notCalled);
+            assert.ok(getExtension.notCalled);
+        } finally {
+            sinon.restore();
+        }
     });
 
     function registerOwner(): Disposable {
@@ -134,66 +128,30 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         return create;
     }
 
-    function installedExtension(activate: () => Promise<void>): void {
-        const extension = Mock.ofType<Extension<void>>();
-        extension.setup((e) => e.isActive).returns(() => false);
-        extension.setup((e) => e.activate()).returns(activate);
-        getExtension.returns(extension.object);
-    }
-
-    test('queries only the explicit environment manager before readiness initialization', async () => {
+    test('queries only the explicit registered environment manager', async () => {
         registerOwner();
         const context = { environment, project, scope: project.uri };
         assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, 'environments.list', context), {
             supported: true,
         });
         assert.ok(envProbe.calledOnceWithExactly(context));
-        assert.ok(getExtension.notCalled);
     });
 
-    test('rejects contradictory environment ownership before waiting or probing', async () => {
+    test('rejects contradictory environment ownership before probing', async () => {
         registerOwner();
         await assert.rejects(api.getEnvironmentManagerCapability('other:manager', 'environments.list', { environment }));
         assert.ok(envProbe.notCalled);
-        assert.ok(getExtension.notCalled);
     });
 
-    test('missing environment manager returns a reason after a noninteractive bounded wait', async () => {
-        const pending = api.getEnvironmentManagerCapability(ownerId, 'environments.list');
-        await clock.tickAsync(MANAGER_READY_TIMEOUT_MS);
-        const support = await pending;
+    test('missing environment manager is unavailable immediately and can be queried after registration', async () => {
+        const support = await api.getEnvironmentManagerCapability(ownerId, 'environments.list');
         assert.ok(!support.supported && support.reason.includes(ownerId));
-        assert.strictEqual(clock.countTimers(), 0);
-    });
-
-    test('waits for pending environment registration', async () => {
-        const pending = api.getEnvironmentManagerCapability(ownerId, 'environments.list');
-        await clock.tickAsync(1);
-        registerOwner();
-        assert.deepStrictEqual(await pending, { supported: true });
-        assert.strictEqual(clock.countTimers(), 0);
-    });
-
-    test('activation failures reject even when the extension registers before rejecting', async () => {
-        const failure = new Error('activation failed');
-        installedExtension(async () => {
-            registerOwner();
-            throw failure;
-        });
-        await assert.rejects(api.getEnvironmentManagerCapability(ownerId, 'environments.list'), (error) => error === failure);
         assert.ok(envProbe.notCalled);
         assert.strictEqual(clock.countTimers(), 0);
-    });
-
-    test('a hung activation is bounded and a later query sees registration', async () => {
-        const activation = createDeferred<void>();
-        installedExtension(() => activation.promise);
-        const pending = api.getEnvironmentManagerCapability(ownerId, 'environments.list');
-        await clock.tickAsync(MANAGER_READY_TIMEOUT_MS);
-        assert.strictEqual((await pending).supported, false);
         registerOwner();
-        assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, true);
-        activation.resolve();
+        assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, 'environments.list'), {
+            supported: true,
+        });
     });
 
     test('environment probes reject without converting the error to unsupported', async () => {
@@ -222,7 +180,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(selectedEnvironment.notCalled);
     });
 
-    test('explicit project selects its configured scoped provider without waiting for the owner', async () => {
+    test('explicit project selects its configured scoped provider without a registered owner', async () => {
         configuredPackage.returns(`${extensionId}:configured`);
         const create = registerPackages(true, 'configured');
         assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, true);
@@ -230,39 +188,40 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.strictEqual(pkgProbe.firstCall.args[0].project, project);
         assert.strictEqual(pkgProbe.firstCall.args[0].environment, environment);
         assert.ok(configuredPackage.calledWithExactly(projectManager, project.uri));
-        assert.ok(getExtension.notCalled);
     });
 
-    test('explicit project waits for its configured provider rather than the preferred root', async () => {
+    test('explicit project is unavailable until its configured provider registers', async () => {
+        registerOwner();
+        registerPackages();
         configuredPackage.returns(`${extensionId}:configured`);
-        const pending = api.getPackageManagerCapability(environment, 'packages.list', project);
-        await clock.tickAsync(1);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, false);
+        assert.ok(pkgProbe.notCalled);
         registerPackages(true, 'configured');
-        assert.strictEqual((await pending).supported, true);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list', project)).supported, true);
         assert.strictEqual(pkgProbe.firstCall.args[0].project, project);
     });
 
-    test('environment routing infers a unique project and waits for its different configured provider', async () => {
+    test('environment routing infers a unique project and selects its different configured provider', async () => {
         registerOwner();
         const preferredFactory = registerPackages(true);
         configuredPackage.returns(`${extensionId}:configured`);
-        const pending = api.getPackageManagerCapability(environment, 'packages.list');
-        await clock.tickAsync(1);
-        assert.ok(pkgProbe.notCalled);
         const configuredFactory = registerPackages(true, 'configured');
-        assert.strictEqual((await pending).supported, true);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list')).supported, true);
         assert.ok(preferredFactory?.notCalled);
         assert.ok(configuredFactory?.calledOnceWithExactly(project));
         assert.strictEqual(pkgProbe.firstCall.args[0].project, project);
     });
 
-    test('waits for both the owning environment manager and its preferred package manager', async () => {
-        const pending = api.getPackageManagerCapability(environment, 'packages.list');
-        await clock.tickAsync(1);
+    test('environment-only package queries are unavailable until both providers register', async () => {
+        const support = await api.getPackageManagerCapability(environment, 'packages.list');
+        assert.ok(!support.supported && support.reason.length > 0);
+        assert.strictEqual(clock.countTimers(), 0);
         registerOwner();
-        await clock.tickAsync(1);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list')).supported, false);
+        assert.strictEqual(clock.countTimers(), 0);
+        assert.ok(pkgProbe.notCalled);
         registerPackages();
-        assert.strictEqual((await pending).supported, true);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list')).supported, true);
     });
 
     for (const matchingProjects of [0, 2]) {
@@ -291,19 +250,9 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         registerOwner();
         const create = registerPackages(true);
         configuredPackage.returns(`${extensionId}:missing`);
-        const pending = api.getPackageManagerCapability(environment, 'packages.list');
-        await clock.tickAsync(MANAGER_READY_TIMEOUT_MS);
-        assert.strictEqual((await pending).supported, false);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, 'packages.list')).supported, false);
         assert.ok(create?.notCalled);
         assert.ok(pkgProbe.notCalled);
-    });
-
-    test('package activation failures reject', async () => {
-        const failure = new Error('package activation failed');
-        installedExtension(async () => {
-            throw failure;
-        });
-        await assert.rejects(api.getPackageManagerCapability(environment, 'packages.list', project), (e) => e === failure);
     });
 
     test('package probe failures reject', async () => {
@@ -332,62 +281,18 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(pkgProbe.notCalled);
     });
 
-    test('readiness errors reject', async () => {
+    test('registry lookup errors reject', async () => {
         const failure = new Error('registry lookup failed');
         sinon.stub(managers, 'getEnvironmentManager').throws(failure);
         await assert.rejects(api.getEnvironmentManagerCapability(ownerId, 'environments.list'), (e) => e === failure);
     });
 
-    test('query timeout does not complete a later operational readiness wait', async () => {
-        createManagerReady(managers, projectManager, disposables);
-        const pending = api.getEnvironmentManagerCapability(ownerId, 'environments.list');
-        await clock.tickAsync(MANAGER_READY_TIMEOUT_MS);
-        assert.strictEqual((await pending).supported, false);
-        let ready = false;
-        const operation = waitForEnvManagerId([ownerId]).then(() => {
-            ready = true;
-        });
-        await clock.tickAsync(1);
-        assert.strictEqual(ready, false);
-        registerOwner();
-        await operation;
-        assert.strictEqual(ready, true);
-    });
-
-    test('unregistering during activation never probes a stale provider', async () => {
-        installedExtension(async () => {
-            registerOwner().dispose();
-        });
+    test('unregistered environment managers are unavailable rather than cached', async () => {
+        const registration = registerOwner();
+        assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, true);
+        envProbe.resetHistory();
+        registration.dispose();
         assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, false);
         assert.ok(envProbe.notCalled);
-    });
-
-    test('a registration event followed by disposal does not report a stale manager ready', async () => {
-        const pending = waitForManagerForQuery(managers, ownerId, 'environment');
-        await clock.tickAsync(1);
-        registerOwner().dispose();
-        assert.strictEqual(await pending, false);
-    });
-
-    test('an unregistration event alone does not complete a query wait', async () => {
-        const registration = registerOwner();
-        registration.dispose();
-        let completed = false;
-        const pending = waitForManagerForQuery(managers, ownerId, 'environment').then((ready) => {
-            completed = true;
-            return ready;
-        });
-        await clock.tickAsync(1);
-        assert.strictEqual(completed, false);
-        registerOwner();
-        assert.strictEqual(await pending, true);
-    });
-
-    test('a disposed registry cannot leave a query waiting indefinitely', async () => {
-        const pending = waitForManagerForQuery(managers, ownerId, 'environment');
-        managers.dispose();
-        await clock.tickAsync(MANAGER_READY_TIMEOUT_MS);
-        assert.strictEqual(await pending, false);
-        assert.strictEqual(clock.countTimers(), 0);
     });
 });

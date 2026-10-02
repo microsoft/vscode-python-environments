@@ -52,6 +52,10 @@ later. Runtime preflight checks are not required to advertise general support.
 These compatibility defaults change discovery only, not existing operation
 dispatch, prompts, or UI gating.
 
+Queries use currently registered managers without activating extensions or
+waiting for registration. A missing manager returns unsupported with an
+unavailable reason immediately; a later query can succeed after registration.
+
 Consumers can query the selected package manager without invoking an operation:
 
 ```typescript

@@ -122,8 +122,6 @@ export interface EnvironmentManagers extends Disposable {
 
     getEnvironmentManager(scope: EnvironmentManagerScope): InternalEnvironmentManager | undefined;
     getPackageManager(scope: PackageManagerScope): InternalPackageManager | undefined;
-    /** Returns the routed provider ID even when that provider has not registered yet. */
-    getPackageManagerId(scope: Uri | PythonEnvironment): string | undefined;
 
     managers: InternalEnvironmentManager[];
     packageManagers: InternalPackageManager[];
@@ -460,27 +458,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
         const project = this.findUniqueProjectForEnvironment(context);
         return project ? this.getPackageManager(project.uri) : undefined;
-    }
-
-    /**
-     * Resolves the package provider to await without creating a scoped instance.
-     * @param scope A project URI or environment, using the same routing as getPackageManager.
-     * @returns The configured provider ID, or undefined for ambiguous project-scoped routing.
-     */
-    public getPackageManagerId(scope: Uri | PythonEnvironment): string | undefined {
-        if (scope instanceof Uri) {
-            return (
-                getDefaultPkgManagerSetting(this.pm, scope) ||
-                this._environmentManagers.get(getDefaultEnvManagerSetting(this.pm, scope))?.preferredPackageManagerId
-            );
-        }
-        const managerId = this._environmentManagers.get(scope.envId.managerId)?.preferredPackageManagerId;
-        const manager = managerId ? this._packageManagers.get(managerId) : undefined;
-        if (!manager?.createForProject) {
-            return managerId;
-        }
-        const project = this.findUniqueProjectForEnvironment(scope);
-        return project ? this.getPackageManagerId(project.uri) : undefined;
     }
 
     private findUniqueProjectForEnvironment(environment: PythonEnvironment): PythonProject | undefined {
