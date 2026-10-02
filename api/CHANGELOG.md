@@ -5,15 +5,13 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.6.0]
 
 ### Added
 
-- Optional dynamic `capabilities` maps on the existing `EnvironmentManager` and `PackageManager` interfaces. No inheritance or migration is required for legacy providers.
-- `Support`, `CapabilityContext`, typed capability keys/maps, and external default dictionaries covering 13 environment and 16 package capabilities. Capability key unions are derived from the dictionaries, which are the single source of truth for keys, descriptions, and defaults.
-- Required operations default supported; optional methods/events follow callable raw hook presence. Existing options inherit parent support, with quick creation additionally requiring raw `create` and `quickCreateConfig` hooks unless advertised. Install-spec formatting retains its extension fallback. Explicit overrides always take precedence, including built-in unsupported stubs. Runtime preflight refinements and stricter metadata validation are deferred.
-- `resolveEnvironmentManagerCapability` and `resolvePackageManagerCapability` for raw-provider support checks with shared defaults and prerequisite-cycle detection.
-- `getEnvironmentManagerCapability` and `getPackageManagerCapability` on the extension API for noninteractive, context-aware routed queries of currently registered managers. Queries do not activate extensions or wait for registration; unavailable managers can be queried again later. Queries are advisory: existing operations and error behavior remain unchanged. Feature-detect these methods on older installed extension runtimes.
+- Optional dynamic `capabilities` maps for environment and package managers, with typed keys, contextual checks, compatibility defaults, and prerequisite-cycle detection.
+- Raw-provider capability resolvers and routed extension API queries that report support without invoking manager operations or prompting.
+- Shared capability catalogs for 13 environment and 16 package features. Legacy providers retain inferred support without adding a capability map.
 
 ## [1.5.0]
 
