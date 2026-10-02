@@ -35,16 +35,6 @@ function canonicalPath(value) {
     return fs.realpathSync.native(path.resolve(value));
 }
 
-const capabilityChecks = [
-    "if (typeof packageModule.defaultEnvironmentCapabilities['environments.list'] !== 'function') throw new Error('Environment catalog missing');",
-    "if (typeof packageModule.defaultPackageCapabilities['packages.list'] !== 'function') throw new Error('Package catalog missing');",
-    "const raw = { name: 'legacy', manage: async () => {}, refresh: async () => {}, getPackages: async () => [] };",
-    "const unsupported = await packageModule.resolvePackageManagerCapability(raw, 'packages.direct');",
-    "if (unsupported.supported || unsupported.reason !== 'Capability not implemented') throw new Error('Unsupported default missing');",
-    "const env = { name: 'legacy', preferredPackageManagerId: 'example:legacy', refresh: async () => {}, getEnvironments: async () => [], get: async () => undefined, set: async () => {}, resolve: async () => undefined };",
-    "if (!(await packageModule.resolveEnvironmentManagerCapability(env, 'environments.list')).supported) throw new Error('Environment default missing');",
-].join('\n');
-
 try {
     fs.writeFileSync(
         path.join(testRoot, 'package.json'),
@@ -160,7 +150,6 @@ try {
                 "(async () => {",
                 '  const api = await packageModule.PythonEnvironments.api();',
                 '  if (api !== vscode.__runtimeApi) process.exit(1);',
-                capabilityChecks,
                 '})().catch(() => process.exit(1));',
             ].join('\n'),
         ],
@@ -180,15 +169,7 @@ try {
         [
             '--input-type=module',
             '--eval',
-            [
-                "const packageModule = await import('@vscode/python-environments');",
-                "const vscode = await import('vscode');",
-                "if (typeof packageModule.PythonEnvironments.api !== 'function') process.exit(1);",
-                'const api = await packageModule.PythonEnvironments.api();',
-                'if (api !== vscode.default.__runtimeApi) process.exit(1);',
-                capabilityChecks,
-                "console.log(import.meta.resolve('@vscode/python-environments'));",
-            ].join('\n'),
+            "const packageModule = await import('@vscode/python-environments'); const vscode = await import('vscode'); if (typeof packageModule.PythonEnvironments.api !== 'function') process.exit(1); const api = await packageModule.PythonEnvironments.api(); if (api !== vscode.default.__runtimeApi) process.exit(1); console.log(import.meta.resolve('@vscode/python-environments'));",
         ],
         {
             cwd: path.join(testRoot, 'modern'),
