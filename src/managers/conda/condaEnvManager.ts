@@ -30,6 +30,7 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { environmentManagerCacheAndEventCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { notifyMissingManagerIfDefault } from '../common/utils';
@@ -55,11 +56,9 @@ import {
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        ...environmentManagerCacheAndEventCapabilities,
         'environments.create': async () => ({ supported: true }),
         'environments.remove': async () => ({ supported: true }),
-        'environments.clearCache': async () => ({ supported: true }),
-        'environments.events.changed': async () => ({ supported: true }),
-        'environments.events.selectionChanged': async () => ({ supported: true }),
         'environments.create.quick': async (context) =>
             resolveEnvironmentManagerCapability(this, 'environments.create', context),
     };
