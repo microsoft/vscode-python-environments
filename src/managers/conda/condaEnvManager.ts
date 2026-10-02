@@ -60,20 +60,8 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         'environments.clearCache': async () => ({ supported: true }),
         'environments.events.changed': async () => ({ supported: true }),
         'environments.events.selectionChanged': async () => ({ supported: true }),
-        'environments.create.quick': async (context) => {
-            const create = await resolveEnvironmentManagerCapability(this, 'environments.create', context);
-            if (!create.supported) {
-                return create;
-            }
-            const { scope } = context;
-            if (scope === 'global' || (Array.isArray(scope) && scope.length > 1)) {
-                return { supported: true };
-            }
-            const uri = scope instanceof Uri ? scope : Array.isArray(scope) ? scope[0] : undefined;
-            return uri && this.api.getPythonProject(uri)?.uri.fsPath
-                ? { supported: true }
-                : { supported: false, reason: l10n.t('Quick Conda creation requires a Python project location.') };
-        },
+        'environments.create.quick': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
     };
 
     private collection: PythonEnvironment[] = [];

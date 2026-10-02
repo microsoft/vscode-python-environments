@@ -2023,25 +2023,31 @@ Legacy providers need not add a map or change inheritance to keep existing
 operations working. Optional support follows their raw hooks unless overridden.
 Required operations, hook presence, and inherited options are compatibility
 inferences, not guarantees that a method honors every request or will succeed.
-Advertise unsupported stubs and contextual/tool restrictions explicitly.
+Advertise unsupported stubs explicitly; contextual/tool restrictions can be
+refined by future overrides without changing the capability API.
 Capability queries remain advisory: existing operation dispatch, synchronous
 support getters, prompts, and UI gating are unchanged.
 
 Venv and Conda support additional packages in quick creation only. Quick-path
 support does not certify a prompt-free invocation: venv dependency validation
 can require interaction. System Python creation prompts and ignores additional
-packages. Inline-script creation requires an applicable local script context;
-unexpected metadata I/O failures reject rather than being reported as invalid
-metadata. Conda quick support does not generate or reserve an environment name.
+packages. Venv and Conda advertise quick creation without preflighting the
+interpreter, project, or creation scope. Inline-script creation requires an
+applicable local script context and uses the existing best-effort metadata reader;
+stricter metadata validation and I/O error handling are deferred.
 Headless removal permits progress/error UI; Conda and inline-script removal
 already need no confirmation.
 Inline-script explicitly advertises quick creation without `quickCreateConfig`,
 and reports URI resolution unsupported because its `resolve` method is a stub.
 
-Pip version lookup depends on the selected backend and tool version (pip >=21.2;
-pip >=25.1 changes parsing, not the capability). Poetry version lookup, upgrade,
+Pip advertises its implemented lookup and direct-package hooks without probing
+tool versions, selecting a backend, or validating the executable. Operational
+requirements still apply (including pip >=21.2 for version lookup); a supported
+result is not a runtime readiness guarantee. Poetry version lookup, upgrade,
 and interactive skip are explicitly unsupported, even though its version-lookup
-method exists; project-sensitive checks use its scoped instance. Conda has no
+method exists; project-sensitive checks require a scoped instance but do not
+validate request project identity. Runtime preflight refinements are deferred.
+Conda has no
 direct-name hook. Direct-package classification is
 best-effort, not exact installation intent; absent `isTransitive` remains unknown.
 

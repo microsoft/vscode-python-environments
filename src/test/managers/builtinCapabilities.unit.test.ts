@@ -17,7 +17,6 @@ import {
 } from '../../capabilities';
 import * as childProcessApis from '../../common/childProcess.apis';
 import * as metadata from '../../common/inlineScript/metadata';
-import * as platformUtils from '../../common/utils/platformUtils';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import * as helpers from '../../managers/builtin/helpers';
@@ -95,14 +94,14 @@ suite('Built-in manager capabilities', () => {
     });
 
     for (const version of [undefined, '2.7.18', 'invalid', '3.12.0']) {
-        test(`venv quick creation requires global Python 3: ${version}`, async () => {
+        test(`venv quick support does not preflight the global Python version: ${version}`, async () => {
             const manager = venv();
             (manager as unknown as { globalEnv?: PythonEnvironment }).globalEnv = version
                 ? environment(version)
                 : undefined;
             const create = sinon.stub(manager, 'create').rejects(new Error('Unexpected creation'));
             const check = manager.capabilities['environments.create.quick']!;
-            assert.strictEqual((await check({ scope: 'global' })).supported, version === '3.12.0');
+            assert.deepStrictEqual(await check({ scope: 'global' }), { supported: true });
             // General support is independent of the quick-path prerequisite; only quick mode forwards packages.
             assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.additionalPackages'), {
                 supported: true,
@@ -136,7 +135,7 @@ suite('Built-in manager capabilities', () => {
         assert.ok(create.notCalled);
     });
 
-    test('Conda local quick creation needs a project, not a base Python or an operation probe', async () => {
+    test('Conda quick support does not preflight the project or creation scope', async () => {
         const manager = new CondaEnvManager({} as NativePythonFinder, api, log);
         disposables.push(manager);
         const create = sinon.stub(manager, 'create');
@@ -145,10 +144,10 @@ suite('Built-in manager capabilities', () => {
             supported: true,
         });
         (api.getPythonProject as sinon.SinonStub).returns(undefined);
-        assertUnsupported(await environmentCapability(manager, 'environments.create.quick', { scope: project.uri }));
-        for (const scope of [undefined, 'all', []] as CapabilityContext['scope'][]) {
-            assertUnsupported(await environmentCapability(manager, 'environments.create.quick', { scope }));
+        for (const scope of [project.uri, undefined, 'all', []] as CapabilityContext['scope'][]) {
+            assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.quick', { scope }), { supported: true });
         }
+        assert.ok((api.getPythonProject as sinon.SinonStub).notCalled);
         assert.deepStrictEqual(await environmentCapability(manager, 'environments.create.additionalPackages'), { supported: true });
         assert.deepStrictEqual(await environmentCapability(manager, 'environments.remove.headless'), { supported: true });
         assert.ok(create.notCalled && remove.notCalled);
@@ -206,7 +205,7 @@ suite('Built-in manager capabilities', () => {
             assert.deepStrictEqual(await environmentCapability(manager, 'environments.remove.headless'), { supported: true });
             assert.ok(create.notCalled && remove.notCalled && select.notCalled && stateUpdate.notCalled);
             assert.ok((api.getEnvironments as sinon.SinonStub).notCalled);
-            assert.ok(readMetadata.alwaysCalledWithExactly(script, { strict: true }));
+            assert.ok(readMetadata.alwaysCalledWithExactly(script));
         });
 
         test('invalid scopes and invalid metadata disable all creation variants', async () => {
@@ -228,17 +227,12 @@ suite('Built-in manager capabilities', () => {
         });
 
         for (const code of ['EACCES', 'EIO', 'ENOENT', 'ENOTDIR', 'EISDIR']) {
-            test(`real metadata reader handles ${code} during capability queries`, async () => {
+            test(`capability queries preserve the metadata reader's best-effort handling of ${code}`, async () => {
                 readMetadata.restore();
                 const error = Object.assign(new Error(`File open failed: ${code}`), { code });
                 const open = sinon.stub(fs, 'open').rejects(error);
                 for (const key of ['environments.create', 'environments.create.quick', 'environments.create.additionalPackages'] as const) {
-                    const result = environmentCapability(manager, key, { scope: script });
-                    if (code === 'EACCES' || code === 'EIO') {
-                        await assert.rejects(result, (failure) => failure === error);
-                    } else {
-                        assertUnsupported(await result);
-                    }
+                    assertUnsupported(await environmentCapability(manager, key, { scope: script }));
                 }
                 assert.strictEqual(open.callCount, 3);
                 assert.ok(open.alwaysCalledWithExactly(script.fsPath, 'r'));
@@ -247,47 +241,18 @@ suite('Built-in manager capabilities', () => {
         }
     });
 
-    for (const [version, supported] of [['21.1.3', false], ['21.2', true], ['21.2.0', true], ['25.0', true], ['25.1', true], ['26.0', true]] as const) {
-        test(`pip ${version} version lookup support is ${supported} without querying an index`, async () => {
-            const manager = pip();
-            sinon.stub(helpers, 'shouldUseUv').resolves(false);
-            const runPython = sinon.stub(helpers, 'runPython').resolves(`pip ${version} from pip (python 3.12)`);
-            const lookup = sinon.stub(manager, 'getPackageAvailableVersions');
-            assert.strictEqual((await packageCapability(manager, 'packages.availableVersions', { environment: environment() })).supported, supported);
-            assert.strictEqual(runPython.callCount, 1);
-            assert.deepStrictEqual(runPython.firstCall.args[1], ['-m', 'pip', '--version']);
-            assert.ok(lookup.notCalled);
-        });
-    }
-
-    test('uv backend bypasses pip version checks and never runs uv tool or index commands', async () => {
+    test('pip advertises lookup without probing tool versions or selecting a backend', async () => {
         const manager = pip();
-        const env = environment();
-        const useUv = sinon.stub(helpers, 'shouldUseUv').resolves(true);
-        const uvExecutable = sinon.stub(helpers, 'getUvExecutable').resolves('uv');
+        const useUv = sinon.stub(helpers, 'shouldUseUv');
+        const uvExecutable = sinon.stub(helpers, 'getUvExecutable');
         const runPython = sinon.stub(helpers, 'runPython');
         const runUv = sinon.stub(helpers, 'runUV');
-        assert.deepStrictEqual(await packageCapability(manager, 'packages.availableVersions', { environment: env }), { supported: true });
-        assert.ok(useUv.calledOnceWithExactly(log, env.environmentPath.fsPath));
-        assert.ok(uvExecutable.calledOnceWithExactly(log, env.environmentPath.fsPath));
-        assert.ok(runPython.notCalled && runUv.notCalled);
-        uvExecutable.resolves(undefined);
-        await assert.rejects(packageCapability(manager, 'packages.availableVersions', { environment: env }), /uv became unavailable/);
-    });
-
-    test('pip reports missing context and unknown versions but propagates unexpected probe failures', async () => {
-        const manager = pip();
-        const useUv = sinon.stub(helpers, 'shouldUseUv').resolves(false);
-        const runPython = sinon.stub(helpers, 'runPython').resolves('unknown');
+        const lookup = sinon.stub(manager, 'getPackageAvailableVersions');
         const missingExecutable = { ...environment(), execInfo: { run: { executable: '' } } };
-        for (const env of [undefined, missingExecutable, environment('invalid')]) {
-            assertUnsupported(await packageCapability(manager, 'packages.availableVersions', { environment: env }));
+        for (const env of [undefined, missingExecutable, environment('invalid'), environment()]) {
+            assert.deepStrictEqual(await packageCapability(manager, 'packages.availableVersions', { environment: env }), { supported: true });
         }
-        assert.ok(useUv.notCalled && runPython.notCalled);
-        assertUnsupported(await packageCapability(manager, 'packages.availableVersions', { environment: environment() }));
-        const failure = new Error('Python probe failed');
-        runPython.rejects(failure);
-        await assert.rejects(packageCapability(manager, 'packages.availableVersions', { environment: environment() }), (error) => error === failure);
+        assert.ok(useUv.notCalled && uvExecutable.notCalled && runPython.notCalled && runUv.notCalled && lookup.notCalled);
     });
 
     test('pip direct names remain best-effort and command-only inline restrictions are not capabilities', async () => {
@@ -298,11 +263,11 @@ suite('Built-in manager capabilities', () => {
         for (const key of ['packages.direct', 'packages.manage', 'packages.manage.headless', 'packages.manage.upgrade', 'packages.manage.showSkipOption', 'packages.list.skipCache'] as const) {
             assert.deepStrictEqual(await packageCapability(manager, key, { environment: env }), { supported: true });
         }
-        assertUnsupported(await packageCapability(manager, 'packages.direct'));
+        assert.deepStrictEqual(await packageCapability(manager, 'packages.direct'), { supported: true });
         assert.ok(direct.notCalled && manage.notCalled);
     });
 
-    test('Poetry closures require their own bound project and reject another project identity', async () => {
+    test('Poetry support uses its bound instance without validating request project identity', async () => {
         const manager = poetry();
         const first = manager.createForProject(project);
         const second = manager.createForProject(otherProject);
@@ -311,13 +276,11 @@ suite('Built-in manager capabilities', () => {
         for (const key of keys) {
             assertUnsupported(await packageCapability(manager, key, { project }));
             assert.deepStrictEqual(await packageCapability(first, key, { project }), { supported: true });
-            assertUnsupported(await packageCapability(first, key, { project: otherProject }));
+            assert.deepStrictEqual(await packageCapability(first, key, { project: otherProject }), { supported: true });
             assert.deepStrictEqual(await packageCapability(second, key, { project: otherProject }), { supported: true });
         }
         const extracted = first.capabilities['packages.list']!;
-        assert.deepStrictEqual(await extracted({ project: { ...project, uri: Uri.parse(project.uri.toString()) } }), { supported: true });
         assert.deepStrictEqual(await extracted({}), { supported: true });
-        assertUnsupported(await extracted({ project: otherProject }));
     });
 
     test('Poetry ignores neither unsupported options nor its throwing lookup hook during capability checks', async () => {
@@ -330,46 +293,6 @@ suite('Built-in manager capabilities', () => {
         }
         assert.deepStrictEqual(await packageCapability(manager, 'packages.formatInstallSpec'), { supported: true });
         assert.ok(lookup.notCalled && manage.notCalled);
-    });
-
-    for (const windows of [true, false]) {
-        test(`Poetry project identities respect ${windows ? 'Windows' : 'POSIX'} path casing`, async () => {
-            sinon.stub(platformUtils, 'isWindows').returns(windows);
-            const mixedCase = { ...project, uri: Uri.file(path.join(root, 'MixedCaseProject')) };
-            const manager = poetry().createForProject(mixedCase);
-            disposables.push(manager);
-            const otherCase = { ...mixedCase, uri: Uri.file(path.join(root, 'mixedcaseproject')) };
-            assert.strictEqual((await packageCapability(manager, 'packages.list', { project: otherCase })).supported, windows);
-            const equivalent = {
-                ...mixedCase,
-                uri: Uri.file(path.join(mixedCase.uri.fsPath, 'child', '..')),
-            };
-            assert.deepStrictEqual(await packageCapability(manager, 'packages.list', { project: equivalent }), { supported: true });
-            for (const uri of [
-                otherProject.uri,
-                mixedCase.uri.with({ scheme: 'vscode-remote' }),
-                mixedCase.uri.with({ authority: 'different-host' }),
-                mixedCase.uri.with({ query: 'revision=1' }),
-                mixedCase.uri.with({ fragment: 'different' }),
-            ]) {
-                assertUnsupported(await packageCapability(manager, 'packages.list', { project: { ...project, uri } }));
-            }
-        });
-    }
-
-    test('Poetry non-file project identities preserve URI casing, scheme and authority', async () => {
-        sinon.stub(platformUtils, 'isWindows').returns(true);
-        const remote = { ...project, uri: project.uri.with({ scheme: 'vscode-remote', authority: 'host', path: '/Project' }) };
-        const manager = poetry().createForProject(remote);
-        disposables.push(manager);
-        assert.deepStrictEqual(await packageCapability(manager, 'packages.list', { project: remote }), { supported: true });
-        for (const uri of [
-            remote.uri.with({ path: '/project' }),
-            remote.uri.with({ authority: 'other-host' }),
-            remote.uri.with({ scheme: 'other' }),
-        ]) {
-            assertUnsupported(await packageCapability(manager, 'packages.list', { project: { ...remote, uri } }));
-        }
     });
 
     test('Conda package advertisements preserve absent direct names and implemented lookup/watch hooks', async () => {
@@ -485,11 +408,7 @@ suite('Built-in manager capabilities', () => {
         }[] = [
             {
                 name: 'pip',
-                create: () => {
-                    sinon.stub(helpers, 'shouldUseUv').resolves(false);
-                    sinon.stub(helpers, 'runPython').resolves('pip 25.1 from pip (python 3.12)');
-                    return pip();
-                },
+                create: () => pip(),
                 supported: ['packages.direct', 'packages.version', 'packages.availableVersions', 'packages.formatInstallSpec', 'packages.events.changed'],
             },
             {

@@ -58,15 +58,8 @@ export class VenvManager implements EnvironmentManager {
         'environments.clearCache': async () => ({ supported: true }),
         'environments.events.changed': async () => ({ supported: true }),
         'environments.events.selectionChanged': async () => ({ supported: true }),
-        'environments.create.quick': async (context) => {
-            const create = await resolveEnvironmentManagerCapability(this, 'environments.create', context);
-            if (!create.supported) {
-                return create;
-            }
-            return this.globalEnv && PythonVersion.tryParse(this.globalEnv.version)?.major === 3
-                ? { supported: true }
-                : { supported: false, reason: l10n.t('Quick creation requires a global Python 3 environment.') };
-        },
+        'environments.create.quick': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
     };
 
     private collection: PythonEnvironment[] = [];

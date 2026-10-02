@@ -25,8 +25,7 @@ import {
     PythonEnvironmentApi,
     PythonProject,
 } from '../../api';
-import { Capabilities, CapabilityContext, PackageManagerCapability, Support } from '../../capabilities';
-import { normalizePath } from '../../common/utils/pathUtils';
+import { Capabilities, PackageManagerCapability, Support } from '../../capabilities';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
 import { PackageManagerRequiresProjectError } from '../common/errors';
@@ -46,10 +45,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         'packages.version': async () => ({ supported: true }),
         'packages.events.changed': async () => ({ supported: true }),
-        'packages.list': async (context) => this.checkProjectSupport(context),
-        'packages.direct': async (context) => this.checkProjectSupport(context),
-        'packages.manage': async (context) => this.checkProjectSupport(context),
-        'packages.refresh': async (context) => this.checkProjectSupport(context),
+        'packages.list': async () => this.checkProjectSupport(),
+        'packages.direct': async () => this.checkProjectSupport(),
+        'packages.manage': async () => this.checkProjectSupport(),
+        'packages.refresh': async () => this.checkProjectSupport(),
         'packages.availableVersions': async () => ({
             supported: false,
             reason: l10n.t('Poetry package version lookup is not supported by this extension.'),
@@ -64,23 +63,9 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         }),
     };
 
-    private checkProjectSupport(context: CapabilityContext): Support {
+    private checkProjectSupport(): Support {
         if (!this.project) {
             return { supported: false, reason: l10n.t('Poetry package management requires a project-bound manager.') };
-        }
-        if (context.project) {
-            const requested = context.project.uri;
-            const bound = this.project.uri;
-            const sameProject =
-                requested.scheme === 'file' && bound.scheme === 'file'
-                    ? requested.authority === bound.authority &&
-                      requested.query === bound.query &&
-                      requested.fragment === bound.fragment &&
-                      normalizePath(path.resolve(requested.fsPath)) === normalizePath(path.resolve(bound.fsPath))
-                    : requested.toString() === bound.toString();
-            if (!sameProject) {
-                return { supported: false, reason: l10n.t('The Poetry package manager is bound to a different project.') };
-            }
         }
         return { supported: true };
     }

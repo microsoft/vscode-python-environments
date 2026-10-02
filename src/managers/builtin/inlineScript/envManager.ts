@@ -298,7 +298,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                     reason: l10n.t('Inline-script creation requires exactly one local file URI.'),
                 };
             }
-            return (await readInlineScriptMetadataFromFile(scriptUri, { strict: true }))
+            return (await readInlineScriptMetadataFromFile(scriptUri))
                 ? { supported: true }
                 : { supported: false, reason: l10n.t('The script must contain valid PEP 723 metadata.') };
         },
