@@ -35,6 +35,20 @@ function canonicalPath(value) {
     return fs.realpathSync.native(path.resolve(value));
 }
 
+const capabilityChecks = [
+    "if (Object.keys(packageModule.defaultEnvironmentCapabilities).length !== 13) throw new Error('Environment catalog missing');",
+    "if (Object.keys(packageModule.defaultPackageCapabilities).length !== 16) throw new Error('Package catalog missing');",
+    "const raw = { name: 'legacy', manage: async () => {}, refresh: async () => {}, getPackages: async () => [] };",
+    "if (!(await packageModule.resolvePackageManagerCapability(raw, 'packages.list')).supported) throw new Error('Default missing');",
+    "const unsupported = await packageModule.resolvePackageManagerCapability(raw, 'packages.direct');",
+    "if (unsupported.supported || unsupported.reason !== 'Capability not implemented') throw new Error('Unsupported default missing');",
+    "raw.capabilities = { 'packages.manage': async () => ({ supported: false, reason: 'Disabled' }) };",
+    "if ((await packageModule.resolvePackageManagerCapability(raw, 'packages.manage.install')).supported) throw new Error('Parent opt-out ignored');",
+    "const env = { name: 'legacy', preferredPackageManagerId: 'example:legacy', refresh: async () => {}, getEnvironments: async () => [], get: async () => undefined, set: async () => {}, resolve: async () => undefined };",
+    "if (!(await packageModule.resolveEnvironmentManagerCapability(env, 'environments.list')).supported) throw new Error('Environment default missing');",
+    "if ((await packageModule.resolveEnvironmentManagerCapability(env, 'environments.create')).supported) throw new Error('Raw hook inference incorrect');",
+].join('\n');
+
 try {
     fs.writeFileSync(
         path.join(testRoot, 'package.json'),
@@ -94,6 +108,7 @@ try {
             "};",
             'exports.__runtimeApi = runtimeApi;',
             'exports.extensions = { getExtension: () => extension };',
+            'exports.l10n = { t: (message) => message };',
         ].join('\n'),
     );
     const installedPackageJson = JSON.parse(fs.readFileSync(path.join(installedPackageRoot, 'package.json'), 'utf8'));
@@ -149,6 +164,7 @@ try {
                 "(async () => {",
                 '  const api = await packageModule.PythonEnvironments.api();',
                 '  if (api !== vscode.__runtimeApi) process.exit(1);',
+                capabilityChecks,
                 '})().catch(() => process.exit(1));',
             ].join('\n'),
         ],
@@ -168,7 +184,15 @@ try {
         [
             '--input-type=module',
             '--eval',
-            "const packageModule = await import('@vscode/python-environments'); const vscode = await import('vscode'); if (typeof packageModule.PythonEnvironments.api !== 'function') process.exit(1); const api = await packageModule.PythonEnvironments.api(); if (api !== vscode.default.__runtimeApi) process.exit(1); console.log(import.meta.resolve('@vscode/python-environments'));",
+            [
+                "const packageModule = await import('@vscode/python-environments');",
+                "const vscode = await import('vscode');",
+                "if (typeof packageModule.PythonEnvironments.api !== 'function') process.exit(1);",
+                'const api = await packageModule.PythonEnvironments.api();',
+                'if (api !== vscode.default.__runtimeApi) process.exit(1);',
+                capabilityChecks,
+                "console.log(import.meta.resolve('@vscode/python-environments'));",
+            ].join('\n'),
         ],
         {
             cwd: path.join(testRoot, 'modern'),

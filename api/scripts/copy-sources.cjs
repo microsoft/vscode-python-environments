@@ -17,6 +17,7 @@ const sources = [
     { from: path.join(repoRoot, 'src', 'api.ts'), to: path.join(srcDir, 'main.ts') },
     { from: path.join(repoRoot, 'src', 'types.ts'), to: path.join(srcDir, 'types.ts') },
     { from: path.join(repoRoot, 'src', 'publicErrors.ts'), to: path.join(srcDir, 'publicErrors.ts') },
+    { from: path.join(repoRoot, 'src', 'capabilities.ts'), to: path.join(srcDir, 'capabilities.ts') },
 ];
 
 fs.mkdirSync(srcDir, { recursive: true });

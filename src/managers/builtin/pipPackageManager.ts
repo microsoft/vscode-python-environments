@@ -24,6 +24,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { Capabilities, PackageCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -51,6 +52,41 @@ import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageCapability> = {
+        'packages.availableVersions': async ({ environment }) => {
+            const pythonExecutable = environment?.execInfo?.run?.executable;
+            if (!environment || !pythonExecutable || !PythonVersion.tryParse(environment.version)) {
+                return {
+                    supported: false,
+                    reason: l10n.t('Package version lookup requires a Python executable and version.'),
+                };
+            }
+            // Select the same backend as lookup, but only execute the local pip version probe.
+            // In particular, never execute uv tool run or a package-index command here.
+            const backend = await createPipOrUvCommandWithKind(
+                { pythonExecutable, log: this.log },
+                environment.environmentPath.fsPath,
+                PipVersionCommand,
+                UvVersionCommand,
+            );
+            if (backend.kind === 'uv') {
+                return { supported: true };
+            }
+            const version = await backend.command.execute();
+            if (!version) {
+                return { supported: false, reason: l10n.t('Unable to determine the pip version.') };
+            }
+            return compare(version.public, '21.2.0') >= 0
+                ? { supported: true }
+                : { supported: false, reason: l10n.t('Package version lookup requires pip 21.2 or newer.') };
+        },
+        // Dependency roots are best-effort classification, not exact user install intent.
+        'packages.direct': async ({ environment }) =>
+            environment?.execInfo?.run?.executable
+                ? { supported: true }
+                : { supported: false, reason: l10n.t('Direct package listing requires a Python executable.') },
+    };
+
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 

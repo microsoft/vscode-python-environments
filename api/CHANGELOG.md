@@ -5,6 +5,15 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Optional dynamic `capabilities` maps on the existing `EnvironmentManager` and `PackageManager` interfaces. No inheritance or migration is required for legacy providers.
+- `Support`, `CapabilityContext`, typed capability keys/maps, and external default dictionaries covering 13 environment and 16 package capabilities.
+- `resolveEnvironmentManagerCapability` and `resolvePackageManagerCapability` for raw-provider support checks with shared defaults and prerequisite-cycle detection.
+- `getEnvironmentCapability` and `getPackageCapability` on the extension API for noninteractive, context-aware routed queries. Queries are advisory: existing operations and error behavior remain unchanged. Feature-detect these methods on older installed extension runtimes.
+
 ## [1.5.0]
 
 ### Added

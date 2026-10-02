@@ -331,6 +331,21 @@ export async function getPrefixes(): Promise<string[]> {
     return prefixes;
 }
 
+/**
+ * Inspect the known creation location without refreshing Conda or persisting discovery state.
+ * This is only a capability prerequisite, not a reservation or validation of a create request.
+ */
+export async function getKnownCondaCreationPrefix(): Promise<string> {
+    if (prefixes?.length) {
+        return prefixes[0];
+    }
+    const state = await getWorkspacePersistentState();
+    const storedPrefixes = await state.get<string[]>(CONDA_PREFIXES_KEY);
+    return Array.isArray(storedPrefixes) && storedPrefixes.length > 0
+        ? storedPrefixes[0]
+        : path.join(os.homedir(), '.conda', 'envs');
+}
+
 export async function getDefaultCondaPrefix(): Promise<string> {
     const prefixes = await getPrefixes();
     return prefixes.length > 0 ? prefixes[0] : path.join(os.homedir(), '.conda', 'envs');

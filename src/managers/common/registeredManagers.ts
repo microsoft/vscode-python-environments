@@ -4,6 +4,11 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
 import { PackageVersionLookupNotSupportedError } from '../../publicErrors';
+import {
+    resolveEnvironmentManagerCapability,
+    resolvePackageManagerCapability,
+} from '../../capabilities';
+import type { CapabilityContext, EnvironmentCapability, PackageCapability, Support } from '../../capabilities';
 import { ISSUES_URL } from '../../common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from '../../common/errors/NotSupportedError';
 import { traceWarn } from '../../common/logging';
@@ -83,6 +88,11 @@ export class InternalEnvironmentManager implements EnvironmentManager {
 
     public get supportsCreate(): boolean {
         return this.manager.create !== undefined;
+    }
+
+    /** Resolves support against the raw provider, not this wrapper's fallback methods. */
+    public getCapability(capability: EnvironmentCapability, context?: CapabilityContext): Promise<Support> {
+        return resolveEnvironmentManagerCapability(this.manager, capability, context);
     }
 
     create(
@@ -226,6 +236,15 @@ export class InternalPackageManager implements PackageManager {
     private readonly packageChangeEventValue: Event<DidChangePackagesEventArgs> | undefined;
     private isDisposed = false;
     public readonly createForProject?: (project: PythonProject) => InternalPackageManager;
+
+    /** Resolves support on this live raw instance, retaining any project-bound state. */
+    public getCapability(capability: PackageCapability, context: CapabilityContext = {}): Promise<Support> {
+        this.throwIfDisposed();
+        return resolvePackageManagerCapability(this.manager, capability, {
+            ...context,
+            project: this.project ?? context.project,
+        });
+    }
 
     public constructor(
         public readonly id: string,

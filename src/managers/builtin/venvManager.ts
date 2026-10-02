@@ -29,6 +29,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
 import { executeCommand } from '../../common/command.api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
@@ -69,6 +70,22 @@ import {
 } from './venvUtils';
 
 export class VenvManager implements EnvironmentManager {
+    readonly capabilities: Capabilities<EnvironmentCapability> = {
+        'environments.create.quick': async (context) => {
+            const create = await resolveEnvironmentManagerCapability(this, 'environments.create', context);
+            if (!create.supported) {
+                return create;
+            }
+            return this.globalEnv && PythonVersion.tryParse(this.globalEnv.version)?.major === 3
+                ? { supported: true }
+                : { supported: false, reason: l10n.t('Quick creation requires a global Python 3 environment.') };
+        },
+        // Additional packages are forwarded only by explicit quick creation. This describes general
+        // support, not request preflight: editable dependencies can still trigger validation prompts.
+        'environments.create.additionalPackages': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
+    };
+
     private collection: PythonEnvironment[] = [];
     private environmentFolders: { collection: PythonEnvironment[]; length: number; folders: Set<string> } | undefined;
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
