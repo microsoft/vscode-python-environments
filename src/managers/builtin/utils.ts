@@ -165,7 +165,7 @@ export async function refreshPythons(
 
     const envs: { env: NativeEnvInfo; uvManaged: boolean }[] = [];
     for (const e of allNativeEnvs) {
-        const uvManaged = await isUvManagedPythonInstall(e);
+        const uvManaged = e.kind === NativePythonEnvironmentKind.venvUv && (await isUvManagedPythonInstall(e));
         if (
             uvManaged ||
             e.kind === undefined ||

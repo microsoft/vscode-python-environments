@@ -256,7 +256,7 @@ export async function findVirtualEnvironments(
 
     for (const e of envs) {
         // uv-managed Python installations are base interpreters, listed by the Global manager.
-        if (await isUvManagedPythonInstall(e)) {
+        if (e.kind === NativePythonEnvironmentKind.venvUv && (await isUvManagedPythonInstall(e))) {
             continue;
         }
 
