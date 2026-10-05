@@ -44,7 +44,7 @@ import {
 import { getShellActivationCommands, shortenVersionString, sortEnvironments } from '../common/utils';
 import { getUvExecutable, runPython, runUV, shouldUseUv } from './helpers';
 import { getProjectInstallable, PipPackages, shouldProceedAfterPyprojectValidation } from './pipUtils';
-import { resolveSystemPythonEnvironmentPath } from './utils';
+import { isUvManagedPythonInstall, resolveSystemPythonEnvironmentPath } from './utils';
 import { addUvEnvironment, removeUvEnvironment, UV_ENVS_KEY } from './uvEnvironments';
 import { createStepBasedVenvFlow } from './venvStepBasedFlow';
 
@@ -255,6 +255,11 @@ export async function findVirtualEnvironments(
         );
 
     for (const e of envs) {
+        // uv-managed Python installations are base interpreters, listed by the Global manager.
+        if (await isUvManagedPythonInstall(e)) {
+            continue;
+        }
+
         // Include environments with errors (broken environments) so users can see and diagnose them
         if (e.error) {
             log.warn(`Broken venv environment detected: ${e.error} - ${JSON.stringify(e)}`);
@@ -686,9 +691,10 @@ export async function resolveVenvPythonEnvironmentPath(
         const resolved = await nativeFinder.resolve(fsPath);
 
         if (
-            resolved.kind === NativePythonEnvironmentKind.venv ||
-            resolved.kind === NativePythonEnvironmentKind.venvUv ||
-            resolved.kind === NativePythonEnvironmentKind.uvWorkspace
+            (resolved.kind === NativePythonEnvironmentKind.venv ||
+                resolved.kind === NativePythonEnvironmentKind.venvUv ||
+                resolved.kind === NativePythonEnvironmentKind.uvWorkspace) &&
+            !(await isUvManagedPythonInstall(resolved))
         ) {
             const envInfo = await getPythonInfo(resolved, nameStyle);
             return api.createPythonEnvironmentItem(envInfo, manager);
