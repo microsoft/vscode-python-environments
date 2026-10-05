@@ -264,6 +264,10 @@ async function autoDiscoverEnvironment(
  * @param projectManager - The project manager
  * @param nativeFinder - Native Python finder for path resolution
  * @param api - The Python environment API
+ * @param activationToReadyDurationMs - Time from activation until environment managers were ready, for telemetry
+ * @param globalScopeDeferredRef - Receives whether the global scope was resolved in the background
+ * @param changeEvent - The settings change that triggered a re-run. The global scope is resolved again only when
+ *   a setting it depends on changed, so a user's global selection is kept otherwise.
  */
 export async function applyInitialEnvironmentSelection(
     envManagers: EnvironmentManagers,
@@ -272,6 +276,7 @@ export async function applyInitialEnvironmentSelection(
     api: PythonEnvironmentApi,
     activationToReadyDurationMs?: number,
     globalScopeDeferredRef?: { value: 'deferred' | 'not_deferred' | 'unknown' },
+    changeEvent?: ConfigurationChangeEvent,
 ): Promise<void> {
     const folders = getWorkspaceFolders() ?? [];
     traceInfo(
@@ -311,8 +316,12 @@ export async function applyInitialEnvironmentSelection(
                 hasPersistedSelection: env !== undefined,
             });
 
-            // Cache only — NO settings.json write (shouldPersistSettings = false)
-            await envManagers.setEnvironment(folder.uri, env, false);
+            // Cache only — NO settings.json write (shouldPersistSettings = false). An environment chosen by a
+            // setting is explicit, so it is honored even when it is not owned by the manager that routing picks
+            // for the folder.
+            await envManagers.setEnvironment(folder.uri, env, false, {
+                explicit: isExplicitSelection(result, env),
+            });
 
             if (env) {
                 workspaceFolderResolved = true;
@@ -351,7 +360,9 @@ export async function applyInitialEnvironmentSelection(
             });
 
             // Cache only — NO settings.json write
-            await envManagers.setEnvironments('global', env, false);
+            await envManagers.setEnvironments('global', env, false, {
+                explicit: isExplicitSelection(result, env),
+            });
 
             traceInfo(`[interpreterSelection] global: ${env?.displayName ?? 'none'} (source: ${result.source})`);
 
@@ -362,7 +373,16 @@ export async function applyInitialEnvironmentSelection(
         }
     };
 
-    if (workspaceFolderResolved) {
+    // pythonProjects never applies to the global scope. Resolving it again when only that changed would replace
+    // a user's global selection with the unchanged result of the other settings.
+    const globalSettingsChanged =
+        !changeEvent ||
+        changeEvent.affectsConfiguration('python-envs.defaultEnvManager') ||
+        changeEvent.affectsConfiguration('python.defaultInterpreterPath');
+
+    if (!globalSettingsChanged) {
+        traceVerbose('[interpreterSelection] Settings for the global scope did not change, keeping its environment');
+    } else if (workspaceFolderResolved) {
         // Defer global scope so it doesn't block post-selection startup.
         traceInfo('[interpreterSelection] Workspace env resolved, deferring global scope to background');
         if (globalScopeDeferredRef) {
@@ -575,14 +595,15 @@ async function tryResolveInterpreterPath(
             }
 
             if (manager && resolvedEnv) {
-                // Create a wrapper environment that uses the user's specified path
+                // Create a wrapper environment that uses the user's specified path, named like the
+                // resolved environment so the status bar and views show a normal interpreter label.
                 const newEnv: PythonEnvironment = {
                     envId: {
                         id: `defaultInterpreterPath:${interpreterPath}`,
                         managerId: manager.id,
                     },
-                    name: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
-                    displayName: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
+                    name: resolvedEnv.name,
+                    displayName: resolvedEnv.displayName,
                     version: resolved.version ?? '',
                     displayPath: interpreterPath,
                     environmentPath: Uri.file(interpreterPath),
@@ -629,7 +650,26 @@ export function registerInterpreterSettingsChangeListener(
                 '[interpreterSelection] Interpreter settings changed, re-evaluating priority chain for all scopes',
             );
             // Re-run the interpreter selection priority chain to apply new settings immediately
-            await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
+            await applyInitialEnvironmentSelection(
+                envManagers,
+                projectManager,
+                nativeFinder,
+                api,
+                undefined,
+                undefined,
+                e,
+            );
         }
     });
+}
+
+/**
+ * Whether a priority-chain result is an explicit choice. Settings choose explicitly, except that when the manager a
+ * setting names has no environment of its own, the fallback it returns (owned by another manager) is not a choice.
+ */
+function isExplicitSelection(result: PriorityChainResult, env: PythonEnvironment | undefined): boolean {
+    if (result.source === 'autoDiscovery') {
+        return false;
+    }
+    return result.environment !== undefined || env?.envId.managerId === result.manager.id;
 }

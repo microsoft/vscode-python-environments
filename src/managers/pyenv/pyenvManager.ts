@@ -232,6 +232,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
     }
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment | undefined): Promise<void> {
         if (scope === undefined) {
+            this.globalEnv = environment;
             await setPyenvForGlobal(environment?.environmentPath?.fsPath);
         } else if (scope instanceof Uri) {
             const folder = this.api.getPythonProject(scope);
