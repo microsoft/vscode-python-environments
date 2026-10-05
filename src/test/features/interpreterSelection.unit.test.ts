@@ -2,10 +2,13 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
+import * as fs from 'fs-extra';
+import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { ConfigurationChangeEvent, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, SetEnvironmentScope } from '../../api';
+import { normalizePath } from '../../common/utils/pathUtils';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import {
@@ -394,6 +397,146 @@ suite('Interpreter Selection - Priority Chain', () => {
             );
 
             assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(absoluteInterpreterPath));
+        });
+
+        suite('bare command names', () => {
+            let commandDir: string;
+            let originalPath: string | undefined;
+
+            /** Creates an executable named `name` in a temporary directory placed first on PATH. */
+            async function putCommandOnPath(name: string): Promise<string> {
+                commandDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dip-command-'));
+                const executable = path.join(commandDir, process.platform === 'win32' ? `${name}.exe` : name);
+                await fs.writeFile(executable, '');
+                await fs.chmod(executable, 0o755);
+                originalPath = process.env.PATH;
+                process.env.PATH = `${commandDir}${path.delimiter}${originalPath ?? ''}`;
+                return executable;
+            }
+
+            function useDefaultInterpreterPath(value: string): void {
+                sandbox
+                    .stub(helpers, 'getUserConfiguredSetting')
+                    .callsFake((section: string, key: string) =>
+                        section === 'python' && key === 'defaultInterpreterPath' ? value : undefined,
+                    );
+            }
+
+            teardown(async () => {
+                if (originalPath !== undefined) {
+                    process.env.PATH = originalPath;
+                    originalPath = undefined;
+                }
+                if (commandDir) {
+                    await fs.remove(commandDir);
+                }
+            });
+
+            test('should resolve a command name like "python3" from PATH for a workspace folder', async () => {
+                const executable = await putCommandOnPath('pyenvs-test-python3');
+                const workspaceUri = Uri.file(path.resolve('/test/workspace'));
+                const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
+                sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+                sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+                sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+                useDefaultInterpreterPath('pyenvs-test-python3');
+                mockNativeFinder.resolve.resolves({ executable, version: '3.12.4', prefix: commandDir });
+                mockApi.resolveEnvironment.resolves(mockSystemEnv);
+
+                const result = await resolveEnvironmentByPriority(
+                    workspaceUri,
+                    mockEnvManagers as unknown as EnvironmentManagers,
+                    mockProjectManager as unknown as PythonProjectManager,
+                    mockNativeFinder as unknown as NativePythonFinder,
+                    mockApi as unknown as PythonEnvironmentApi,
+                );
+
+                assert.strictEqual(result.source, 'defaultInterpreterPath');
+                assert.strictEqual(
+                    normalizePath(mockNativeFinder.resolve.firstCall.args[0]),
+                    normalizePath(executable),
+                );
+            });
+
+            test('should resolve a command name from PATH for the global scope', async () => {
+                const executable = await putCommandOnPath('pyenvs-test-python3');
+                sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
+                useDefaultInterpreterPath('pyenvs-test-python3');
+                mockNativeFinder.resolve.resolves({ executable, version: '3.12.4', prefix: commandDir });
+                mockApi.resolveEnvironment.resolves(mockSystemEnv);
+
+                const result = await resolveGlobalEnvironmentByPriority(
+                    mockEnvManagers as unknown as EnvironmentManagers,
+                    mockNativeFinder as unknown as NativePythonFinder,
+                    mockApi as unknown as PythonEnvironmentApi,
+                );
+
+                assert.strictEqual(result.source, 'defaultInterpreterPath');
+                assert.strictEqual(
+                    normalizePath(mockNativeFinder.resolve.firstCall.args[0]),
+                    normalizePath(executable),
+                );
+            });
+
+            test('should resolve a command name that is not on PATH against the workspace folder', async () => {
+                const workspaceUri = Uri.file(path.resolve('/test/workspace'));
+                const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
+                const expected = path.resolve(workspaceUri.fsPath, 'pyenvs-test-missing-python');
+                sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+                sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+                sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+                useDefaultInterpreterPath('pyenvs-test-missing-python');
+                mockNativeFinder.resolve.rejects(new Error('not found'));
+                mockVenvManager.get.resolves(undefined);
+
+                await resolveEnvironmentByPriority(
+                    workspaceUri,
+                    mockEnvManagers as unknown as EnvironmentManagers,
+                    mockProjectManager as unknown as PythonProjectManager,
+                    mockNativeFinder as unknown as NativePythonFinder,
+                    mockApi as unknown as PythonEnvironmentApi,
+                );
+
+                assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(expected));
+            });
+
+            test('should treat the default value "python" as not configured', async () => {
+                await putCommandOnPath('python');
+                sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+                useDefaultInterpreterPath('python');
+                mockVenvManager.get.resolves(mockVenvEnv);
+
+                const result = await resolveEnvironmentByPriority(
+                    testUri,
+                    mockEnvManagers as unknown as EnvironmentManagers,
+                    mockProjectManager as unknown as PythonProjectManager,
+                    mockNativeFinder as unknown as NativePythonFinder,
+                    mockApi as unknown as PythonEnvironmentApi,
+                );
+
+                assert.strictEqual(result.source, 'autoDiscovery');
+                assert.strictEqual(result.environment, mockVenvEnv);
+                assert.ok(mockNativeFinder.resolve.notCalled);
+            });
+
+            test('should not pick a batch file from PATH on Windows', async function () {
+                if (process.platform !== 'win32') {
+                    this.skip();
+                }
+                const shim = await putCommandOnPath('pyenvs-test-shim');
+                await fs.move(shim, path.join(commandDir, 'pyenvs-test-shim.bat'));
+                sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
+                useDefaultInterpreterPath('pyenvs-test-shim');
+                mockNativeFinder.resolve.rejects(new Error('not found'));
+
+                await resolveGlobalEnvironmentByPriority(
+                    mockEnvManagers as unknown as EnvironmentManagers,
+                    mockNativeFinder as unknown as NativePythonFinder,
+                    mockApi as unknown as PythonEnvironmentApi,
+                );
+
+                assert.ok(mockNativeFinder.resolve.calledOnceWithExactly('pyenvs-test-shim'));
+            });
         });
 
         test('should pass an absolute defaultInterpreterPath to the native finder unchanged', async () => {
