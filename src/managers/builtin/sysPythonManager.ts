@@ -23,7 +23,6 @@ import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { getLatest } from '../common/utils';
 import {
     clearSystemEnvCache,
     getSystemEnvForGlobal,
@@ -32,7 +31,7 @@ import {
     setSystemEnvForWorkspace,
     setSystemEnvForWorkspaces,
 } from './cache';
-import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
+import { getDefaultGlobalPython, refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
 import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToInstall } from './uvPythonInstaller';
 
 export class SysPythonManager implements EnvironmentManager {
@@ -176,7 +175,7 @@ export class SysPythonManager implements EnvironmentManager {
 
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
         if (scope === undefined) {
-            this.globalEnv = environment ?? getLatest(this.collection);
+            this.globalEnv = environment ?? getDefaultGlobalPython(this.collection);
             if (environment) {
                 await setSystemEnvForGlobal(environment.environmentPath.fsPath);
             }
@@ -372,7 +371,7 @@ export class SysPythonManager implements EnvironmentManager {
 
         // If a global environment is still not set, try using the latest environment
         if (!this.globalEnv) {
-            this.globalEnv = getLatest(this.collection);
+            this.globalEnv = getDefaultGlobalPython(this.collection);
         }
 
         // Try to find workspace environments

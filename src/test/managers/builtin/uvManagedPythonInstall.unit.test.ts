@@ -8,7 +8,12 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { LogOutputChannel, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../../api';
-import { isUvManagedPythonInstall, refreshPythons, resolveSystemPythonEnvironmentPath } from '../../../managers/builtin/utils';
+import {
+    getDefaultGlobalPython,
+    isUvManagedPythonInstall,
+    refreshPythons,
+    resolveSystemPythonEnvironmentPath,
+} from '../../../managers/builtin/utils';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
 import { findVirtualEnvironments, resolveVenvPythonEnvironmentPath } from '../../../managers/builtin/venvUtils';
 import {
@@ -150,5 +155,50 @@ suite('uv-managed Python installations', () => {
 
         assert.strictEqual(install?.shortDisplayName, '3.13.15 (uv)');
         assert.strictEqual(venv?.shortDisplayName, '3.13.15');
+    });
+
+    suite('default global Python', () => {
+        let pythonOrg: NativeEnvInfo;
+
+        setup(async () => {
+            // An older installation that is not managed by uv (for example from python.org).
+            const prefix = path.join(tempRoot, 'Python312');
+            await fs.outputFile(executableIn(prefix), '');
+            pythonOrg = {
+                kind: NativePythonEnvironmentKind.globalPaths,
+                executable: executableIn(prefix),
+                prefix,
+                version: '3.12.10',
+            };
+        });
+
+        test('prefers an installation not managed by uv over a newer uv-managed one', async () => {
+            const envs = await refreshPythons(false, finderReturning([uvInstall, pythonOrg]), api, log, systemManager);
+
+            assert.strictEqual(
+                getDefaultGlobalPython(envs)?.environmentPath.fsPath,
+                Uri.file(pythonOrg.executable!).fsPath,
+            );
+        });
+
+        test('prefers an installation not managed by uv over a uv-managed one resolved by path', async () => {
+            const finder = finderReturning([uvInstall, pythonOrg]);
+            const envs = await refreshPythons(false, finderReturning([pythonOrg]), api, log, systemManager);
+            const resolved = await resolveSystemPythonEnvironmentPath(uvInstall.executable!, finder, api, systemManager);
+
+            assert.strictEqual(
+                getDefaultGlobalPython([resolved!, ...envs])?.environmentPath.fsPath,
+                Uri.file(pythonOrg.executable!).fsPath,
+            );
+        });
+
+        test('uses a uv-managed installation when it is the only Python', async () => {
+            const envs = await refreshPythons(false, finderReturning([uvInstall]), api, log, systemManager);
+
+            assert.strictEqual(
+                getDefaultGlobalPython(envs)?.environmentPath.fsPath,
+                Uri.file(uvInstall.executable!).fsPath,
+            );
+        });
     });
 });

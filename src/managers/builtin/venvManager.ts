@@ -32,6 +32,7 @@ import { findParentIfFile } from '../../features/envCommands';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
+import { getDefaultGlobalPython } from './utils';
 import { promptInstallPythonViaUv } from './uvPythonInstaller';
 import {
     clearVenvCache,
@@ -568,7 +569,7 @@ export class VenvManager implements EnvironmentManager {
 
         // If a global environment is still not set, use latest from globals
         if (!this.globalEnv) {
-            this.globalEnv = getLatest(globals);
+            this.globalEnv = getDefaultGlobalPython(globals);
         }
     }
 
