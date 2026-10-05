@@ -9,6 +9,7 @@ import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import {
     InlineScriptMetadata,
+    getInlineScriptSourceHash,
     MAX_HEADER_BYTES,
     matchesPythonVersion,
     readInlineScriptMetadata,
@@ -91,6 +92,62 @@ suite('inlineScriptMetadata', () => {
             assert.ok(md);
             assert.ok(md.tool, 'tool table should be populated');
             assert.deepStrictEqual(md.tool, { mybuild: { extra: 'thing' } });
+        });
+
+        test('fingerprints dependencies surrounded by marker text inside valid TOML strings', () => {
+            const text = script([
+                '# /// script',
+                '# note = """',
+                '# ///',
+                '# """',
+                '# dependencies = ["requests"]',
+                '# other = """',
+                '# /// script',
+                '# """',
+                '# ///',
+            ]);
+            const original = readInlineScriptMetadata(text);
+            const changed = readInlineScriptMetadata(text.replace('requests', 'httpx'));
+            assert.ok(original?.sourceHash);
+            assert.ok(changed?.sourceHash);
+            assert.deepStrictEqual(original.dependencies, ['requests']);
+            assert.deepStrictEqual(changed.dependencies, ['httpx']);
+            assert.notStrictEqual(original.sourceHash, changed.sourceHash);
+        });
+
+        test('fingerprints every non-newline character of valid metadata with embedded markers', () => {
+            const fixtures = [
+                script(['# /// script', '# requires-python = ">=3.11"', '# dependencies = ["requests"]', '# ///']),
+                script([
+                    '# /// script',
+                    '# note = """',
+                    '# ///',
+                    '# """',
+                    '# dependencies = ["requests"]',
+                    '# other = """',
+                    '# /// script',
+                    '# /// script',
+                    '# content',
+                    '# """',
+                    '# ///',
+                ]),
+            ];
+            for (const source of fixtures) {
+                const metadata = readInlineScriptMetadata(source);
+                assert.ok(metadata?.sourceHash);
+                for (let offset = metadata.sourceRange!.start; offset < metadata.sourceRange!.end; offset += 1) {
+                    if (source[offset] === '\n' || source[offset] === '\r') {
+                        continue;
+                    }
+                    const replacement = source[offset] === 'x' ? 'y' : 'x';
+                    const changed = source.slice(0, offset) + replacement + source.slice(offset + 1);
+                    assert.notStrictEqual(
+                        getInlineScriptSourceHash(changed),
+                        metadata.sourceHash,
+                        `Fingerprint omitted metadata character at ${offset}`,
+                    );
+                }
+            }
         });
 
         test('multiple `script` blocks returns undefined and logs a warning', () => {

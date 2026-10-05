@@ -470,7 +470,171 @@ suite('InlineScriptLazyDetector', () => {
         detector.dispose();
     });
 
-    test('invalidates routing for a CRLF dependency edit using source offsets', async () => {
+    test('preserves routing when a whole-document body edit leaves the block unchanged', async () => {
+        const uri = Uri.file(path.join(process.cwd(), 'body-edit.py'));
+        const original = '# /// script\n# dependencies = []\n# ///\n\nprint("old")';
+        const changed = original.replace('"old"', '"new"');
+        const metadata = ism.readInlineScriptMetadata(original)!;
+        readMetadataStub.resolves(metadata);
+        const detector = createDetector();
+        await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true, '3.12.4');
+        changeListener!({
+            document: { ...makeDoc(uri), isDirty: true, getText: () => changed },
+            contentChanges: [{ range: undefined as never, rangeOffset: 0, rangeLength: original.length, text: changed }],
+            reason: undefined,
+        });
+        assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+        assert.strictEqual(routingRegistry.getEnvironmentVersion(uri), '3.12.4');
+        assert.deepStrictEqual(routingRegistry.getMetadata(uri), metadata);
+        detector.dispose();
+    });
+
+    test('still invalidates a whole-document edit when the raw metadata changes', async () => {
+        const uri = Uri.file(path.join(process.cwd(), 'header-edit.py'));
+        const original = '# /// script\n# dependencies = []\n# ///\n';
+        const changed = original.replace('dependencies = []', 'dependencies=[]');
+        readMetadataStub.resolves(ism.readInlineScriptMetadata(original));
+        const detector = createDetector();
+        await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true, '3.12.4');
+        changeListener!({
+            document: { ...makeDoc(uri), isDirty: true, getText: () => changed },
+            contentChanges: [{ range: undefined as never, rangeOffset: 0, rangeLength: original.length, text: changed }],
+            reason: undefined,
+        });
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        detector.dispose();
+    });
+
+    test('restores routeability when an unsaved metadata edit is undone to the saved fingerprint', async () => {
+        const uri = Uri.file(path.join(process.cwd(), 'header-undo.py'));
+        const original = '# /// script\n# dependencies = []\n# ///\n';
+        const changed = original.replace('dependencies = []', 'dependencies = ["requests"]');
+        const metadata = ism.readInlineScriptMetadata(original);
+        assert.ok(metadata?.sourceHash);
+        readMetadataStub.resolves(metadata);
+        const detector = createDetector();
+        await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true, '3.12.4');
+        const changeDocument = (text: string) => {
+            changeListener!({
+                document: { ...makeDoc(uri), isDirty: true, getText: () => text },
+                contentChanges: [{ range: undefined as never, rangeOffset: 0, rangeLength: original.length, text }],
+                reason: undefined,
+            });
+        };
+
+        changeDocument(changed);
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        assert.strictEqual(routingRegistry.hasValidatedAssociation(uri), true);
+        assert.deepStrictEqual(routingRegistry.getMetadata(uri), metadata);
+
+        changeDocument(original);
+        assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+        assert.strictEqual(routingRegistry.getEnvironmentVersion(uri), '3.12.4');
+        detector.dispose();
+    });
+
+    test('invalidates dependency edits after an unchanged block moves beyond its old offsets', async () => {
+        const uri = Uri.file(path.join(process.cwd(), 'moved-header.py'));
+        const original = '# /// script\n# dependencies = ["requests"]\n# ///\n';
+        const metadata = ism.readInlineScriptMetadata(original)!;
+        readMetadataStub.resolves(metadata);
+        const detector = createDetector();
+        await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true, '3.12.4');
+        const prefix = '# leading comment\n'.repeat(20);
+        const moved = prefix + original;
+        changeListener!({
+            document: { ...makeDoc(uri), isDirty: true, getText: () => moved },
+            contentChanges: [{ range: undefined as never, rangeOffset: 0, rangeLength: 0, text: prefix }],
+            reason: undefined,
+        });
+        assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+        const dependencyOffset = moved.indexOf('requests');
+        assert.ok(dependencyOffset > metadata.sourceRange!.end);
+        const changed = moved.replace('requests', 'httpx');
+        changeListener!({
+            document: { ...makeDoc(uri), isDirty: true, getText: () => changed },
+            contentChanges: [{ range: undefined as never, rangeOffset: dependencyOffset, rangeLength: 8, text: 'httpx' }],
+            reason: undefined,
+        });
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        detector.dispose();
+    });
+
+    test('invalidates changed dependencies between embedded TOML closing and opening markers', async () => {
+        const uri = Uri.file(path.join(process.cwd(), 'embedded-markers.py'));
+        const original = [
+            '# /// script',
+            '# note = """',
+            '# ///',
+            '# """',
+            '# dependencies = ["requests"]',
+            '# other = """',
+            '# /// script',
+            '# """',
+            '# ///',
+        ].join('\n');
+        const metadata = ism.readInlineScriptMetadata(original);
+        assert.ok(metadata?.sourceHash);
+        readMetadataStub.resolves(metadata);
+        const detector = createDetector();
+        await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true, '3.12.4');
+        changeListener!({
+            document: { ...makeDoc(uri), isDirty: true, getText: () => original.replace('requests', 'httpx') },
+            contentChanges: [
+                { range: undefined as never, rangeOffset: original.indexOf('requests'), rangeLength: 8, text: 'httpx' },
+            ],
+            reason: undefined,
+        });
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        detector.dispose();
+    });
+
+    test('invalidates when a preceding non-script opener changes structural block selection', async () => {
+        const uri = Uri.file(path.join(process.cwd(), 'preceding-marker.py'));
+        const original = '# note\n# /// script\n# dependencies = ["requests"]\n# ///';
+        const changed = original.replace('# note', '# /// other');
+        const metadata = ism.readInlineScriptMetadata(original);
+        assert.ok(metadata?.sourceHash);
+        assert.strictEqual(ism.readInlineScriptMetadata(changed), undefined);
+        readMetadataStub.resolves(metadata);
+        const detector = createDetector();
+        await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true, '3.12.4');
+        changeListener!({
+            document: { ...makeDoc(uri), isDirty: true, getText: () => changed },
+            contentChanges: [{ range: undefined as never, rangeOffset: 0, rangeLength: 6, text: '# /// other' }],
+            reason: undefined,
+        });
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        detector.dispose();
+    });
+
+    test('keeps routing for body edits after an ignored unfinished metadata example', async () => {
+        const uri = Uri.file(path.join(process.cwd(), 'body-example.py'));
+        const original = '# /// script\n# dependencies = []\n# ///\n\n"""\n# /// script\n# dependencies = ["example"]\n"""\nprint("body")';
+        const metadata = ism.readInlineScriptMetadata(original);
+        assert.ok(metadata?.sourceHash);
+        readMetadataStub.resolves(metadata);
+        const detector = createDetector();
+        await fireOpen(uri);
+        routingRegistry.setValidatedAssociation(uri, true, '3.12.4');
+        changeListener!({
+            document: { ...makeDoc(uri), isDirty: true, getText: () => original.replace('"body"', '"changed"') },
+            contentChanges: [
+                { range: undefined as never, rangeOffset: original.indexOf('"body"'), rangeLength: 6, text: '"changed"' },
+            ],
+            reason: undefined,
+        });
+        assert.strictEqual(routingRegistry.shouldRoute(uri), true);
+        detector.dispose();
+    });
+
+    test('invalidates routing for a CRLF dependency edit beyond normalized offsets', async () => {
         const uri = Uri.file(path.resolve('/elsewhere/crlf.py'));
         const source = [
             '# /// script',
@@ -493,9 +657,21 @@ suite('InlineScriptLazyDetector', () => {
 
         await fireOpen(uri);
         routingRegistry.setValidatedAssociation(uri, true);
-        fireChange(uri, makeContentChanges(dependencyOffset));
+        const changed = source.replace('requests', 'httpx');
+        changeListener!({
+            document: { ...makeDoc(uri), isDirty: true, getText: () => changed },
+            contentChanges: [
+                {
+                    range: undefined as never,
+                    rangeOffset: source.indexOf('requests'),
+                    rangeLength: 'requests'.length,
+                    text: 'httpx',
+                },
+            ],
+            reason: undefined,
+        });
 
-        assert.strictEqual(routingRegistry.getMetadata(uri), undefined);
+        assert.deepStrictEqual(routingRegistry.getMetadata(uri), metadata);
         assert.strictEqual(routingRegistry.shouldRoute(uri), false);
         detector.dispose();
     });

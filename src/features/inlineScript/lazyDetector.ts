@@ -3,7 +3,11 @@
 
 import * as path from 'path';
 import { Disposable, TextDocument, TextDocumentChangeEvent, TextDocumentContentChangeEvent, Uri } from 'vscode';
-import { readInlineScriptMetadataFromFile } from '../../common/inlineScript/metadata';
+import {
+    getInlineScriptSourceHash,
+    readInlineScriptMetadataFromFile,
+    sliceHeaderBytes,
+} from '../../common/inlineScript/metadata';
 import { getInlineScriptRoutingKey, InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { traceVerbose, traceWarn } from '../../common/logging';
 import { EventNames } from '../../common/telemetry/constants';
@@ -278,7 +282,13 @@ export class InlineScriptLazyDetector implements Disposable {
         if (this.routingRegistry) {
             const key = this.getReadKey(e.document.uri);
             const metadata = this.routingRegistry.getMetadata(e.document.uri);
-            if (
+            // Saved offsets can become stale when an unchanged block moves, so fingerprinted headers are compared directly.
+            if (metadata?.sourceHash) {
+                this.routingRegistry.setLiveMetadataMatchesSaved(
+                    e.document.uri,
+                    getInlineScriptSourceHash(sliceHeaderBytes(e.document.getText())) === metadata.sourceHash,
+                );
+            } else if (
                 (metadata &&
                     this.contentChangesMayAffectMetadata(
                         e.contentChanges,

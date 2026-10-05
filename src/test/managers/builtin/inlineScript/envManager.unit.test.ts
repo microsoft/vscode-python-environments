@@ -7840,9 +7840,12 @@ suite('InlineScriptEnvManager', () => {
 
         test('recovers an old usable environment after a single stamp failure without a save', async () => {
             const uri = scriptUri('recover.py');
+            const scriptText = '# /// script\n# requires-python = ">=3.11"\n# dependencies = ["requests"]\n# ///\n';
+            const metadata = metadataReader.readInlineScriptMetadata(scriptText)!;
+            readMetadataStub.resolves(metadata);
             const environment = await createOwnedEnvironment();
             await manager.set(uri, environment);
-            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri, metadata);
             setSidecar(
                 await makeSidecar({
                     lastUsedAt: new Date(NOW.getTime() - 20 * 24 * 60 * 60 * 1000).toISOString(),
@@ -7858,7 +7861,7 @@ suite('InlineScriptEnvManager', () => {
             const provider = new InlineScriptCodeLensProvider(routingRegistry, 'setup');
             try {
                 const document = new MockDocument(
-                    '# /// script\n# dependencies = ["requests"]\n# ///\n',
+                    scriptText,
                     uri.fsPath,
                     async () => true,
                 );
@@ -7874,7 +7877,10 @@ suite('InlineScriptEnvManager', () => {
                 await ready.promise;
 
                 assert.strictEqual(await manager.get(uri), environment);
-                assert.strictEqual(provider.provideCodeLenses(document, {} as never).length, 0);
+                const lenses = provider.provideCodeLenses(document, {} as never);
+                assert.strictEqual(lenses.length, 1);
+                assert.strictEqual(lenses[0].command?.command, '');
+                assert.strictEqual(lenses[0].command?.title, 'Script environment ready (Python 3.12.4)');
                 assert.strictEqual(writeMetaStub.callCount, 2);
                 sinon.assert.notCalled(createWithProgressStub);
             } finally {
