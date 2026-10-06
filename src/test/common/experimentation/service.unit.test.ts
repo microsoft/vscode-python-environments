@@ -15,7 +15,11 @@ import {
     ExperimentationContext,
     ExperimentationService,
 } from '../../../common/experimentation/service';
-import { ExperimentationStorage, TAS_CACHE_KEY } from '../../../common/experimentation/storage';
+import {
+    ExperimentationStorage,
+    type SdkTargetingValues,
+    TAS_CACHE_KEY,
+} from '../../../common/experimentation/storage';
 import { TasCall } from '../../../common/experimentation/telemetry';
 import * as logging from '../../../common/logging';
 import { EventNames } from '../../../common/telemetry/constants';
@@ -36,6 +40,13 @@ const CONFIGURATION: ExperimentationConfiguration = {
 };
 const VERSION = '1.39.0';
 const IDENTITY = 'test-machine';
+const VSCODE_VERSION = '1.110.0';
+const APP_NAME = 'Visual Studio Code';
+const LANGUAGE = 'en';
+const IDENTITY_ONLY_CONFIGURATION: ExperimentationConfiguration = {
+    ...CONFIGURATION,
+    assignmentParameters: { approved_identity: 'machineId' },
+};
 
 class FakeSdk implements ExperimentationClient {
     readonly initialized = createDeferred<void>();
@@ -115,7 +126,9 @@ suite('Experimentation service', () => {
         sinon.stub(envApis, 'isTelemetryEnabled').callsFake(() => consent);
         sinon.stub(envApis, 'onDidChangeTelemetryEnabled').callsFake((listener) => changed.event(listener));
         sinon.stub(envApis, 'getMachineId').returns(IDENTITY);
-        sinon.stub(envApis, 'getLanguage').returns('en');
+        sinon.stub(envApis, 'getLanguage').returns(LANGUAGE);
+        sinon.stub(envApis, 'getVSCodeVersion').returns(VSCODE_VERSION);
+        sinon.stub(envApis, 'getAppName').returns(APP_NAME);
         events = sinon.stub(sender, 'sendTelemetryEvent');
         warn = sinon.stub(logging, 'traceWarn');
         logError = sinon.stub(logging, 'traceError');
@@ -134,14 +147,29 @@ suite('Experimentation service', () => {
         return service;
     }
 
-    async function cache(values: Record<string, unknown> = { example: true }, language = 'en'): Promise<void> {
-        const parameters = new Map([
-            ['approved_identity', IDENTITY],
-            ['approved_version', VERSION],
-            ['approved_language', language],
-        ]);
+    async function cache(
+        values: Record<string, unknown> = { example: true },
+        configuration = CONFIGURATION,
+        targetingOverrides: Partial<SdkTargetingValues> = {},
+    ): Promise<void> {
+        const sdkTargetingValues: SdkTargetingValues = {
+            applicationVersion: VSCODE_VERSION,
+            build: APP_NAME,
+            clientId: IDENTITY,
+            language: LANGUAGE,
+            ...targetingOverrides,
+        };
+        const sources = {
+            machineId: IDENTITY,
+            extensionVersion: VERSION,
+            language: sdkTargetingValues.language,
+        };
+        const parameters = new Map<string, string>();
+        for (const [name, source] of Object.entries(configuration.assignmentParameters)) {
+            parameters.set(name, sources[source]);
+        }
         await new ExperimentationStorage(
-            state, CONFIGURATION, parameters, VERSION, () => true,
+            state, configuration, parameters, sdkTargetingValues, VERSION, () => true,
         ).update(TAS_CACHE_KEY, {
             features: Object.keys(values),
             assignmentContext: 'cached;',
@@ -230,6 +258,37 @@ suite('Experimentation service', () => {
             clients[0].options.assignmentsFilterProviders?.[0].getFilters().get('approved_language'), 'fr',
         );
     });
+
+    for (const changedValue of [
+        {
+            name: 'language',
+            update: () => (envApis.getLanguage as sinon.SinonStub).returns('fr'),
+        },
+        {
+            name: 'VS Code version',
+            update: () => (envApis.getVSCodeVersion as sinon.SinonStub).returns('1.111.0'),
+        },
+        {
+            name: 'application name',
+            update: () => (envApis.getAppName as sinon.SinonStub).returns('Visual Studio Code - Insiders'),
+        },
+    ]) {
+        test(`does not reuse warm cache when the SDK ${changedValue.name} changes`, async () => {
+            context = {
+                ...context,
+                extension: {
+                    packageJSON: { version: VERSION, experimentation: IDENTITY_ONLY_CONFIGURATION },
+                },
+            };
+            await cache({ example: true }, IDENTITY_ONLY_CONFIGURATION);
+            changedValue.update();
+            const service = start();
+            await service.initializePromise;
+            assert.strictEqual(service.diagnostics.cacheState, 'absent');
+            assert.strictEqual(service.getTreatmentVariable('example', false), false);
+            assert.deepStrictEqual(getSharedTelemetryProperties(), {});
+        });
+    }
 
     test('serves newly fetched Boolean, number and string assignments with type-appropriate defaults', async () => {
         const service = start();

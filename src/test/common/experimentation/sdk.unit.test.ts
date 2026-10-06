@@ -36,6 +36,8 @@ suite('Experimentation SDK contract with fake transport', () => {
         sinon.stub(envApis, 'onDidChangeTelemetryEnabled').returns(new Disposable(() => undefined));
         sinon.stub(envApis, 'getMachineId').returns('sdk-test-machine');
         sinon.stub(envApis, 'getLanguage').returns('en');
+        sinon.stub(envApis, 'getVSCodeVersion').returns('1.110.0');
+        sinon.stub(envApis, 'getAppName').returns('Insider');
         sinon.stub(sender, 'sendTelemetryEvent');
         const fetch: FetchFn = async (url, init) => {
             calls.push([url, init]);

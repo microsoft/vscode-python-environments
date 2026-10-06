@@ -4,7 +4,14 @@
 import type { Disposable, Memento } from 'vscode';
 import type { ExperimentationConfig, IExperimentationService } from 'vscode-tas-client';
 import { ENVS_EXTENSION_ID } from '../constants';
-import { getLanguage, getMachineId, isTelemetryEnabled, onDidChangeTelemetryEnabled } from '../env.apis';
+import {
+    getAppName,
+    getLanguage,
+    getMachineId,
+    getVSCodeVersion,
+    isTelemetryEnabled,
+    onDidChangeTelemetryEnabled,
+} from '../env.apis';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../logging';
 import { EventNames } from '../telemetry/constants';
 import { setSharedTelemetryProperty } from '../telemetry/reporter';
@@ -23,6 +30,10 @@ import { createExperimentationFetch } from './transport';
 export const EXPERIMENTATION_INITIALIZATION_TIMEOUT_MS = 5_000;
 const INITIAL_FETCH_TIMEOUT_MS = 15_000;
 type TreatmentValue = boolean | number | string;
+
+function trimVersionSuffix(version: string): string {
+    return version.split(/-[a-zA-Z0-9]+$/)[0];
+}
 
 export type ExperimentationClient = Pick<
     IExperimentationService,
@@ -234,7 +245,8 @@ export class ExperimentationService implements Disposable {
         if (typeof identity !== 'string' || !identity.trim()) {
             throw new Error('The configured experimentation identity is unavailable.');
         }
-        const values = { machineId: identity, extensionVersion: this.version, language: getLanguage() };
+        const language = getLanguage();
+        const values = { machineId: identity, extensionVersion: this.version, language };
         const parameters = new Map<string, string>();
         for (const [name, source] of Object.entries(configuration.assignmentParameters)) {
             const value = values[source];
@@ -243,8 +255,20 @@ export class ExperimentationService implements Disposable {
             }
             parameters.set(name, value);
         }
+        // The SDK adds these filters independently and merges both endpoint responses into one cached snapshot.
+        const sdkTargetingValues = {
+            applicationVersion: trimVersionSuffix(getVSCodeVersion()),
+            build: getAppName(),
+            clientId: identity,
+            language,
+        };
         const storage = new ExperimentationStorage(
-            this.context.globalState, configuration, parameters, this.version, () => this.isActive(run),
+            this.context.globalState,
+            configuration,
+            parameters,
+            sdkTargetingValues,
+            this.version,
+            () => this.isActive(run),
         );
         const cached = storage.hasCachedAssignments();
         this.snapshot = { ...this.snapshot, cacheState: cached ? 'present' : 'absent', hasUsableSnapshot: cached };

@@ -8,6 +8,13 @@ import type { ExperimentationConfiguration } from './configuration';
 
 export const TAS_CACHE_KEY = 'VSCode.ABExp.FeatureData';
 
+export interface SdkTargetingValues {
+    readonly applicationVersion: string;
+    readonly build: string;
+    readonly clientId: string;
+    readonly language: string;
+}
+
 function isCacheData(value: unknown): boolean {
     if (typeof value !== 'object' || value === null) {
         return false;
@@ -38,6 +45,7 @@ export class ExperimentationStorage implements Memento {
         private readonly storage: Memento,
         configuration: ExperimentationConfiguration,
         resolvedAssignmentParameters: ReadonlyMap<string, string>,
+        sdkTargetingValues: SdkTargetingValues,
         extensionVersion: string,
         private readonly isActive: () => boolean,
     ) {
@@ -47,6 +55,7 @@ export class ExperimentationStorage implements Memento {
             configuration.identityParameter,
             Object.entries(configuration.assignmentParameters).sort(([a], [b]) => a.localeCompare(b)),
             Array.from(resolvedAssignmentParameters.entries()).sort(([a], [b]) => a.localeCompare(b)),
+            Object.entries(sdkTargetingValues).sort(([a], [b]) => a.localeCompare(b)),
             extensionVersion,
         ]);
         this.prefix = `python-envs.experimentation.${createHash('sha256').update(namespace).digest('hex')}.`;

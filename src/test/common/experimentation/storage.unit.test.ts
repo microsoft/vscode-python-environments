@@ -4,7 +4,11 @@
 import assert from 'node:assert';
 import * as sinon from 'sinon';
 import { ExperimentationConfiguration } from '../../../common/experimentation/configuration';
-import { ExperimentationStorage, TAS_CACHE_KEY } from '../../../common/experimentation/storage';
+import {
+    ExperimentationStorage,
+    type SdkTargetingValues,
+    TAS_CACHE_KEY,
+} from '../../../common/experimentation/storage';
 import * as logging from '../../../common/logging';
 import { MockMemento } from '../../mocks/mementos';
 
@@ -30,20 +34,35 @@ function resolvedParameters(identity: string, language = 'en'): ReadonlyMap<stri
     ]);
 }
 
+function sdkTargetingValues(overrides: Partial<SdkTargetingValues> = {}): SdkTargetingValues {
+    return {
+        applicationVersion: '1.110.0',
+        build: 'Visual Studio Code',
+        clientId: 'machine-a',
+        language: 'en',
+        ...overrides,
+    };
+}
+
 suite('Experimentation storage', () => {
     teardown(() => sinon.restore());
 
     test('persists through globalState and reuses the same resolved parameters in any order', async () => {
         const globalState = new MockMemento();
         const first = new ExperimentationStorage(
-            globalState, configuration, resolvedParameters('machine-a'), '1.0.0', () => true,
+            globalState,
+            configuration,
+            resolvedParameters('machine-a'),
+            sdkTargetingValues(),
+            '1.0.0',
+            () => true,
         );
         await globalState.update('unrelated', 1);
         await first.update(TAS_CACHE_KEY, assignments);
         const restarted = new ExperimentationStorage(globalState, configuration, new Map([
             ['approved_language', 'en'],
             ['approved_identity', 'machine-a'],
-        ]), '1.0.0', () => true);
+        ]), sdkTargetingValues(), '1.0.0', () => true);
         assert.deepStrictEqual(restarted.get(TAS_CACHE_KEY), assignments);
         assert.strictEqual(restarted.hasCachedAssignments(), true);
         assert.deepStrictEqual(restarted.keys(), [TAS_CACHE_KEY]);
@@ -51,30 +70,65 @@ suite('Experimentation storage', () => {
         assert.ok(globalState.keys().every((key) => !key.includes('machine-a')));
     });
 
-    test('does not reuse another identity, targeting value, audience, endpoint or extension version', async () => {
+    test('does not reuse another targeting value, audience, endpoint or extension version', async () => {
         const globalState = new MockMemento();
         const original = new ExperimentationStorage(
-            globalState, configuration, resolvedParameters('a'), '1', () => true,
+            globalState,
+            configuration,
+            resolvedParameters('a'),
+            sdkTargetingValues({ clientId: 'a' }),
+            '1',
+            () => true,
         );
         await original.update(TAS_CACHE_KEY, assignments);
         const others = [
-            new ExperimentationStorage(globalState, configuration, resolvedParameters('b'), '1', () => true),
-            new ExperimentationStorage(globalState, configuration, resolvedParameters('a', 'fr'), '1', () => true),
             new ExperimentationStorage(
-                globalState, { ...configuration, targetPopulation: 'insider' }, resolvedParameters('a'), '1',
+                globalState, configuration, resolvedParameters('b'), sdkTargetingValues({ clientId: 'b' }), '1',
+                () => true,
+            ),
+            new ExperimentationStorage(
+                globalState, configuration, resolvedParameters('a', 'fr'),
+                sdkTargetingValues({ clientId: 'a' }), '1', () => true,
+            ),
+            new ExperimentationStorage(
+                globalState, configuration, resolvedParameters('a'),
+                sdkTargetingValues({ clientId: 'a', language: 'fr' }), '1', () => true,
+            ),
+            new ExperimentationStorage(
+                globalState, configuration, resolvedParameters('a'),
+                sdkTargetingValues({ applicationVersion: '1.111.0', clientId: 'a' }), '1', () => true,
+            ),
+            new ExperimentationStorage(
+                globalState, configuration, resolvedParameters('a'),
+                sdkTargetingValues({ build: 'Visual Studio Code - Insiders', clientId: 'a' }), '1', () => true,
+            ),
+            new ExperimentationStorage(
+                globalState,
+                { ...configuration, targetPopulation: 'insider' },
+                resolvedParameters('a'),
+                sdkTargetingValues({ clientId: 'a' }),
+                '1',
                 () => true,
             ),
             new ExperimentationStorage(globalState, {
                 ...configuration, assignmentsEndpoint: 'https://other.example.invalid/api/v1/assignments',
-            }, resolvedParameters('a'), '1', () => true),
-            new ExperimentationStorage(globalState, configuration, resolvedParameters('a'), '2', () => true),
+            }, resolvedParameters('a'), sdkTargetingValues({ clientId: 'a' }), '1', () => true),
+            new ExperimentationStorage(
+                globalState, configuration, resolvedParameters('a'), sdkTargetingValues({ clientId: 'a' }), '2',
+                () => true,
+            ),
         ];
         assert.ok(others.every((storage) => !storage.hasCachedAssignments()));
     });
 
     test('an empty but valid assignment response is a cached snapshot', async () => {
         const storage = new ExperimentationStorage(
-            new MockMemento(), configuration, resolvedParameters('a'), '1', () => true,
+            new MockMemento(),
+            configuration,
+            resolvedParameters('a'),
+            sdkTargetingValues({ clientId: 'a' }),
+            '1',
+            () => true,
         );
         await storage.update(TAS_CACHE_KEY, { features: [], assignmentContext: '', configs: [] });
         assert.strictEqual(storage.hasCachedAssignments(), true);
@@ -83,7 +137,12 @@ suite('Experimentation storage', () => {
     test('malformed cache is ignored and reported without logging its contents', async () => {
         const warn = sinon.stub(logging, 'traceWarn');
         const storage = new ExperimentationStorage(
-            new MockMemento(), configuration, resolvedParameters('a'), '1', () => true,
+            new MockMemento(),
+            configuration,
+            resolvedParameters('a'),
+            sdkTargetingValues({ clientId: 'a' }),
+            '1',
+            () => true,
         );
         await storage.update(TAS_CACHE_KEY, 'malformed private payload');
         assert.strictEqual(storage.hasCachedAssignments(), false);
@@ -96,7 +155,12 @@ suite('Experimentation storage', () => {
         const globalState = new MockMemento();
         let active = true;
         const storage = new ExperimentationStorage(
-            globalState, configuration, resolvedParameters('a'), '1', () => active,
+            globalState,
+            configuration,
+            resolvedParameters('a'),
+            sdkTargetingValues({ clientId: 'a' }),
+            '1',
+            () => active,
         );
         await storage.update(TAS_CACHE_KEY, assignments);
         active = false;
@@ -109,7 +173,12 @@ suite('Experimentation storage', () => {
         sinon.stub(globalState, 'update').rejects(new Error('storage unavailable'));
         const warn = sinon.stub(logging, 'traceWarn');
         const storage = new ExperimentationStorage(
-            globalState, configuration, resolvedParameters('a'), '1', () => true,
+            globalState,
+            configuration,
+            resolvedParameters('a'),
+            sdkTargetingValues({ clientId: 'a' }),
+            '1',
+            () => true,
         );
         await assert.doesNotReject(storage.update(TAS_CACHE_KEY, assignments));
         sinon.assert.calledOnce(warn);

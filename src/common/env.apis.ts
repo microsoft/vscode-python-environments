@@ -1,4 +1,4 @@
-import { Disposable, env, Uri } from 'vscode';
+import { Disposable, env, Uri, version } from 'vscode';
 import type { TelemetryLogger, TelemetryLoggerOptions, TelemetrySender } from 'vscode';
 
 export function launchBrowser(uri: string | Uri): Thenable<boolean> {
@@ -27,6 +27,16 @@ export function getMachineId(): string {
 /** Read the display language for an approved audience binding. */
 export function getLanguage(): string {
     return env.language;
+}
+
+/** Read the VS Code application version used by built-in experimentation targeting. */
+export function getVSCodeVersion(): string {
+    return version;
+}
+
+/** Read the VS Code application name used by built-in experimentation targeting. */
+export function getAppName(): string {
+    return env.appName;
 }
 
 /** Create a VS Code logger that applies telemetry consent and data cleaning. */

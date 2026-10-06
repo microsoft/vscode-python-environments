@@ -81,10 +81,11 @@ snapshot queries, not refresh requests.
   second TAS Boolean gate.
 
 Cache data lives in `context.globalState`, namespaced by the approved configuration,
-extension version, and resolved targeting values such as identity and configured
-language. The namespace is hashed; identifiers and endpoints are not emitted in
-diagnostics. This prevents another population, endpoint, version, identity, or audience
-value from reusing that snapshot. Malformed cache data is ignored with a warning.
+extension version, resolved assignment parameters, and the SDK's built-in targeting
+values: VS Code version, application name, language, and legacy MachineId. The namespace
+is hashed; identifiers and endpoints are not emitted in diagnostics. This prevents a
+snapshot from being reused after its population, endpoint, version, identity, or audience
+context changes. Malformed cache data is ignored with a warning.
 
 Revoking telemetry consent disposes the SDK, aborts outstanding requests, clears
 shared attribution, and makes queries use defaults. Re-enabling consent creates a
