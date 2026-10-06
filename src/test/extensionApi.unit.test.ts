@@ -266,6 +266,7 @@ suite('PythonEnvironmentApiImpl - getEnvironmentSync', () => {
         const api = new PythonEnvironmentApiImpl(
             {
                 onDidChangeActiveEnvironment: new EventEmitter().event,
+                onDidChangePackageProviderPackages: new EventEmitter().event,
                 getLastKnownEnvironment,
             } as unknown as ApiArgs[0],
             {
