@@ -243,26 +243,26 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
 });
 
 suite('PythonEnvironmentApiImpl - getEnvironmentSync', () => {
-    teardown(() => {
-        sinon.restore();
-    });
+    type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
+    const workspaceUri = Uri.joinPath(Uri.file(process.cwd()), 'workspace');
+    const environmentUri = Uri.joinPath(workspaceUri, '.venv');
+    const scope = Uri.joinPath(workspaceUri, 'script.py');
+    const lastKnown = {
+        envId: { id: 'selected', managerId: 'ms-python.python:venv' },
+        name: 'selected',
+        displayName: 'selected',
+        displayPath: environmentUri.fsPath,
+        version: '3.12.0',
+        environmentPath: environmentUri,
+        execInfo: { run: { executable: Uri.joinPath(environmentUri, 'python').fsPath, args: [] } },
+        sysPrefix: environmentUri.fsPath,
+    } as PythonEnvironment;
 
-    test('returns the last-known environment without waiting for manager readiness', () => {
-        const workspaceUri = Uri.joinPath(Uri.file(process.cwd()), 'workspace');
-        const environmentUri = Uri.joinPath(workspaceUri, '.venv');
-        const scope = Uri.joinPath(workspaceUri, 'script.py');
-        const lastKnown = {
-            envId: { id: 'selected', managerId: 'ms-python.python:venv' },
-            name: 'selected',
-            displayName: 'selected',
-            displayPath: environmentUri.fsPath,
-            version: '3.12.0',
-            environmentPath: environmentUri,
-            execInfo: { run: { executable: Uri.joinPath(environmentUri, 'python').fsPath, args: [] } },
-            sysPrefix: environmentUri.fsPath,
-        } as PythonEnvironment;
-        type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
-        const getLastKnownEnvironment = sinon.stub().withArgs(scope).returns(lastKnown);
+    function createApi(environment: PythonEnvironment | undefined): {
+        api: PythonEnvironmentApiImpl;
+        getLastKnownEnvironment: sinon.SinonStub;
+    } {
+        const getLastKnownEnvironment = sinon.stub().returns(environment);
         const api = new PythonEnvironmentApiImpl(
             {
                 onDidChangeActiveEnvironment: new EventEmitter().event,
@@ -277,8 +277,31 @@ suite('PythonEnvironmentApiImpl - getEnvironmentSync', () => {
             {} as unknown as ApiArgs[3],
             { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4],
         );
+        return { api, getLastKnownEnvironment };
+    }
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('returns the last-known environment without waiting for manager readiness', () => {
+        const { api, getLastKnownEnvironment } = createApi(lastKnown);
 
         assert.strictEqual(api.getEnvironmentSync(scope), lastKnown);
+        sinon.assert.calledOnceWithExactly(getLastKnownEnvironment, scope);
+    });
+
+    test('returns the last-known global environment', () => {
+        const { api, getLastKnownEnvironment } = createApi(lastKnown);
+
+        assert.strictEqual(api.getEnvironmentSync(undefined), lastKnown);
+        sinon.assert.calledOnceWithExactly(getLastKnownEnvironment, undefined);
+    });
+
+    test('returns undefined when no environment has been resolved', () => {
+        const { api, getLastKnownEnvironment } = createApi(undefined);
+
+        assert.strictEqual(api.getEnvironmentSync(scope), undefined);
         sinon.assert.calledOnceWithExactly(getLastKnownEnvironment, scope);
     });
 });
