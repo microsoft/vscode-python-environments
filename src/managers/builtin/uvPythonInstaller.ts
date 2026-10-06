@@ -11,6 +11,8 @@ import {
     TaskScope,
 } from 'vscode';
 import { spawnProcess } from '../../common/childProcess.apis';
+import { launchBrowser } from '../../common/env.apis';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, UvInstallStrings } from '../../common/localize';
 import { traceError, traceInfo, traceLog, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
@@ -28,6 +30,8 @@ export const UV_INSTALL_PYTHON_DONT_ASK_KEY = 'python-envs:uv:UV_INSTALL_PYTHON_
 
 const MAX_PROMPT_DETAIL_LENGTH = 120;
 const TASK_TIMEOUT_MS = 5 * 60 * 1000;
+const PYTHON_INSTALLATION_OPTIONS_URL =
+    'https://code.visualstudio.com/docs/python/python-tutorial#_install-a-python-interpreter';
 
 // Accept only numeric release segments before forwarding script-controlled input to uv.
 const INSTALLABLE_PYTHON_VERSION = /^\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.dev\d+)?$/i;
@@ -235,7 +239,17 @@ async function ensureUvForVersionLookup(
     if (selection !== UvInstallStrings.installUv) {
         return 'declined';
     }
+    return installUvForVersionLookup(log);
+}
+
+async function installUvForVersionLookup(
+    log?: LogOutputChannel,
+    showInstallFailure = false,
+): Promise<EnsureUvForInlineScriptVersionLookupResult> {
     if (!(await installUv(log))) {
+        if (showInstallFailure) {
+            await showErrorMessageWithLogs(UvInstallStrings.uvInstallFailed, log);
+        }
         return 'failed';
     }
     if (await isUvInstalled(log)) {
@@ -252,7 +266,25 @@ async function ensureUvForVersionLookup(
  * @returns Whether uv is available for version lookup.
  */
 export async function ensureUvForPythonVersionLookup(log?: LogOutputChannel): Promise<boolean> {
-    return (await ensureUvForVersionLookup(UvInstallStrings.installUvForVersionLookupPrompt, log)) === 'available';
+    if (await isUvInstalled(log)) {
+        return true;
+    }
+
+    const selection = await showInformationMessage(
+        UvInstallStrings.installUvForVersionLookupPrompt,
+        { modal: true },
+        UvInstallStrings.installUv,
+        UvInstallStrings.otherPythonInstallationOptions,
+        UvInstallStrings.close,
+    );
+    if (selection === UvInstallStrings.otherPythonInstallationOptions) {
+        await launchBrowser(PYTHON_INSTALLATION_OPTIONS_URL);
+        return false;
+    }
+    if (selection !== UvInstallStrings.installUv) {
+        return false;
+    }
+    return (await installUvForVersionLookup(log, true)) === 'available';
 }
 
 export async function ensureUvForInlineScriptVersionLookupDetailed(
