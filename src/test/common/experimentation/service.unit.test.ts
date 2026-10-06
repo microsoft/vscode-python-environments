@@ -134,9 +134,17 @@ suite('Experimentation service', () => {
         return service;
     }
 
-    async function cache(values: Record<string, unknown> = { example: true }): Promise<void> {
-        await new ExperimentationStorage(state, CONFIGURATION, IDENTITY, VERSION, () => true).update(TAS_CACHE_KEY, {
-            features: Object.keys(values), assignmentContext: 'cached;',
+    async function cache(values: Record<string, unknown> = { example: true }, language = 'en'): Promise<void> {
+        const parameters = new Map([
+            ['approved_identity', IDENTITY],
+            ['approved_version', VERSION],
+            ['approved_language', language],
+        ]);
+        await new ExperimentationStorage(
+            state, CONFIGURATION, parameters, VERSION, () => true,
+        ).update(TAS_CACHE_KEY, {
+            features: Object.keys(values),
+            assignmentContext: 'cached;',
             configs: [{ Id: 'vscode', Parameters: values }],
         });
     }
@@ -208,6 +216,19 @@ suite('Experimentation service', () => {
         assert.strictEqual(service.diagnostics.assignmentsFetch, 'notObserved');
         assert.strictEqual(service.getTreatmentVariable('example', false), true);
         assert.deepStrictEqual(getSharedTelemetryProperties(), { 'abexp.assignmentcontext': 'cached;' });
+    });
+
+    test('does not reuse warm cache after a resolved targeting value changes', async () => {
+        await cache();
+        (envApis.getLanguage as sinon.SinonStub).returns('fr');
+        const service = start();
+        await service.initializePromise;
+        assert.strictEqual(service.diagnostics.cacheState, 'absent');
+        assert.strictEqual(service.getTreatmentVariable('example', false), false);
+        assert.deepStrictEqual(getSharedTelemetryProperties(), {});
+        assert.strictEqual(
+            clients[0].options.assignmentsFilterProviders?.[0].getFilters().get('approved_language'), 'fr',
+        );
     });
 
     test('serves newly fetched Boolean, number and string assignments with type-appropriate defaults', async () => {

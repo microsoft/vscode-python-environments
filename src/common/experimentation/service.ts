@@ -244,7 +244,7 @@ export class ExperimentationService implements Disposable {
             parameters.set(name, value);
         }
         const storage = new ExperimentationStorage(
-            this.context.globalState, configuration, identity, this.version, () => this.isActive(run),
+            this.context.globalState, configuration, parameters, this.version, () => this.isActive(run),
         );
         const cached = storage.hasCachedAssignments();
         this.snapshot = { ...this.snapshot, cacheState: cached ? 'present' : 'absent', hasUsableSnapshot: cached };

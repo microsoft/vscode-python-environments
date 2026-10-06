@@ -29,7 +29,7 @@ function isCacheData(value: unknown): boolean {
     );
 }
 
-/** Scope globalState assignments by identity and configuration, ignoring stopped SDK writes. */
+/** Scope globalState assignments by configuration and resolved targeting values, ignoring stopped SDK writes. */
 export class ExperimentationStorage implements Memento {
     private readonly prefix: string;
     private reportedInvalidCache = false;
@@ -37,7 +37,7 @@ export class ExperimentationStorage implements Memento {
     constructor(
         private readonly storage: Memento,
         configuration: ExperimentationConfiguration,
-        identity: string,
+        resolvedAssignmentParameters: ReadonlyMap<string, string>,
         extensionVersion: string,
         private readonly isActive: () => boolean,
     ) {
@@ -46,7 +46,7 @@ export class ExperimentationStorage implements Memento {
             configuration.targetPopulation,
             configuration.identityParameter,
             Object.entries(configuration.assignmentParameters).sort(([a], [b]) => a.localeCompare(b)),
-            identity,
+            Array.from(resolvedAssignmentParameters.entries()).sort(([a], [b]) => a.localeCompare(b)),
             extensionVersion,
         ]);
         this.prefix = `python-envs.experimentation.${createHash('sha256').update(namespace).digest('hex')}.`;

@@ -12,7 +12,10 @@ const configuration: ExperimentationConfiguration = {
     assignmentsEndpoint: 'https://assignments.example.invalid/api/v1/assignments',
     targetPopulation: 'public',
     identityParameter: 'approved_identity',
-    assignmentParameters: { approved_identity: 'machineId' },
+    assignmentParameters: {
+        approved_identity: 'machineId',
+        approved_language: 'language',
+    },
 };
 const assignments = {
     features: [],
@@ -20,15 +23,27 @@ const assignments = {
     configs: [{ Id: 'vscode', Parameters: { example: false } }],
 };
 
+function resolvedParameters(identity: string, language = 'en'): ReadonlyMap<string, string> {
+    return new Map([
+        ['approved_identity', identity],
+        ['approved_language', language],
+    ]);
+}
+
 suite('Experimentation storage', () => {
     teardown(() => sinon.restore());
 
-    test('persists through globalState and reuses the same identity and configuration after restart', async () => {
+    test('persists through globalState and reuses the same resolved parameters in any order', async () => {
         const globalState = new MockMemento();
-        const first = new ExperimentationStorage(globalState, configuration, 'machine-a', '1.0.0', () => true);
+        const first = new ExperimentationStorage(
+            globalState, configuration, resolvedParameters('machine-a'), '1.0.0', () => true,
+        );
         await globalState.update('unrelated', 1);
         await first.update(TAS_CACHE_KEY, assignments);
-        const restarted = new ExperimentationStorage(globalState, configuration, 'machine-a', '1.0.0', () => true);
+        const restarted = new ExperimentationStorage(globalState, configuration, new Map([
+            ['approved_language', 'en'],
+            ['approved_identity', 'machine-a'],
+        ]), '1.0.0', () => true);
         assert.deepStrictEqual(restarted.get(TAS_CACHE_KEY), assignments);
         assert.strictEqual(restarted.hasCachedAssignments(), true);
         assert.deepStrictEqual(restarted.keys(), [TAS_CACHE_KEY]);
@@ -36,32 +51,40 @@ suite('Experimentation storage', () => {
         assert.ok(globalState.keys().every((key) => !key.includes('machine-a')));
     });
 
-    test('does not reuse another identity, audience, endpoint or extension version', async () => {
+    test('does not reuse another identity, targeting value, audience, endpoint or extension version', async () => {
         const globalState = new MockMemento();
-        const original = new ExperimentationStorage(globalState, configuration, 'a', '1', () => true);
+        const original = new ExperimentationStorage(
+            globalState, configuration, resolvedParameters('a'), '1', () => true,
+        );
         await original.update(TAS_CACHE_KEY, assignments);
         const others = [
-            new ExperimentationStorage(globalState, configuration, 'b', '1', () => true),
+            new ExperimentationStorage(globalState, configuration, resolvedParameters('b'), '1', () => true),
+            new ExperimentationStorage(globalState, configuration, resolvedParameters('a', 'fr'), '1', () => true),
             new ExperimentationStorage(
-                globalState, { ...configuration, targetPopulation: 'insider' }, 'a', '1', () => true,
+                globalState, { ...configuration, targetPopulation: 'insider' }, resolvedParameters('a'), '1',
+                () => true,
             ),
             new ExperimentationStorage(globalState, {
                 ...configuration, assignmentsEndpoint: 'https://other.example.invalid/api/v1/assignments',
-            }, 'a', '1', () => true),
-            new ExperimentationStorage(globalState, configuration, 'a', '2', () => true),
+            }, resolvedParameters('a'), '1', () => true),
+            new ExperimentationStorage(globalState, configuration, resolvedParameters('a'), '2', () => true),
         ];
         assert.ok(others.every((storage) => !storage.hasCachedAssignments()));
     });
 
     test('an empty but valid assignment response is a cached snapshot', async () => {
-        const storage = new ExperimentationStorage(new MockMemento(), configuration, 'a', '1', () => true);
+        const storage = new ExperimentationStorage(
+            new MockMemento(), configuration, resolvedParameters('a'), '1', () => true,
+        );
         await storage.update(TAS_CACHE_KEY, { features: [], assignmentContext: '', configs: [] });
         assert.strictEqual(storage.hasCachedAssignments(), true);
     });
 
     test('malformed cache is ignored and reported without logging its contents', async () => {
         const warn = sinon.stub(logging, 'traceWarn');
-        const storage = new ExperimentationStorage(new MockMemento(), configuration, 'a', '1', () => true);
+        const storage = new ExperimentationStorage(
+            new MockMemento(), configuration, resolvedParameters('a'), '1', () => true,
+        );
         await storage.update(TAS_CACHE_KEY, 'malformed private payload');
         assert.strictEqual(storage.hasCachedAssignments(), false);
         assert.strictEqual(storage.get(TAS_CACHE_KEY), undefined);
@@ -72,7 +95,9 @@ suite('Experimentation storage', () => {
     test('does not write after its SDK generation is stopped', async () => {
         const globalState = new MockMemento();
         let active = true;
-        const storage = new ExperimentationStorage(globalState, configuration, 'a', '1', () => active);
+        const storage = new ExperimentationStorage(
+            globalState, configuration, resolvedParameters('a'), '1', () => active,
+        );
         await storage.update(TAS_CACHE_KEY, assignments);
         active = false;
         await storage.update(TAS_CACHE_KEY, { features: [], assignmentContext: 'late;', configs: [] });
@@ -83,7 +108,9 @@ suite('Experimentation storage', () => {
         const globalState = new MockMemento();
         sinon.stub(globalState, 'update').rejects(new Error('storage unavailable'));
         const warn = sinon.stub(logging, 'traceWarn');
-        const storage = new ExperimentationStorage(globalState, configuration, 'a', '1', () => true);
+        const storage = new ExperimentationStorage(
+            globalState, configuration, resolvedParameters('a'), '1', () => true,
+        );
         await assert.doesNotReject(storage.update(TAS_CACHE_KEY, assignments));
         sinon.assert.calledOnce(warn);
         assert.strictEqual(storage.hasCachedAssignments(), false);
