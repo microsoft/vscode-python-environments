@@ -1,6 +1,8 @@
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
+import { PythonToolError, PythonToolOperation, throwIfCancelled } from '../../internal/pythonToolSupport';
+import { ProcessTerminationError, ProcessTimeoutError, runLoggedProcess } from '../../common/utils/processRunner';
 import {
     CancellationError,
     CancellationToken,
@@ -31,7 +33,6 @@ import { getWorkspacePersistentState } from '../../common/persistentState';
 import { pickProject } from '../../common/pickers/projects';
 import { PythonVersion } from '../../common/pythonVersion';
 import { StopWatch } from '../../common/stopWatch';
-import { createDeferred } from '../../common/utils/deferred';
 import { untildify } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import {
@@ -201,51 +202,59 @@ export async function getConda(native?: NativePythonFinder): Promise<string> {
     return await getCondaExecutable(native);
 }
 
+/** Resolves a configured command name for tool execution and portable command descriptors. */
+export async function getCondaForTools(): Promise<string> {
+    const command = await getConda();
+    return path.resolve(path.isAbsolute(command) ? command : await which(command));
+}
+
 async function _runConda(
     conda: string,
     args: string[],
     log?: LogOutputChannel,
     token?: CancellationToken,
+    timeout?: number,
+    toolExecution = false,
 ): Promise<string> {
-    const deferred = createDeferred<string>();
     args = quoteArgs(args);
     const quotedConda = quoteStringIfNecessary(conda);
     const timer = new StopWatch();
-    deferred.promise.finally(() => traceInfo(`Ran conda in ${timer.elapsedTime}: ${quotedConda} ${args.join(' ')}`));
-    const proc = spawnProcess(quotedConda, args, { shell: true });
-
-    token?.onCancellationRequested(() => {
-        proc.kill();
-        deferred.reject(new CancellationError());
-    });
-
-    proc.on('error', (err) => {
-        log?.error(`Error spawning conda: ${err}`);
-        deferred.reject(new Error(`Error spawning conda: ${err.message}`));
-    });
-
-    let stdout = '';
-    let stderr = '';
-    proc.stdout?.on('data', (data) => {
-        const d = data.toString('utf-8');
-        stdout += d;
-        log?.info(d.trim());
-    });
-    proc.stderr?.on('data', (data) => {
-        const d = data.toString('utf-8');
-        stderr += d;
-        log?.error(d.trim());
-    });
-    proc.on('close', () => {
-        deferred.resolve(stdout);
-    });
-    proc.on('exit', (code) => {
-        if (code !== 0) {
-            deferred.reject(new Error(`Failed to run "conda ${args.join(' ')}":\n ${stderr}`));
+    try {
+        if (toolExecution) {
+            return await runLoggedProcess(quotedConda, args, { shell: true }, log, token, timeout);
         }
-    });
-
-    return deferred.promise;
+        return await new Promise<string>((resolve, reject) => {
+            const proc = spawnProcess(quotedConda, args, { shell: true });
+            token?.onCancellationRequested(() => {
+                proc.kill();
+                reject(new CancellationError());
+            });
+            proc.on('error', (err) => {
+                log?.error(`Error spawning conda: ${err}`);
+                reject(new Error(`Error spawning conda: ${err.message}`));
+            });
+            let stdout = '';
+            let stderr = '';
+            proc.stdout?.on('data', (data) => {
+                const value = data.toString('utf-8');
+                stdout += value;
+                log?.info(value.trim());
+            });
+            proc.stderr?.on('data', (data) => {
+                const value = data.toString('utf-8');
+                stderr += value;
+                log?.error(value.trim());
+            });
+            proc.on('close', () => resolve(stdout));
+            proc.on('exit', (code) => {
+                if (code !== 0) {
+                    reject(new Error(`Failed to run "conda ${args.join(' ')}":\n ${stderr}`));
+                }
+            });
+        });
+    } finally {
+        traceInfo(`Ran conda in ${timer.elapsedTime}: ${quotedConda} ${args.join(' ')}`);
+    }
 }
 
 async function runConda(args: string[], log?: LogOutputChannel, token?: CancellationToken): Promise<string> {
@@ -257,9 +266,14 @@ export async function runCondaExecutable(
     args: string[],
     log?: LogOutputChannel,
     token?: CancellationToken,
+    timeout?: number,
+    toolExecution = false,
 ): Promise<string> {
-    const conda = await getCondaExecutable(undefined);
-    return await _runConda(conda, args, log, token);
+    if (toolExecution) {
+        throwIfCancelled(token);
+    }
+    const conda = toolExecution ? await getCondaForTools() : await getCondaExecutable(undefined);
+    return await _runConda(conda, args, log, token, timeout, toolExecution);
 }
 
 let prefixes: string[] | undefined;
@@ -841,6 +855,8 @@ export async function refreshCondaEnvs(
     api: PythonEnvironmentApi,
     log: LogOutputChannel,
     manager: EnvironmentManager,
+    strict = false,
+    onError?: (error: unknown) => void,
 ): Promise<PythonEnvironment[]> {
     log.info(`Refreshing conda environments (hardRefresh=${hardRefresh})`);
 
@@ -850,6 +866,10 @@ export async function refreshCondaEnvs(
     } catch (error) {
         traceError('Failed to refresh native finder for conda environments', error);
         log.error(`Failed to refresh native finder: ${error instanceof Error ? error.message : String(error)}`);
+        onError?.(error);
+        if (strict) {
+            throw error;
+        }
         return [];
     }
 
@@ -857,6 +877,15 @@ export async function refreshCondaEnvs(
     if (!data || !Array.isArray(data)) {
         traceWarn(`Native finder returned invalid data: ${typeof data}, expected array`);
         log.warn(`Native finder returned invalid data type: ${typeof data}`);
+        const error = new Error(
+            l10n.t(
+                'Conda discovery returned invalid data. Retry environment discovery before configuring an environment.',
+            ),
+        );
+        onError?.(error);
+        if (strict) {
+            throw error;
+        }
         return [];
     }
 
@@ -911,6 +940,10 @@ export async function refreshCondaEnvs(
                             error instanceof Error ? error.message : String(error)
                         }`,
                     );
+                    onError?.(error);
+                    if (strict) {
+                        throw error;
+                    }
                 }
             }),
         );
@@ -1189,38 +1222,77 @@ export async function quickCreateConda(
     fsPath: string,
     name: string,
     additionalPackages?: string[],
+    operation?: PythonToolOperation,
 ): Promise<PythonEnvironment | undefined> {
     const prefix = path.join(fsPath, name);
     const execPath = os.platform() === 'win32' ? path.join(prefix, 'python.exe') : path.join(prefix, 'bin', 'python');
 
-    return await withProgress(
-        {
-            location: ProgressLocation.Notification,
-            title: `Creating conda environment: ${name}`,
-        },
-        async () => {
-            try {
-                const conda = await getConda();
-                await runCondaExecutable(['create', '--yes', '--prefix', prefix, 'python'], log);
-                if (additionalPackages && additionalPackages.length > 0) {
-                    await runConda(['install', '--yes', '--prefix', prefix, ...additionalPackages], log);
-                }
-                const version = await getVersion(prefix);
-
-                // Use proper prefix-based activation with actual conda path
-                const environment = api.createPythonEnvironmentItem(
-                    await getPrefixesCondaPythonInfo(prefix, execPath, version, conda, manager),
-                    manager,
-                );
-                return environment;
-            } catch (e) {
-                log.error('Failed to create conda environment', e);
-                setImmediate(async () => {
-                    await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
-                });
+    const create = async () => {
+        let environment: PythonEnvironment | undefined;
+        try {
+            throwIfCancelled(operation?.token);
+            const conda = await getConda();
+            const baseVersion = operation?.baseEnvironment
+                ? PythonVersion.tryParse(operation.baseEnvironment.version)
+                : undefined;
+            await runCondaExecutable(
+                [
+                    'create',
+                    '--yes',
+                    '--prefix',
+                    prefix,
+                    baseVersion ? `python=${baseVersion.major}.${baseVersion.minor}` : 'python',
+                ],
+                log,
+                operation?.token,
+                operation ? 300_000 : undefined,
+                !!operation,
+            );
+            throwIfCancelled(operation?.token);
+            if (!operation && additionalPackages && additionalPackages.length > 0) {
+                await runConda(['install', '--yes', '--prefix', prefix, ...additionalPackages], log);
             }
-        },
-    );
+            const version = await getVersion(prefix);
+
+            // Use proper prefix-based activation with actual conda path
+            environment = api.createPythonEnvironmentItem(
+                await getPrefixesCondaPythonInfo(prefix, execPath, version, conda, manager),
+                manager,
+            );
+            if (operation && additionalPackages && additionalPackages.length > 0) {
+                await operation.managePackages(environment, { install: additionalPackages, runHeadless: true });
+            }
+            throwIfCancelled(operation?.token);
+            return environment;
+        } catch (e) {
+            log.error('Failed to create conda environment', e);
+            if (operation) {
+                if (e instanceof CancellationError || e instanceof PythonToolError) {
+                    throw e;
+                }
+                throw new PythonToolError(
+                    e instanceof ProcessTerminationError
+                        ? 'PROCESS_TERMINATION_FAILED'
+                        : e instanceof ProcessTimeoutError
+                        ? 'TIMEOUT'
+                        : environment
+                        ? 'PACKAGE_INSTALL_FAILED'
+                        : 'CREATION_FAILED',
+                    l10n.t('Failed to set up the Conda environment: {0}', e instanceof Error ? e.message : String(e)),
+                    environment,
+                );
+            }
+            setImmediate(async () => {
+                await showErrorMessageWithLogs(CondaStrings.condaCreateFailed, log);
+            });
+        }
+    };
+    return operation
+        ? create()
+        : withProgress(
+              { location: ProgressLocation.Notification, title: `Creating conda environment: ${name}` },
+              create,
+          );
 }
 
 export async function deleteCondaEnvironment(environment: PythonEnvironment, log: LogOutputChannel): Promise<boolean> {

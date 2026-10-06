@@ -416,6 +416,20 @@ suite('inlineScriptMetadata', () => {
             assert.strictEqual(md, undefined);
         });
 
+        test('strict tool reads reject invalid metadata while public reads keep their existing behavior', async () => {
+            const uri = Uri.file(path.join(tmpDir, 'invalid.py'));
+            await fs.writeFile(uri.fsPath, script(['# /// script', '# dependencies = [', '# ///']));
+            assert.strictEqual(await readInlineScriptMetadataFromFile(uri), undefined);
+            await assert.rejects(readInlineScriptMetadataFromFile(uri, true), /PEP 723/);
+        });
+
+        test('strict tool reads surface I/O errors but accept an ordinary script without metadata', async () => {
+            const uri = Uri.file(path.join(tmpDir, 'plain.py'));
+            await assert.rejects(readInlineScriptMetadataFromFile(uri, true), /ENOENT/);
+            await fs.writeFile(uri.fsPath, 'print("ordinary script")\n');
+            assert.strictEqual(await readInlineScriptMetadataFromFile(uri, true), undefined);
+        });
+
         test('block past MAX_HEADER_BYTES boundary is NOT found (cap is enforced)', async () => {
             const filePath = path.join(tmpDir, 'big.py');
             // Pad with a comment that fills more than MAX_HEADER_BYTES,

@@ -11,8 +11,9 @@ export async function createPipOrUvCommandWithKind<P, U>(
     PipCommand: CommandConstructor<P>,
     UvCommand: CommandConstructor<U>,
 ): Promise<PipOrUvCommand<P, U>> {
-    if (await shouldUseUv(options.log, environmentPath)) {
-        const uvExecutable = await getUvExecutable(options.log, environmentPath);
+    const token = options.toolExecution ? options.cancellationToken : undefined;
+    if (await shouldUseUv(options.log, environmentPath, environmentPath, token)) {
+        const uvExecutable = await getUvExecutable(options.log, environmentPath, token);
         if (!uvExecutable) {
             throw new Error(`uv became unavailable for environment: ${environmentPath}`);
         }
