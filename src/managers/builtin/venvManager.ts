@@ -52,6 +52,7 @@ import {
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
+    private environmentFolders: { collection: PythonEnvironment[]; length: number; folders: Set<string> } | undefined;
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;
     private skipWatcherRefresh = false;
@@ -311,6 +312,31 @@ export class VenvManager implements EnvironmentManager {
             return;
         }
         return this.internalRefresh(undefined, true, VenvManagerStrings.venvRefreshing);
+    }
+
+    /**
+     * Returns true when a known virtual environment is at, or inside, the given path.
+     *
+     * Called for every deletion in the workspace, so it is a single set lookup: the set holds every
+     * environment prefix and its parent folders, and is rebuilt when the collection changes.
+     *
+     * @param fsPath A file system path, for example of a deleted folder.
+     */
+    hasEnvironmentAt(fsPath: string): boolean {
+        const cache = this.environmentFolders;
+        if (cache?.collection !== this.collection || cache.length !== this.collection.length) {
+            const folders = new Set<string>();
+            for (const env of this.collection) {
+                let folder = env.sysPrefix ? path.resolve(env.sysPrefix) : undefined;
+                while (folder && !folders.has(normalizePath(folder))) {
+                    folders.add(normalizePath(folder));
+                    const parent = path.dirname(folder);
+                    folder = parent !== folder ? parent : undefined;
+                }
+            }
+            this.environmentFolders = { collection: this.collection, length: this.collection.length, folders };
+        }
+        return this.environmentFolders!.folders.has(normalizePath(path.resolve(fsPath)));
     }
 
     private async internalRefresh(
@@ -574,6 +600,7 @@ export class VenvManager implements EnvironmentManager {
 
     /**
      * Loads and maps Python environments to their corresponding project paths in the workspace. about  O(p × e) where p = projects.len and e = environments.len
+     * Skips unresolvable selections without preventing other projects from restoring their environments.
      */
     private async loadEnvMap() {
         const globals = await this.baseManager.getEnvironments('global');
@@ -608,7 +635,7 @@ export class VenvManager implements EnvironmentManager {
                         foundEnv = resolved;
                     } else {
                         this.log.error(`Failed to resolve python environment: ${env}`);
-                        return;
+                        continue;
                     }
                 }
                 // Given found env, add it to the map and fire the event if needed.
