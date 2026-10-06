@@ -52,7 +52,9 @@ import {
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
+    private environmentFolders: { collection: PythonEnvironment[]; length: number; folders: Set<string> } | undefined;
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
+    private readonly projectSelectionRevisions = new Map<string, number>();
     private globalEnv: PythonEnvironment | undefined;
     private skipWatcherRefresh = false;
 
@@ -295,7 +297,7 @@ export class VenvManager implements EnvironmentManager {
         const changed: Uri[] = [];
         this.fsPathToEnv.forEach((env, uri) => {
             if (normalizePath(env.environmentPath.fsPath) === envPath) {
-                this.fsPathToEnv.delete(uri);
+                this.setProjectSelection(uri, undefined);
                 changed.push(Uri.file(uri));
             }
         });
@@ -313,12 +315,38 @@ export class VenvManager implements EnvironmentManager {
         return this.internalRefresh(undefined, true, VenvManagerStrings.venvRefreshing);
     }
 
+    /**
+     * Returns true when a known virtual environment is at, or inside, the given path.
+     *
+     * Called for every deletion in the workspace, so it is a single set lookup: the set holds every
+     * environment prefix and its parent folders, and is rebuilt when the collection changes.
+     *
+     * @param fsPath A file system path, for example of a deleted folder.
+     */
+    hasEnvironmentAt(fsPath: string): boolean {
+        const cache = this.environmentFolders;
+        if (cache?.collection !== this.collection || cache.length !== this.collection.length) {
+            const folders = new Set<string>();
+            for (const env of this.collection) {
+                let folder = env.sysPrefix ? path.resolve(env.sysPrefix) : undefined;
+                while (folder && !folders.has(normalizePath(folder))) {
+                    folders.add(normalizePath(folder));
+                    const parent = path.dirname(folder);
+                    folder = parent !== folder ? parent : undefined;
+                }
+            }
+            this.environmentFolders = { collection: this.collection, length: this.collection.length, folders };
+        }
+        return this.environmentFolders!.folders.has(normalizePath(path.resolve(fsPath)));
+    }
+
     private async internalRefresh(
         scope: RefreshEnvironmentsScope,
         hardRefresh: boolean,
         title: string,
         location: ProgressLocation = ProgressLocation.Window,
     ): Promise<void> {
+        const selectionRevisions = new Map(this.projectSelectionRevisions);
         await withProgress(
             {
                 location,
@@ -339,7 +367,7 @@ export class VenvManager implements EnvironmentManager {
                         this,
                         scope ? [scope] : undefined,
                     )) ?? [];
-                await this.loadEnvMap();
+                await this.loadEnvMap(selectionRevisions);
 
                 const added = this.collection.map((env) => ({ environment: env, kind: EnvironmentChangeKind.add }));
                 this._onDidChangeEnvironments.fire([...discard, ...added]);
@@ -426,13 +454,7 @@ export class VenvManager implements EnvironmentManager {
                 }
             }
 
-            const normalizedPwPath = normalizePath(pw.uri.fsPath);
-            const before = this.fsPathToEnv.get(normalizedPwPath);
-            if (environment) {
-                this.fsPathToEnv.set(normalizedPwPath, environment);
-            } else {
-                this.fsPathToEnv.delete(normalizedPwPath);
-            }
+            const before = this.setProjectSelection(pw.uri.fsPath, environment);
             await setVenvForWorkspace(pw.uri.fsPath, environment?.environmentPath.fsPath);
 
             if (before?.envId.id !== environment?.envId.id) {
@@ -452,13 +474,7 @@ export class VenvManager implements EnvironmentManager {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                const normalizedPath = normalizePath(p.uri.fsPath);
-                before.set(p.uri.fsPath, this.fsPathToEnv.get(normalizedPath));
-                if (environment) {
-                    this.fsPathToEnv.set(normalizedPath, environment);
-                } else {
-                    this.fsPathToEnv.delete(normalizedPath);
-                }
+                before.set(p.uri.fsPath, this.setProjectSelection(p.uri.fsPath, environment));
             });
 
             await setVenvForWorkspaces(
@@ -473,6 +489,21 @@ export class VenvManager implements EnvironmentManager {
                 }
             });
         }
+    }
+
+    private setProjectSelection(
+        fsPath: string,
+        environment: PythonEnvironment | undefined,
+    ): PythonEnvironment | undefined {
+        const key = normalizePath(fsPath);
+        const before = this.fsPathToEnv.get(key);
+        this.projectSelectionRevisions.set(key, (this.projectSelectionRevisions.get(key) ?? 0) + 1);
+        if (environment) {
+            this.fsPathToEnv.set(key, environment);
+        } else {
+            this.fsPathToEnv.delete(key);
+        }
+        return before;
     }
 
     async resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
@@ -574,13 +605,19 @@ export class VenvManager implements EnvironmentManager {
 
     /**
      * Loads and maps Python environments to their corresponding project paths in the workspace. about  O(p × e) where p = projects.len and e = environments.len
+     * Preserves project selections changed after this refresh began, including queued change notifications.
      * Skips unresolvable selections without preventing other projects from restoring their environments.
      */
-    private async loadEnvMap() {
+    private async loadEnvMap(selectionRevisions: ReadonlyMap<string, number>) {
+        const isCurrent = (key: string) => this.projectSelectionRevisions.get(key) === selectionRevisions.get(key);
         const globals = await this.baseManager.getEnvironments('global');
         await this.loadGlobalEnv(globals);
 
-        this.fsPathToEnv.clear();
+        this.fsPathToEnv.forEach((_env, key) => {
+            if (isCurrent(key)) {
+                this.fsPathToEnv.delete(key);
+            }
+        });
 
         const sorted = sortEnvironments(this.collection);
         const projects = this.api.getPythonProjects();
@@ -590,6 +627,9 @@ export class VenvManager implements EnvironmentManager {
             const originalPath = project.uri.fsPath;
             const normalizedPath = normalizePath(originalPath);
             const env = await getVenvForWorkspace(originalPath);
+            if (!isCurrent(normalizedPath)) {
+                continue;
+            }
             if (env) {
                 // from env path find PythonEnvironment object in the collection.
                 let foundEnv = this.findEnvironmentByPath(env, sorted) ?? this.findEnvironmentByPath(env, globals);
@@ -603,6 +643,9 @@ export class VenvManager implements EnvironmentManager {
                         this,
                         this.baseManager,
                     );
+                    if (!isCurrent(normalizedPath)) {
+                        continue;
+                    }
                     if (resolved) {
                         // If resolved; add it to the venvManager collection
                         this.addEnvironment(resolved, false);
@@ -615,9 +658,11 @@ export class VenvManager implements EnvironmentManager {
                 // Given found env, add it to the map and fire the event if needed.
                 this.fsPathToEnv.set(normalizedPath, foundEnv);
                 if (previousEnv?.envId.id !== foundEnv.envId.id) {
-                    events.push(() =>
-                        this._onDidChangeEnvironment.fire({ uri: project.uri, old: undefined, new: foundEnv }),
-                    );
+                    events.push(() => {
+                        if (isCurrent(normalizedPath)) {
+                            this._onDidChangeEnvironment.fire({ uri: project.uri, old: undefined, new: foundEnv });
+                        }
+                    });
                 }
             } else {
                 // Search through all known environments (e) and check if any are associated with the current project path. If so, add that environment and path in the map.
