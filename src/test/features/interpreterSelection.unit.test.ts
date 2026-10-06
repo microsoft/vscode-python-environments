@@ -1133,19 +1133,22 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             return undefined;
         });
 
-        await applyInitialEnvironmentSelection(
-            selection.envManagers,
-            projectManager,
-            mockNativeFinder as unknown as NativePythonFinder,
-            mockApi as unknown as PythonEnvironmentApi,
-        );
-        configuredManager = undefined;
+        try {
+            await applyInitialEnvironmentSelection(
+                selection.envManagers,
+                projectManager,
+                mockNativeFinder as unknown as NativePythonFinder,
+                mockApi as unknown as PythonEnvironmentApi,
+            );
+            configuredManager = undefined;
 
-        assert.strictEqual(
-            (await selection.envManagers.getEnvironment(testUri))?.envId.id,
-            configuredEnvironment.envId.id,
-        );
-        selection.envManagers.dispose();
+            assert.strictEqual(
+                (await selection.envManagers.getEnvironment(testUri))?.envId.id,
+                configuredEnvironment.envId.id,
+            );
+        } finally {
+            selection.envManagers.dispose();
+        }
     });
 
     test("does not retain a configured manager's fallback as an explicit selection", async () => {
@@ -1178,16 +1181,22 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             return undefined;
         });
 
-        await applyInitialEnvironmentSelection(
-            selection.envManagers,
-            projectManager,
-            mockNativeFinder as unknown as NativePythonFinder,
-            mockApi as unknown as PythonEnvironmentApi,
-        );
-        selection.setSystemEnvironment(laterSystemEnvironment);
+        try {
+            await applyInitialEnvironmentSelection(
+                selection.envManagers,
+                projectManager,
+                mockNativeFinder as unknown as NativePythonFinder,
+                mockApi as unknown as PythonEnvironmentApi,
+            );
+            selection.setSystemEnvironment(laterSystemEnvironment);
 
-        assert.strictEqual((await selection.envManagers.getEnvironment(testUri))?.envId.id, venvFallback.envId.id);
-        selection.envManagers.dispose();
+            assert.strictEqual(
+                (await selection.envManagers.getEnvironment(testUri))?.envId.id,
+                venvFallback.envId.id,
+            );
+        } finally {
+            selection.envManagers.dispose();
+        }
     });
 
     test('should handle global scope errors when deferred to background', async () => {
