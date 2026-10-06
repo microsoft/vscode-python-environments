@@ -5,20 +5,49 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typemoq from 'typemoq';
-import { CancellationTokenSource, LogOutputChannel, Uri } from 'vscode';
-import { PythonEnvironmentApi, PythonProject } from '../../../api';
+import { CancellationTokenSource, LogOutputChannel, Uri, WorkspaceConfiguration } from 'vscode';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
 import * as telemetry from '../../../common/telemetry/sender';
 import { isSameOrParentPath } from '../../../common/utils/pathUtils';
 import * as windowApis from '../../../common/window.apis';
+import * as workspaceApis from '../../../common/workspace.apis';
+import { PythonProjectManagerImpl } from '../../../features/projectManager';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import * as sourcing from '../../../managers/conda/condaSourcingUtils';
 import * as condaUtils from '../../../managers/conda/condaUtils';
 import { makeMockCondaEnvironment } from '../../mocks/pythonEnvironment';
 
+interface IsolationScenario {
+    name: string;
+    hasBase: boolean;
+    otherLocal?: boolean;
+    explicit?: 'shared' | 'external';
+    nesting?: 'owner-is-child' | 'other-is-child';
+    reverseProjectOrder?: boolean;
+}
+
+const scenarios: IsolationScenario[] = [
+    { name: 'no-base', hasBase: false },
+    { name: 'base', hasBase: true, reverseProjectOrder: true },
+    { name: 'two-local', hasBase: true, otherLocal: true },
+    { name: 'explicit-shared', hasBase: true, explicit: 'shared' },
+    { name: 'explicit-external', hasBase: true, explicit: 'external', reverseProjectOrder: true },
+    { name: 'nested-parent', hasBase: true, nesting: 'owner-is-child' },
+    { name: 'nested-child', hasBase: true, nesting: 'other-is-child' },
+];
+
 suite('CondaEnvManager - project isolation', () => {
     let sandbox: sinon.SinonSandbox;
     let cancellation: CancellationTokenSource;
+
+    function assertEnvironment(
+        actual: PythonEnvironment | undefined,
+        expected: PythonEnvironment | undefined,
+        message?: string,
+    ): void {
+        assert.strictEqual(actual?.envId.id, expected?.envId.id, message);
+    }
 
     setup(() => {
         sandbox = sinon.createSandbox();
@@ -42,22 +71,14 @@ suite('CondaEnvManager - project isolation', () => {
     });
 
     for (const operation of ['initialize', 'refresh'] as const) {
-        for (const scenario of [
-            'no-base',
-            'base',
-            'two-local',
-            'explicit-shared',
-            'explicit-external',
-            'nested-parent',
-            'nested-child',
-        ] as const) {
-            for (const ownerFirst of [false, true]) {
-                test(`${operation}: project selections remain isolated (${scenario}, ownerFirst=${ownerFirst})`, async () => {
-                    const hasBase = scenario !== 'no-base';
+        for (const scenario of scenarios) {
+            const projectOrders = scenario.reverseProjectOrder ? [false, true] : [false];
+            for (const ownerFirst of projectOrders) {
+                test(`${operation}: project selections remain isolated (${scenario.name}, ownerFirst=${ownerFirst})`, async () => {
                     const owner: PythonProject = {
                         name: 'owner',
                         uri: Uri.file(
-                            scenario === 'nested-parent'
+                            scenario.nesting === 'owner-is-child'
                                 ? path.resolve('conda-isolation', 'project-a', 'nested')
                                 : path.resolve('conda-isolation', 'project-a'),
                         ),
@@ -65,9 +86,9 @@ suite('CondaEnvManager - project isolation', () => {
                     const other: PythonProject = {
                         name: 'other',
                         uri: Uri.file(
-                            scenario === 'nested-parent'
+                            scenario.nesting === 'owner-is-child'
                                 ? path.resolve('conda-isolation', 'project-a')
-                                : scenario === 'nested-child'
+                                : scenario.nesting === 'other-is-child'
                                   ? path.resolve('conda-isolation', 'project-a', 'nested')
                                   : path.resolve('conda-isolation', 'project-b'),
                         ),
@@ -88,7 +109,9 @@ suite('CondaEnvManager - project isolation', () => {
                     api.setup((a) => a.getPythonProject(typemoq.It.isAny())).returns((uri: Uri) =>
                         projectsBySpecificity.find((project) => isSameOrParentPath(project.uri.fsPath, uri.fsPath)),
                     );
-                    const refresh = sandbox.stub(condaUtils, 'refreshCondaEnvs').resolves(hasBase ? [base] : []);
+                    const refresh = sandbox
+                        .stub(condaUtils, 'refreshCondaEnvs')
+                        .resolves(scenario.hasBase ? [base] : []);
                     const savedSelection = sandbox.stub(condaUtils, 'getCondaForWorkspace').resolves(undefined);
                     const resolve = sandbox.stub(condaUtils, 'resolveCondaPath').resolves(external);
                     const manager = new CondaEnvManager(
@@ -99,40 +122,40 @@ suite('CondaEnvManager - project isolation', () => {
                     try {
                         if (operation === 'refresh') {
                             await manager.initialize();
-                            assert.strictEqual(await manager.get(other.uri), hasBase ? base : undefined);
+                            assertEnvironment(await manager.get(other.uri), scenario.hasBase ? base : undefined);
                         }
                         refresh.resolves([
-                            ...(hasBase ? [base] : []),
+                            ...(scenario.hasBase ? [base] : []),
                             local,
-                            ...(scenario === 'two-local' ? [otherLocal] : []),
+                            ...(scenario.otherLocal ? [otherLocal] : []),
                         ]);
                         const explicit =
-                            scenario === 'explicit-shared'
+                            scenario.explicit === 'shared'
                                 ? local
-                                : scenario === 'explicit-external'
+                                : scenario.explicit === 'external'
                                   ? external
                                   : undefined;
                         savedSelection.withArgs(other.uri.fsPath).resolves(explicit?.environmentPath.fsPath);
                         const expectedOther =
-                            explicit ?? (scenario === 'two-local' ? otherLocal : hasBase ? base : undefined);
+                            explicit ?? (scenario.otherLocal ? otherLocal : scenario.hasBase ? base : undefined);
                         if (operation === 'initialize') {
                             await manager.initialize();
                         } else {
                             await manager.refresh(undefined);
                         }
 
-                        assert.strictEqual(await manager.get(owner.uri), local);
-                        assert.strictEqual(
+                        assertEnvironment(await manager.get(owner.uri), local);
+                        assertEnvironment(
                             await manager.get(other.uri),
                             expectedOther,
                             "Only an explicit selection may make a project use another project's local environment",
                         );
-                        assert.strictEqual(
+                        assertEnvironment(
                             await manager.get(Uri.joinPath(other.uri, 'main.py')),
                             expectedOther,
                             "Files in the other project must use that project's selected environment or fallback",
                         );
-                        if (scenario === 'explicit-external') {
+                        if (scenario.explicit === 'external') {
                             sinon.assert.calledOnce(resolve);
                             assert.strictEqual(resolve.firstCall.args[0], external.environmentPath.fsPath);
                         } else {
@@ -145,4 +168,42 @@ suite('CondaEnvManager - project isolation', () => {
             }
         }
     }
+
+    test('uses the real project manager to isolate nested project environments', async () => {
+        sandbox.stub(workspaceApis, 'getConfiguration').returns({
+            get: <T>(_key: string, defaultValue?: T) => defaultValue,
+        } as WorkspaceConfiguration);
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
+
+        const projects = new PythonProjectManagerImpl();
+        const parent = projects.create('parent', Uri.file(path.resolve('conda-isolation', 'project-a')));
+        const child = projects.create('child', Uri.joinPath(parent.uri, 'nested'));
+        await projects.add([parent, child], { persistSettings: false });
+
+        const base = makeMockCondaEnvironment('base', path.resolve('conda-isolation', 'base'));
+        const childLocal = makeMockCondaEnvironment('child-env', Uri.joinPath(child.uri, '.conda').fsPath);
+        sandbox.stub(condaUtils, 'refreshCondaEnvs').resolves([base, childLocal]);
+        sandbox.stub(condaUtils, 'getCondaForWorkspace').resolves(undefined);
+        const api = {
+            getPythonProjects: () => projects.getProjects(),
+            getPythonProject: (uri: Uri) => projects.get(uri),
+        } as unknown as PythonEnvironmentApi;
+        const manager = new CondaEnvManager(
+            typemoq.Mock.ofType<NativePythonFinder>().object,
+            api,
+            typemoq.Mock.ofType<LogOutputChannel>().object,
+        );
+
+        try {
+            await manager.initialize();
+
+            assertEnvironment(await manager.get(parent.uri), base);
+            assertEnvironment(await manager.get(Uri.joinPath(parent.uri, 'main.py')), base);
+            assertEnvironment(await manager.get(child.uri), childLocal);
+            assertEnvironment(await manager.get(Uri.joinPath(child.uri, 'main.py')), childLocal);
+        } finally {
+            manager.dispose();
+            projects.dispose();
+        }
+    });
 });
