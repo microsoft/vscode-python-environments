@@ -63,3 +63,14 @@ jobs:
           file-pattern: 'api/CHANGELOG.md'
           skip-label: 'skip api changelog'
           failure-message: 'The public API (${prereq-pattern}) was changed without a changelog entry in ${file-pattern} (the ${skip-label} label can be used to pass this check)'
+
+      - name: 'Public API changes require documentation updates'
+        uses: brettcannon/check-for-changed-files@d85c64d17b3c1d0ac57c9cc46ea39399b0d6fa71 # v1.2.2
+        with:
+          prereq-pattern: |
+            src/api.ts
+            src/types.ts
+            src/publicErrors.ts
+          file-pattern: 'docs/README.md'
+          skip-label: 'skip api docs'
+          failure-message: 'The public API (${prereq-pattern}) was changed without updating ${file-pattern} (the ${skip-label} label can be used to pass this check)'

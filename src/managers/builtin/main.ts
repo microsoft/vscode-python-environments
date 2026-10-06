@@ -27,10 +27,13 @@ export async function registerSystemPythonFeatures(
     const venvDebouncedRefresh = createSimpleDebounce(500, () => {
         venvManager.watcherRefresh();
     });
-    const activationWatcher = createFileSystemWatcher('{**/activate}', false, true, false);
+    const activationWatcher = createFileSystemWatcher('{**/activate}', false, false, false);
     disposables.push(
         activationWatcher,
         activationWatcher.onDidCreate(() => {
+            venvDebouncedRefresh.trigger();
+        }),
+        activationWatcher.onDidChange(() => {
             venvDebouncedRefresh.trigger();
         }),
         activationWatcher.onDidDelete(() => {
