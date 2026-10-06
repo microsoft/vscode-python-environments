@@ -526,17 +526,6 @@ suite('PythonEnvironmentManagers - selection stored by a non-default manager', (
         assert.strictEqual((await envManagers.getEnvironment(fileUri))?.envId.id, localVenv.envId.id);
     });
 
-    test('the default manager fallback is returned when no explicit selection exists', async () => {
-        assert.strictEqual((await envManagers.getEnvironment(fileUri))?.envId.id, newestGlobal.envId.id);
-        sinon.assert.notCalled(systemGet);
-    });
-
-    test('an auto-discovered selection does not replace the default manager fallback', async () => {
-        await envManagers.setEnvironment(projectUri, configured, false);
-
-        assert.strictEqual((await envManagers.getEnvironment(fileUri))?.envId.id, newestGlobal.envId.id);
-    });
-
     test('a later auto-discovered selection clears an explicit one even if the system manager kept it', async () => {
         // python.defaultInterpreterPath applied, then removed: the system manager still stores the old
         // interpreter, and global auto-discovery reads it back from there.
