@@ -1,10 +1,14 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventEmitter, Uri } from 'vscode';
-import { PythonEnvironment, PythonProject } from '../api';
+import {
+    PythonEnvironment,
+    PythonProject,
+} from '../api';
 import * as managerReady from '../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
 import type { PythonProjectManager } from '../features/projectManager';
+import type { InternalPackageManager } from '../managers/common/registeredManagers';
 
 suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
     test('fires event with correct added and removed projects', () => {
@@ -16,7 +20,10 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
         } as unknown as PythonProjectManager;
 
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
-        const mockEnvManagers = { onDidChangeActiveEnvironment: new EventEmitter().event } as unknown as ApiArgs[0];
+        const mockEnvManagers = {
+            onDidChangeActiveEnvironment: new EventEmitter().event,
+            onDidChangePackageProviderPackages: new EventEmitter().event,
+        } as unknown as ApiArgs[0];
         const mockProjectCreators = {} as unknown as ApiArgs[2];
         const mockTerminalManager = {} as unknown as ApiArgs[3];
         const mockEnvVarManager = { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4];
@@ -91,6 +98,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
         const mockEnvManagers = {
             onDidChangeActiveEnvironment: new EventEmitter().event,
+            onDidChangePackageProviderPackages: new EventEmitter().event,
             getEnvironment: sinon.stub().returns(
                 new Promise<PythonEnvironment | undefined>((resolve) => {
                     resolveEnvironment = resolve;
@@ -134,6 +142,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
         const mockEnvManagers = {
             onDidChangeActiveEnvironment: new EventEmitter().event,
+            onDidChangePackageProviderPackages: new EventEmitter().event,
             getEnvironment: sinon.stub().returns(
                 new Promise<PythonEnvironment | undefined>((resolve) => {
                     resolveEnvironment = resolve;
@@ -158,5 +167,77 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
         resolveEnvironment?.(undefined);
 
         assert.strictEqual(await pending, undefined);
+    });
+});
+
+suite('PythonEnvironmentApiImpl - package resolution', () => {
+    setup(() => {
+        sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    function createApi(manager: InternalPackageManager | undefined): {
+        api: PythonEnvironmentApiImpl;
+        getPackageManager: sinon.SinonStub;
+    } {
+        type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
+        const getPackageManager = sinon.stub().returns(manager);
+        const envManagers = {
+            onDidChangeActiveEnvironment: new EventEmitter().event,
+            onDidChangePackageProviderPackages: new EventEmitter().event,
+            getPackageManager,
+        } as unknown as ApiArgs[0];
+        const projectManager = {
+            getProjects: () => [],
+            onDidChangeProjects: new EventEmitter<void>().event,
+        } as unknown as ApiArgs[1];
+        return {
+            api: new PythonEnvironmentApiImpl(
+                envManagers,
+                projectManager,
+                {} as ApiArgs[2],
+                {} as ApiArgs[3],
+                { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4],
+            ),
+            getPackageManager,
+        };
+    }
+
+    const environment = {
+        envId: { id: 'environment', managerId: 'environment-manager' },
+    } as PythonEnvironment;
+
+    function expectNoPackageManagerError(error: unknown): true {
+        assert.ok(error instanceof Error, 'Expected an Error');
+        assert.strictEqual(error.name, 'Error');
+        assert.strictEqual(error.message, 'No package manager found');
+        return true;
+    }
+
+    test('rejects mutations and refreshes when no package manager resolves', async () => {
+        const { api } = createApi(undefined);
+
+        await assert.rejects(api.managePackages(environment, { install: ['example'] }), expectNoPackageManagerError);
+        await assert.rejects(api.refreshPackages(environment), expectNoPackageManagerError);
+    });
+
+    test('returns undefined for reads when no package manager resolves', async () => {
+        const { api } = createApi(undefined);
+
+        assert.strictEqual(await api.getPackages(environment), undefined);
+    });
+
+    test('delegates to the resolved manager', async () => {
+        const manage = sinon.stub().resolves();
+        const manager = { manage } as unknown as InternalPackageManager;
+        const { api, getPackageManager } = createApi(manager);
+
+        await api.managePackages(environment, { install: ['example'] });
+
+        assert.ok(getPackageManager.calledWithExactly(environment));
+        assert.ok(manage.calledOnceWithExactly(environment, { install: ['example'] }));
     });
 });
