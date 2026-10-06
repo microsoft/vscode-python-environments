@@ -132,12 +132,30 @@ export class VenvManager implements EnvironmentManager {
         if (this._initialized) {
             return this._initialized.promise;
         }
-        this._initialized = createDeferred();
+        const initialized = (this._initialized = createDeferred<void>());
         try {
-            await this.initializeDiscovery();
-            await this.loadGlobalEnv(await this.baseManager.getEnvironments('global'));
+            await this.initializeWithBase();
+        } catch (error) {
+            if (this._initialized === initialized) {
+                this._initialized = undefined;
+            }
+            throw error;
         } finally {
-            this._initialized.resolve();
+            initialized.resolve();
+        }
+    }
+
+    private async initializeWithBase(): Promise<void> {
+        await this.initializeDiscovery();
+        const discovery = this.discovery;
+        try {
+            await this.loadGlobalEnv(await this.baseManager.getEnvironments('global'));
+        } catch (error) {
+            // Discovery alone is not a complete human initialization when the base step fails.
+            if (this.discovery === discovery) {
+                this.discovery = undefined;
+            }
+            throw error;
         }
     }
 
@@ -520,10 +538,7 @@ export class VenvManager implements EnvironmentManager {
             getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getVenvForWorkspace(fsPath),
             resolve: (p) => resolveVenvPythonEnvironmentPath(p, this.nativeFinder, this.api, this, this.baseManager),
-            startBackgroundInit: async () => {
-                await this.initializeDiscovery();
-                await this.loadGlobalEnv(await this.baseManager.getEnvironments('global'));
-            },
+            startBackgroundInit: () => this.initializeWithBase(),
         });
         if (fastResult) {
             return fastResult.env;

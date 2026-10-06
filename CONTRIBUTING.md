@@ -235,6 +235,10 @@ public API, and human workflows retain their prompts; independently triggered
 startup UI can still appear while a tool runs. There is no global "suppress UI"
 switch. Exact nested-project persistence is also opt-in to the private setter;
 ordinary manager-setting updates retain their existing defaults.
+Human venv initialization retries discovery and base preparation after a failure,
+including failures after discovery has completed. A partial initialization is not
+reused as a successful cache on the next public lookup; private discovery still
+does not wait for human onboarding.
 
 Keep tests for both internal and human routes when changing these helpers. The
 focused suites are in `src/test/internal`, with shared creation/package and

@@ -5,8 +5,10 @@ import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { CancellationTokenSource, Uri } from 'vscode';
-import { PythonEnvironmentApi } from '../../api';
+import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
+import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
+import { isSameOrParentPath } from '../../common/utils/pathUtils';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
@@ -28,6 +30,7 @@ import * as poetryUtils from '../../managers/poetry/poetryUtils';
 import { PyEnvManager } from '../../managers/pyenv/pyenvManager';
 import * as pyenvUtils from '../../managers/pyenv/pyenvUtils';
 import { createMockLogOutputChannel } from '../mocks/helper';
+import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
 interface TestManager extends ToolEnvironmentManager {
     initialize(): Promise<void>;
@@ -183,5 +186,132 @@ suite('Agent discovery isolation from public onboarding', () => {
             release.resolve();
             await human;
         }
+    });
+
+    suite('venv public initialization recovery', () => {
+        let manager: VenvManager;
+        let base: PythonEnvironment;
+        let local: PythonEnvironment;
+        let discovery: sinon.SinonStub;
+        let persistence: sinon.SinonStub;
+        const failure = new Error('Unable to persist the installed Python selection');
+
+        setup(() => {
+            const project = { name: 'workspace', uri: scope };
+            sinon
+                .stub(api, 'getPythonProject')
+                .callsFake((uri) => (isSameOrParentPath(scope.fsPath, uri.fsPath) ? project : undefined));
+            sinon.stub(api, 'getPythonProjects').returns([project]);
+            base = createMockPythonEnvironment({
+                name: 'base',
+                managerId: SYSTEM_MANAGER_ID,
+                envPath: path.join(path.dirname(scope.fsPath), 'base-python', 'python'),
+            });
+            local = createMockPythonEnvironment({
+                name: 'local',
+                managerId: VENV_MANAGER_ID,
+                envPath: path.join(scope.fsPath, '.venv', process.platform === 'win32' ? 'Scripts' : 'bin', 'python'),
+                sysPrefix: path.join(scope.fsPath, '.venv'),
+            });
+            prompt.resolves(base.environmentPath.fsPath);
+            (systemUtils.resolveSystemPythonEnvironmentPath as sinon.SinonStub).resolves(base);
+            persistence = sinon.stub(cache, 'setSystemEnvForGlobal').rejects(failure);
+            discovery = venvUtils.findVirtualEnvironments as sinon.SinonStub;
+            manager = new VenvManager(
+                finder,
+                api,
+                new SysPythonManager(finder, api, createMockLogOutputChannel()),
+                createMockLogOutputChannel(),
+            );
+        });
+
+        test('public get rediscovers local environments after the base initialization step fails', async () => {
+            await manager.get(scope);
+            assert.ok(persistence.calledOnce);
+            assert.ok(discovery.calledOnce);
+            discovery.resolves([local]);
+
+            assert.strictEqual(await manager.get(scope), local);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [local]);
+            assert.ok(discovery.calledTwice);
+            assert.ok(prompt.calledOnce, 'A successful base installation must not be requested again');
+        });
+
+        for (const entry of ['initialize', 'getEnvironments'] as const) {
+            test(`${entry} retries discovery after a base initialization failure`, async () => {
+                const initialize = () =>
+                    entry === 'initialize' ? manager.initialize() : manager.getEnvironments('all');
+                await assert.rejects(initialize(), (error) => error === failure);
+                discovery.resolves([local]);
+
+                await initialize();
+                assert.strictEqual(await manager.get(scope), local);
+                assert.deepStrictEqual(await manager.getEnvironments('all'), [local]);
+                assert.ok(discovery.calledTwice);
+            });
+        }
+
+        test('direct initialization retries after discovery itself fails', async () => {
+            (systemUtils.refreshPythons as sinon.SinonStub).resolves([base]);
+            discovery.onFirstCall().rejects(failure);
+            discovery.resolves([local]);
+            await assert.rejects(manager.initialize(), (error) => error === failure);
+
+            await manager.initialize();
+            assert.strictEqual(await manager.get(scope), local);
+            assert.ok(discovery.calledTwice);
+            assert.ok(prompt.notCalled);
+        });
+
+        test('public get retries when loading the global selection after discovery fails', async () => {
+            (systemUtils.refreshPythons as sinon.SinonStub).resolves([base]);
+            (venvUtils.getVenvForGlobal as sinon.SinonStub).onSecondCall().rejects(failure);
+            await manager.get(scope);
+            discovery.resolves([local]);
+
+            assert.strictEqual(await manager.get(scope), local);
+            assert.ok(discovery.calledTwice);
+            assert.ok(prompt.notCalled);
+        });
+
+        test('successful initialization remains cached across public reads', async () => {
+            (systemUtils.refreshPythons as sinon.SinonStub).resolves([base]);
+            discovery.resolves([local]);
+            await manager.initialize();
+            await manager.initialize();
+
+            assert.strictEqual(await manager.get(scope), local);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), [local]);
+            assert.ok(discovery.calledOnce);
+        });
+
+        test('private discovery stays independent of failed human onboarding and supports the later public retry', async () => {
+            prompt.callsFake(async () => {
+                entered.resolve();
+                await release.promise;
+                return base.environmentPath.fsPath;
+            });
+            const human = manager.initialize().then(
+                () => undefined,
+                (error: unknown) => error,
+            );
+            await waitForToolRead(entered.promise, source.token, 1000);
+            try {
+                await manager[pythonToolSupport].initialize();
+                assert.strictEqual(await manager[pythonToolSupport].get(scope), undefined);
+                assert.ok(discovery.calledOnce);
+            } finally {
+                release.resolve();
+            }
+            assert.strictEqual(await human, failure);
+            discovery.resolves([local]);
+
+            await manager[pythonToolSupport].initialize();
+            assert.strictEqual(await manager[pythonToolSupport].get(scope), local);
+            await manager.initialize();
+            assert.strictEqual(await manager.get(scope), local);
+            assert.ok(discovery.calledTwice);
+            assert.ok(prompt.calledOnce);
+        });
     });
 });
