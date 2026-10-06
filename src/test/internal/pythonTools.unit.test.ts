@@ -6,8 +6,15 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { CancellationError, CancellationTokenSource, EventEmitter, Uri, WorkspaceConfiguration } from 'vscode';
-import { EnvironmentManager, Package, PythonEnvironment, PythonProject } from '../../api';
+import {
+    CancellationError,
+    CancellationToken,
+    CancellationTokenSource,
+    EventEmitter,
+    Uri,
+    WorkspaceConfiguration,
+} from 'vscode';
+import { EnvironmentManager, Package, PackageManagementOptions, PythonEnvironment, PythonProject } from '../../api';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -82,11 +89,15 @@ suite('Internal Python tools', () => {
         return env;
     }
 
-    function makeManager(name: string, fallback?: PythonEnvironment): ToolEnvironmentManager {
+    function makeManager(
+        name: string,
+        fallback?: PythonEnvironment,
+        preferredPackageManagerId = `${PYTHON_EXTENSION_ID}:pip`,
+    ): ToolEnvironmentManager {
         const selections = new Map<string, PythonEnvironment>();
         const manager: ToolEnvironmentManager = {
             name,
-            preferredPackageManagerId: `${PYTHON_EXTENSION_ID}:pip`,
+            preferredPackageManagerId,
             get: sinon
                 .stub()
                 .callsFake(async (scope?: Uri) =>
@@ -506,6 +517,91 @@ suite('Internal Python tools', () => {
             release.resolve();
             await Promise.all([install, read]);
         }
+    });
+
+    test('uses each project-scoped Poetry manager when two projects share an environment', async () => {
+        const second = Uri.file(path.join(root.fsPath, 'second'));
+        await fs.ensureDir(second.fsPath);
+        projectList.push({ name: 'second', uri: second });
+        const shared = await addEnvironment(path.join(temp, 'shared-poetry'), POETRY_MANAGER_ID);
+        const poetry = makeManager('poetry', undefined, POETRY_MANAGER_ID);
+        managers.registerEnvironmentManager(poetry, { extensionId: PYTHON_EXTENSION_ID });
+        await managers.setEnvironment(root, shared, false);
+        await managers.setEnvironment(second, shared, false);
+        projectSettings = [root, second].map((uri) => ({
+            path: path.relative(root.fsPath, uri.fsPath),
+            envManager: POETRY_MANAGER_ID,
+            packageManager: POETRY_MANAGER_ID,
+        }));
+
+        const calls: { operation: 'get' | 'manage'; project: string; scope: string }[] = [];
+        const poetryPackages: ToolPackageManager = {
+            name: 'poetry',
+            manage: sinon.stub().throws(new Error('Unscoped package route must not be called')),
+            getPackages: sinon.stub().throws(new Error('Unscoped package cache must not be called')),
+            refresh: sinon.stub().resolves(),
+            createForProject: (project) => ({
+                name: 'poetry',
+                manage: sinon.stub().throws(new Error('Public package route must not be called')),
+                getPackages: sinon.stub().throws(new Error('Public package cache must not be called')),
+                refresh: sinon.stub().resolves(),
+                [pythonToolSupport]: {
+                    getPackages: async (
+                        _environment: PythonEnvironment,
+                        _token: CancellationToken,
+                        scope: Uri,
+                    ) => {
+                        calls.push({ operation: 'get', project: project.uri.fsPath, scope: scope.fsPath });
+                        return [{ name: `${project.name}-package`, version: '1.0' }];
+                    },
+                    manage: async (
+                        _environment: PythonEnvironment,
+                        _options: PackageManagementOptions,
+                        _token: CancellationToken,
+                        scope: Uri,
+                    ) => {
+                        calls.push({ operation: 'manage', project: project.uri.fsPath, scope: scope.fsPath });
+                    },
+                },
+            }),
+            [pythonToolSupport]: {
+                getPackages: sinon.stub().throws(new Error('Unscoped package tool must not be called')),
+                manage: sinon.stub().throws(new Error('Unscoped package tool must not be called')),
+            },
+        };
+        managers.registerPackageManager(poetryPackages, { extensionId: PYTHON_EXTENSION_ID });
+
+        const firstQuery = await api.getEnvironment(
+            { resourcePath: root.fsPath, includePackages: true },
+            source.token,
+        );
+        const firstInstall = await api.installPackages(
+            { resourcePath: root.fsPath, packages: ['first-package'] },
+            source.token,
+        );
+        const secondQuery = await api.getEnvironment(
+            { resourcePath: second.fsPath, includePackages: true },
+            source.token,
+        );
+        const secondInstall = await api.installPackages(
+            { resourcePath: second.fsPath, packages: ['second-package'] },
+            source.token,
+        );
+
+        assert.deepStrictEqual(firstQuery.status === 'success' && firstQuery.packages, [
+            { name: 'workspace-package', version: '1.0' },
+        ]);
+        assert.strictEqual(firstInstall.status, 'success');
+        assert.deepStrictEqual(secondQuery.status === 'success' && secondQuery.packages, [
+            { name: 'second-package', version: '1.0' },
+        ]);
+        assert.strictEqual(secondInstall.status, 'success');
+        assert.deepStrictEqual(calls, [
+            { operation: 'get', project: root.fsPath, scope: root.fsPath },
+            { operation: 'manage', project: root.fsPath, scope: root.fsPath },
+            { operation: 'get', project: second.fsPath, scope: second.fsPath },
+            { operation: 'manage', project: second.fsPath, scope: second.fsPath },
+        ]);
     });
 
     test('reports completed selection as success when cancellation arrives after persistence', async () => {

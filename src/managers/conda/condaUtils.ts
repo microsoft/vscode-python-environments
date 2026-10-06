@@ -205,7 +205,33 @@ export async function getConda(native?: NativePythonFinder): Promise<string> {
 /** Resolves a configured command name for tool execution and portable command descriptors. */
 export async function getCondaForTools(): Promise<string> {
     const command = await getConda();
-    return path.resolve(path.isAbsolute(command) ? command : await which(command));
+    const resolved = path.resolve(path.isAbsolute(command) ? command : await which(command));
+    if (!isWindows() || !['.bat', '.cmd'].includes(path.extname(resolved).toLowerCase())) {
+        return resolved;
+    }
+
+    const directory = path.dirname(resolved);
+    const executableName = `${path.basename(resolved, path.extname(resolved))}.exe`;
+    const candidates = [
+        path.join(directory, executableName),
+        path.join(directory, 'Scripts', 'conda.exe'),
+        path.join(directory, '_conda.exe'),
+        path.resolve(directory, '..', 'Scripts', 'conda.exe'),
+        path.resolve(directory, '..', '_conda.exe'),
+    ];
+    for (const candidate of new Set(candidates.map((value) => path.resolve(value)))) {
+        if (await fse.pathExists(candidate)) {
+            return candidate;
+        }
+    }
+
+    throw new PythonToolError(
+        'CONDA_EXECUTABLE_NOT_FOUND',
+        l10n.t(
+            'Conda tool operations cannot launch the command script at {0}. Set python.condaPath to a conda.exe executable.',
+            resolved,
+        ),
+    );
 }
 
 async function _runConda(
@@ -216,15 +242,15 @@ async function _runConda(
     timeout?: number,
     toolExecution = false,
 ): Promise<string> {
-    args = quoteArgs(args);
-    const quotedConda = quoteStringIfNecessary(conda);
+    const command = toolExecution ? conda : quoteStringIfNecessary(conda);
+    const commandArgs = toolExecution ? args : quoteArgs(args);
     const timer = new StopWatch();
     try {
         if (toolExecution) {
-            return await runLoggedProcess(quotedConda, args, { shell: true }, log, token, timeout);
+            return await runLoggedProcess(command, commandArgs, { shell: false, windowsHide: true }, log, token, timeout);
         }
         return await new Promise<string>((resolve, reject) => {
-            const proc = spawnProcess(quotedConda, args, { shell: true });
+            const proc = spawnProcess(command, commandArgs, { shell: true });
             token?.onCancellationRequested(() => {
                 proc.kill();
                 reject(new CancellationError());
@@ -248,12 +274,12 @@ async function _runConda(
             proc.on('close', () => resolve(stdout));
             proc.on('exit', (code) => {
                 if (code !== 0) {
-                    reject(new Error(`Failed to run "conda ${args.join(' ')}":\n ${stderr}`));
+                    reject(new Error(`Failed to run "conda ${commandArgs.join(' ')}":\n ${stderr}`));
                 }
             });
         });
     } finally {
-        traceInfo(`Ran conda in ${timer.elapsedTime}: ${quotedConda} ${args.join(' ')}`);
+        traceInfo(`Ran conda in ${timer.elapsedTime}: ${command} ${commandArgs.join(' ')}`);
     }
 }
 

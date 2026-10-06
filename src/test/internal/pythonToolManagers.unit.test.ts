@@ -167,11 +167,17 @@ suite('Python tool manager capabilities', () => {
     test('Conda tool descriptors resolve a bare configured command to an absolute PATH executable', async () => {
         temp = await fs.mkdtemp(path.join(os.tmpdir(), 'conda-tool-command-'));
         const name = 'conda-tool-fixture';
-        const command = path.join(temp, process.platform === 'win32' ? `${name}.cmd` : name);
-        await fs.writeFile(
+        const commandDirectory = process.platform === 'win32' ? path.join(temp, 'condabin') : temp;
+        const command = path.join(commandDirectory, process.platform === 'win32' ? `${name}.cmd` : name);
+        const executable =
+            process.platform === 'win32' ? path.join(temp, 'Scripts', 'conda.exe') : command;
+        await fs.outputFile(
             command,
             process.platform === 'win32' ? '@echo off\r\nexit /b 0\r\n' : '#!/bin/sh\nexit 0\n',
         );
+        if (process.platform === 'win32') {
+            await fs.outputFile(executable, '');
+        }
         if (process.platform !== 'win32') {
             await fs.chmod(command, 0o755);
         }
@@ -180,13 +186,13 @@ suite('Python tool manager capabilities', () => {
             .stub(config, 'get')
             .callsFake(<T>(key: string, fallback?: T) => (key === 'condaPath' ? name : fallback) as T);
         const previousPath = process.env.PATH;
-        process.env.PATH = `${temp}${path.delimiter}${previousPath ?? ''}`;
+        process.env.PATH = `${commandDirectory}${path.delimiter}${previousPath ?? ''}`;
         try {
             const manager = new CondaEnvManager({} as NativePythonFinder, api, createMockLogOutputChannel());
             const described = await manager[pythonToolSupport].describe!(environment, source.token);
             assert.strictEqual(await condaUtils.getConda(), name, 'Public settings behavior is unchanged');
             assert.ok(path.isAbsolute(described.execInfo.activatedRun!.executable));
-            assert.strictEqual(normalizePath(described.execInfo.activatedRun!.executable), normalizePath(command));
+            assert.strictEqual(normalizePath(described.execInfo.activatedRun!.executable), normalizePath(executable));
             assert.strictEqual(environment.execInfo.activatedRun, undefined);
         } finally {
             if (previousPath === undefined) {

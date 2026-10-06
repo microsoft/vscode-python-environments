@@ -184,11 +184,12 @@ export class PythonToolsApiImpl implements PythonToolsApi {
                     };
                 }
                 try {
-                    const packageManager = await this.getPackageManager(environment, token);
+                    const packageScope = this.creationRoot(target, manager);
+                    const packageManager = await this.getPackageManager(environment, packageScope, token);
                     const packages = await packageManager.tools!.getPackages(
                         environment,
                         token,
-                        this.creationRoot(target, manager),
+                        packageScope,
                     );
                     return {
                         status: 'success',
@@ -599,9 +600,9 @@ export class PythonToolsApiImpl implements PythonToolsApi {
                 return environments;
             },
             managePackages: async (environment: PythonEnvironment, options: PackageManagementOptions) => {
-                const manager = await this.getPackageManager(environment, token);
-                throwIfCancelled(token);
                 const scope = this.creationRoot(target, this.managers.getEnvironmentManager(target.resource));
+                const manager = await this.getPackageManager(environment, scope, token);
+                throwIfCancelled(token);
                 await manager.tools!.manage(environment, { ...options, runHeadless: true }, token, scope);
             },
         };
@@ -609,11 +610,20 @@ export class PythonToolsApiImpl implements PythonToolsApi {
 
     private async getPackageManager(
         environment: PythonEnvironment,
+        scope: Uri,
         token: CancellationToken,
     ): Promise<InternalPackageManager> {
+        const preferredManagerId = this.managers.getEnvironmentManager(environment)?.preferredPackageManagerId;
         const manager = await this.waitForRegistration(
-            () => this.managers.getPackageManager(environment),
-            this.managers.onDidChangePackageManager,
+            () => {
+                const scoped = this.managers.getPackageManager(scope);
+                return scoped?.id === preferredManagerId ? scoped : this.managers.getPackageManager(environment);
+            },
+            (listener) =>
+                Disposable.from(
+                    this.managers.onDidChangePackageManager(listener),
+                    this.managers.onDidChangeProjectPackageManager(listener),
+                ),
             token,
         );
         if (!manager.tools) {
