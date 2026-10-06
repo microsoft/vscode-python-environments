@@ -990,6 +990,22 @@ export function getSettingWorkspaceScope<T>(section: string, key: string, scope?
 }
 
 /**
+ * Determines whether the Python Environments extension should activate.
+ *
+ * Explicit values are resolved independently for each workspace folder using VS Code's
+ * workspace-folder > workspace > user precedence. The extension activates when at least
+ * one folder enables integration, or when no explicit value applies.
+ */
+export function isEnvironmentsExtensionEnabled(): boolean {
+    const workspaceFolders = workspaceApis.getWorkspaceFolders();
+    const scopes = workspaceFolders?.length ? workspaceFolders.map((folder) => folder.uri) : [undefined];
+
+    return scopes.some(
+        (scope) => getSettingWorkspaceScope<boolean>('python', 'useEnvironmentsExtension', scope) !== false,
+    );
+}
+
+/**
  * Gets user-configured setting for user-scoped settings.
  * Only checks globalValue (ignores defaultValue).
  * @param section - The configuration section (e.g., 'python')

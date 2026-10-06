@@ -27,14 +27,26 @@ export async function registerSystemPythonFeatures(
     const venvDebouncedRefresh = createSimpleDebounce(500, () => {
         venvManager.watcherRefresh();
     });
-    const activationWatcher = createFileSystemWatcher('{**/activate}', false, true, false);
+    const activationWatcher = createFileSystemWatcher('{**/activate}', false, false, false);
+    // Deleting a folder is reported for the folder only, not for the files in it, so deleting a
+    // virtual environment folder never matches the activate script pattern above.
+    const deletionWatcher = createFileSystemWatcher('**/*', true, true, false);
     disposables.push(
         activationWatcher,
         activationWatcher.onDidCreate(() => {
             venvDebouncedRefresh.trigger();
         }),
+        activationWatcher.onDidChange(() => {
+            venvDebouncedRefresh.trigger();
+        }),
         activationWatcher.onDidDelete(() => {
             venvDebouncedRefresh.trigger();
+        }),
+        deletionWatcher,
+        deletionWatcher.onDidDelete((uri) => {
+            if (venvManager.hasEnvironmentAt(uri.fsPath)) {
+                venvDebouncedRefresh.trigger();
+            }
         }),
         onDidDeleteFiles(() => {
             venvDebouncedRefresh.trigger();
