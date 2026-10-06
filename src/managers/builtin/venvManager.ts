@@ -52,6 +52,7 @@ import {
 
 export class VenvManager implements EnvironmentManager {
     private collection: PythonEnvironment[] = [];
+    private environmentFolders: { collection: PythonEnvironment[]; length: number; folders: Set<string> } | undefined;
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private readonly projectSelectionRevisions = new Map<string, number>();
     private globalEnv: PythonEnvironment | undefined;
@@ -312,6 +313,31 @@ export class VenvManager implements EnvironmentManager {
             return;
         }
         return this.internalRefresh(undefined, true, VenvManagerStrings.venvRefreshing);
+    }
+
+    /**
+     * Returns true when a known virtual environment is at, or inside, the given path.
+     *
+     * Called for every deletion in the workspace, so it is a single set lookup: the set holds every
+     * environment prefix and its parent folders, and is rebuilt when the collection changes.
+     *
+     * @param fsPath A file system path, for example of a deleted folder.
+     */
+    hasEnvironmentAt(fsPath: string): boolean {
+        const cache = this.environmentFolders;
+        if (cache?.collection !== this.collection || cache.length !== this.collection.length) {
+            const folders = new Set<string>();
+            for (const env of this.collection) {
+                let folder = env.sysPrefix ? path.resolve(env.sysPrefix) : undefined;
+                while (folder && !folders.has(normalizePath(folder))) {
+                    folders.add(normalizePath(folder));
+                    const parent = path.dirname(folder);
+                    folder = parent !== folder ? parent : undefined;
+                }
+            }
+            this.environmentFolders = { collection: this.collection, length: this.collection.length, folders };
+        }
+        return this.environmentFolders!.folders.has(normalizePath(path.resolve(fsPath)));
     }
 
     private async internalRefresh(
