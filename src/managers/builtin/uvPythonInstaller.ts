@@ -275,7 +275,6 @@ export async function ensureUvForPythonVersionLookup(log?: LogOutputChannel): Pr
         { modal: true },
         UvInstallStrings.installUv,
         UvInstallStrings.otherPythonInstallationOptions,
-        UvInstallStrings.close,
     );
     if (selection === UvInstallStrings.otherPythonInstallationOptions) {
         await launchBrowser(PYTHON_INSTALLATION_OPTIONS_URL);

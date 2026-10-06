@@ -282,7 +282,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         assert(showInformationMessageStub.calledOnce, 'Should offer the requested prerelease');
     });
 
-    test('should request consent before global Python version lookup', async () => {
+    test('should cancel global Python version lookup without installing uv', async () => {
         isUvInstalledStub.resolves(false);
         showInformationMessageStub.resolves(undefined);
 
@@ -293,8 +293,9 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
             { modal: true },
             UvInstallStrings.installUv,
             UvInstallStrings.otherPythonInstallationOptions,
-            UvInstallStrings.close,
         );
+        sinon.assert.notCalled(launchBrowserStub);
+        assert.strictEqual(showErrorMessageStub.callCount, 0);
     });
 
     test('should open alternate Python installation guidance', async () => {
@@ -306,15 +307,6 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
             launchBrowserStub,
             'https://code.visualstudio.com/docs/python/python-tutorial#_install-a-python-interpreter',
         );
-    });
-
-    test('should close global Python version lookup without installing uv', async () => {
-        isUvInstalledStub.resolves(false);
-        showInformationMessageStub.resolves(UvInstallStrings.close);
-
-        assert.strictEqual(await ensureUvForPythonVersionLookup(mockLog), false);
-        sinon.assert.notCalled(launchBrowserStub);
-        assert.strictEqual(showErrorMessageStub.callCount, 0);
     });
 
     test('should install uv for global Python version lookup after consent', async () => {

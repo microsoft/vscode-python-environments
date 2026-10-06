@@ -386,7 +386,6 @@ export namespace UvInstallStrings {
         'The Global environment manager uses uv to find and install Python versions. uv was not found. Install uv to continue, or install Python another way.',
     );
     export const otherPythonInstallationOptions = l10n.t('Other installation options');
-    export const close = l10n.t('Close');
     export const installed = l10n.t('installed');
     export const fetchingVersions = l10n.t('Fetching available Python versions...');
     export const failedToFetchVersions = l10n.t('Failed to fetch available Python versions');
