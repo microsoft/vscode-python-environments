@@ -8,6 +8,17 @@ import { getConfiguration, getWorkspaceFolder, isWorkspaceTrusted } from '../../
 import { getUvEnvironments } from './uvEnvironments';
 
 let available = createDeferred<boolean>();
+let uvExecutable = 'uv';
+
+/**
+ * Uses an explicitly located uv executable for this extension-host session.
+ * Resets availability so the executable is verified before use.
+ * @param executable Command or absolute executable path to invoke.
+ */
+export function setUvExecutable(executable: string): void {
+    uvExecutable = executable;
+    resetUvInstallationCache();
+}
 
 /**
  * Reset the UV installation cache.
@@ -20,30 +31,31 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
     if (available.completed) {
         return available.promise;
     }
-    log?.info(`Running: uv --version`);
-    const proc = spawnProcess('uv', ['--version']);
+    const pending = available;
+    log?.info(`Running: ${uvExecutable} --version`);
+    const proc = spawnProcess(uvExecutable, ['--version']);
     proc.on('error', () => {
-        available.resolve(false);
+        pending.resolve(false);
     });
     proc.stdout?.on('data', (d) => log?.info(d.toString()));
     proc.on('exit', (code) => {
         if (code === 0) {
             sendTelemetryEvent(EventNames.VENV_USING_UV);
         }
-        available.resolve(code === 0);
+        pending.resolve(code === 0);
     });
-    return available.promise;
+    return pending.promise;
 }
 
 /**
- * Resolves uv from the extension PATH, or from pyprojectx in the owning trusted workspace.
+ * Resolves uv from this session's installation or PATH, or from pyprojectx in the owning trusted workspace.
  * @param log Optional command log.
  * @param scope Path inside the workspace whose local uv should be considered.
  * @returns The command to spawn, or undefined when uv is unavailable.
  */
 export async function getUvExecutable(log?: LogOutputChannel, scope?: string): Promise<string | undefined> {
     if (await isUvInstalled(log)) {
-        return 'uv';
+        return uvExecutable;
     }
     const workspaceFolder = scope && isWorkspaceTrusted() ? getWorkspaceFolder(Uri.file(scope)) : undefined;
     if (!workspaceFolder) {
@@ -90,7 +102,7 @@ export async function runUV(
     log?: LogOutputChannel,
     token?: CancellationToken,
     timeout?: number,
-    executable = 'uv',
+    executable = uvExecutable,
 ): Promise<string> {
     log?.info(`Running: ${executable} ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
