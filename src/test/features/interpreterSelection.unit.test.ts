@@ -432,54 +432,56 @@ suite('Interpreter Selection - Priority Chain', () => {
                 }
             });
 
-            test('should resolve a command name like "python3" from PATH for a workspace folder', async () => {
-                const executable = await putCommandOnPath('pyenvs-test-python3');
-                const workspaceUri = Uri.file(path.resolve('/test/workspace'));
-                const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
-                sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
-                sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
-                sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
-                useDefaultInterpreterPath('pyenvs-test-python3');
-                mockNativeFinder.resolve.resolves({ executable, version: '3.12.4', prefix: commandDir });
-                mockApi.resolveEnvironment.resolves(mockSystemEnv);
+            for (const testCase of [
+                {
+                    scope: 'workspace folder',
+                    resolve: async () => {
+                        const workspaceUri = Uri.file(path.resolve('test', 'workspace'));
+                        const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
+                        sandbox
+                            .stub(workspaceApis, 'getConfiguration')
+                            .returns(createMockConfig([]) as WorkspaceConfiguration);
+                        sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+                        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+                        return resolveEnvironmentByPriority(
+                            workspaceUri,
+                            mockEnvManagers as unknown as EnvironmentManagers,
+                            mockProjectManager as unknown as PythonProjectManager,
+                            mockNativeFinder as unknown as NativePythonFinder,
+                            mockApi as unknown as PythonEnvironmentApi,
+                        );
+                    },
+                },
+                {
+                    scope: 'global scope',
+                    resolve: async () => {
+                        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
+                        return resolveGlobalEnvironmentByPriority(
+                            mockEnvManagers as unknown as EnvironmentManagers,
+                            mockNativeFinder as unknown as NativePythonFinder,
+                            mockApi as unknown as PythonEnvironmentApi,
+                        );
+                    },
+                },
+            ]) {
+                test(`should resolve a command name from PATH for the ${testCase.scope}`, async () => {
+                    const executable = await putCommandOnPath('pyenvs-test-python3');
+                    useDefaultInterpreterPath('pyenvs-test-python3');
+                    mockNativeFinder.resolve.resolves({ executable, version: '3.12.4', prefix: commandDir });
+                    mockApi.resolveEnvironment.resolves(mockSystemEnv);
 
-                const result = await resolveEnvironmentByPriority(
-                    workspaceUri,
-                    mockEnvManagers as unknown as EnvironmentManagers,
-                    mockProjectManager as unknown as PythonProjectManager,
-                    mockNativeFinder as unknown as NativePythonFinder,
-                    mockApi as unknown as PythonEnvironmentApi,
-                );
+                    const result = await testCase.resolve();
 
-                assert.strictEqual(result.source, 'defaultInterpreterPath');
-                assert.strictEqual(
-                    normalizePath(mockNativeFinder.resolve.firstCall.args[0]),
-                    normalizePath(executable),
-                );
-            });
-
-            test('should resolve a command name from PATH for the global scope', async () => {
-                const executable = await putCommandOnPath('pyenvs-test-python3');
-                sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
-                useDefaultInterpreterPath('pyenvs-test-python3');
-                mockNativeFinder.resolve.resolves({ executable, version: '3.12.4', prefix: commandDir });
-                mockApi.resolveEnvironment.resolves(mockSystemEnv);
-
-                const result = await resolveGlobalEnvironmentByPriority(
-                    mockEnvManagers as unknown as EnvironmentManagers,
-                    mockNativeFinder as unknown as NativePythonFinder,
-                    mockApi as unknown as PythonEnvironmentApi,
-                );
-
-                assert.strictEqual(result.source, 'defaultInterpreterPath');
-                assert.strictEqual(
-                    normalizePath(mockNativeFinder.resolve.firstCall.args[0]),
-                    normalizePath(executable),
-                );
-            });
+                    assert.strictEqual(result.source, 'defaultInterpreterPath');
+                    assert.strictEqual(
+                        normalizePath(mockNativeFinder.resolve.firstCall.args[0]),
+                        normalizePath(executable),
+                    );
+                });
+            }
 
             test('should resolve a command name that is not on PATH against the workspace folder', async () => {
-                const workspaceUri = Uri.file(path.resolve('/test/workspace'));
+                const workspaceUri = Uri.file(path.resolve('test', 'workspace'));
                 const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
                 const expected = path.resolve(workspaceUri.fsPath, 'pyenvs-test-missing-python');
                 sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
