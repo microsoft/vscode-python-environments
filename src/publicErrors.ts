@@ -56,3 +56,40 @@ export function isPackageVersionLookupNotSupportedError(
             (error as { code?: unknown }).code === 'PackageVersionLookupNotSupported')
     );
 }
+
+/**
+ * Error thrown when an environment manager cannot honor a requested creation option.
+ */
+export class CreateEnvironmentOptionNotSupportedError extends Error {
+    /**
+     * Stable discriminator identifying this error type across bundle boundaries.
+     */
+    public readonly code = 'CreateEnvironmentOptionNotSupported';
+
+    constructor(
+        public readonly option: 'name',
+        message?: string,
+    ) {
+        super(message ?? `The environment manager does not support the "${option}" creation option.`);
+        this.name = 'CreateEnvironmentOptionNotSupportedError';
+        Object.setPrototypeOf(this, CreateEnvironmentOptionNotSupportedError.prototype);
+    }
+}
+
+/**
+ * Reports whether an error represents an unsupported environment creation option.
+ *
+ * @param error The value to test.
+ * @returns `true` when the error carries the stable unsupported-option discriminator.
+ */
+export function isCreateEnvironmentOptionNotSupportedError(
+    error: unknown,
+): error is CreateEnvironmentOptionNotSupportedError {
+    return (
+        error instanceof CreateEnvironmentOptionNotSupportedError ||
+        (typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            (error as { code?: unknown }).code === 'CreateEnvironmentOptionNotSupported')
+    );
+}

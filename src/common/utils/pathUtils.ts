@@ -87,6 +87,29 @@ export function isSameOrParentPath(parentPath: string, candidatePath: string): b
     );
 }
 
+function matchesWindowsReservedDeviceName(value: string): boolean {
+    const deviceBaseName = value.split('.')[0];
+    return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(deviceBaseName);
+}
+
+/**
+ * Determines whether `value` can be used as a path segment on all supported platforms.
+ *
+ * @param value The path segment to validate.
+ * @returns `true` when the value is valid on Windows, macOS, and Linux.
+ */
+export function isValidPortablePathSegment(value: string): boolean {
+    return (
+        value.length > 0 &&
+        value.trim().length > 0 &&
+        value !== '.' &&
+        value !== '..' &&
+        !/[<>:"/\\|?*\u0000-\u001f]/.test(value) &&
+        !/[. ]$/.test(value) &&
+        !matchesWindowsReservedDeviceName(value)
+    );
+}
+
 /**
  * Determines whether `value` maps to a reserved Windows device name (e.g. `CON`,
  * `PRN`, `AUX`, `NUL`, `COM1`-`COM9`, `LPT1`-`LPT9`).
@@ -99,8 +122,7 @@ export function isSameOrParentPath(parentPath: string, candidatePath: string): b
  * @returns `true` on Windows when `value` resolves to a reserved device name.
  */
 export function isWindowsReservedDeviceName(value: string): boolean {
-    const deviceBaseName = value.split('.')[0];
-    return isWindows() && /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(deviceBaseName);
+    return isWindows() && matchesWindowsReservedDeviceName(value);
 }
 
 export function getResourceUri(resourcePath: string, root?: string): Uri | undefined {

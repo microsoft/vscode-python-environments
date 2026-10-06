@@ -163,6 +163,27 @@ suite('Create Any Environment Command Tests', () => {
         manager.verifyAll();
     });
 
+    test('Named creation only offers managers that support custom names', async () => {
+        const unsupportedManager = typeMoq.Mock.ofType<InternalEnvironmentManager>();
+        unsupportedManager.setup((m) => m.supportsCreate).returns(() => true);
+        unsupportedManager.setup((m) => m.supportsCustomName).returns(() => false);
+        manager.setup((m) => m.supportsCustomName).returns(() => true);
+        em.setup((e) => e.managers).returns(() => [unsupportedManager.object, manager.object]);
+        pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => []);
+        manager
+            .setup((m) => m.create('global', typeMoq.It.isValue({ name: 'analysis-env' })))
+            .returns(() => Promise.resolve(env.object))
+            .verifiable(typeMoq.Times.once());
+        pickEnvironmentManagerStub.resolves(manager.object.id);
+
+        const result = await createAnyEnvironmentCommand(em.object, pm.object, { name: 'analysis-env' });
+
+        assert.strictEqual(result, env.object);
+        assert.deepStrictEqual(pickEnvironmentManagerStub.firstCall.args[0], [manager.object]);
+        assert.strictEqual(pickEnvironmentManagerStub.firstCall.args[3], false);
+        manager.verifyAll();
+    });
+
     test('Create global venv (no-workspace): select', async () => {
         pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => []);
         manager

@@ -3,7 +3,10 @@
 
 import type { Pep440Version } from '@renovatebot/pep440';
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
-import { PackageVersionLookupNotSupportedError } from '../../publicErrors';
+import {
+    CreateEnvironmentOptionNotSupportedError,
+    PackageVersionLookupNotSupportedError,
+} from '../../publicErrors';
 import { ISSUES_URL } from '../../common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from '../../common/errors/NotSupportedError';
 import { traceWarn } from '../../common/logging';
@@ -69,15 +72,30 @@ export class InternalEnvironmentManager implements EnvironmentManager {
     public get log(): LogOutputChannel | undefined {
         return this.manager.log;
     }
+    public get createCapabilities() {
+        return this.manager.createCapabilities;
+    }
 
     public get supportsCreate(): boolean {
         return this.manager.create !== undefined;
+    }
+
+    public get supportsCustomName(): boolean {
+        return this.createCapabilities?.customName === true;
     }
 
     create(
         scope: CreateEnvironmentScope,
         options: CreateEnvironmentOptions | undefined,
     ): Promise<PythonEnvironment | undefined> {
+        if (options?.name !== undefined && !this.supportsCustomName) {
+            return Promise.reject(
+                new CreateEnvironmentOptionNotSupportedError(
+                    'name',
+                    `Environment manager does not support named environment creation: ${this.id}`,
+                ),
+            );
+        }
         if (this.manager.create) {
             return this.manager.create(scope, options);
         }

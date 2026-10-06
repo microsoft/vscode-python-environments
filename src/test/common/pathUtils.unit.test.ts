@@ -1,7 +1,12 @@
 import assert from 'node:assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
-import { getResourceUri, isWindowsReservedDeviceName, normalizePath } from '../../common/utils/pathUtils';
+import {
+    getResourceUri,
+    isValidPortablePathSegment,
+    isWindowsReservedDeviceName,
+    normalizePath,
+} from '../../common/utils/pathUtils';
 import * as utils from '../../common/utils/platformUtils';
 
 suite('Path Utilities', () => {
@@ -161,6 +166,37 @@ suite('Path Utilities', () => {
 
             for (const name of ['CON', 'nul', 'com1', 'lpt9']) {
                 assert.strictEqual(isWindowsReservedDeviceName(name), false, `${name} should be allowed off Windows`);
+            }
+        });
+    });
+
+    suite('isValidPortablePathSegment', () => {
+        test('accepts names that are valid on all supported platforms', () => {
+            for (const name of ['env', 'python-3.12', '.venv', 'data science', '分析']) {
+                assert.strictEqual(isValidPortablePathSegment(name), true, `${name} should be valid`);
+            }
+        });
+
+        test('rejects path traversal, reserved characters, and control characters', () => {
+            for (const name of [
+                '',
+                '   ',
+                '.',
+                '..',
+                '../outside',
+                '..\\outside',
+                'python:3.12',
+                'env?',
+                'env\0',
+                'env\n',
+            ]) {
+                assert.strictEqual(isValidPortablePathSegment(name), false, `${JSON.stringify(name)} should be invalid`);
+            }
+        });
+
+        test('rejects Windows device names and trailing periods or spaces on every platform', () => {
+            for (const name of ['CON', 'nul', 'COM1.txt', 'lpt9.env', 'env.', 'env ']) {
+                assert.strictEqual(isValidPortablePathSegment(name), false, `${JSON.stringify(name)} should be invalid`);
             }
         });
     });
