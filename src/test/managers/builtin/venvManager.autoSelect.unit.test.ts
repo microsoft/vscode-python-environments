@@ -33,7 +33,7 @@ suite('VenvManager auto-selection for a project', () => {
         });
     }
 
-    function createManager(): VenvManager {
+    async function createManager(): Promise<VenvManager> {
         const project = { name: 'project', uri: projectUri } as PythonProject;
         const projectRoot = normalizePath(projectUri.fsPath);
         const api = {
@@ -46,10 +46,7 @@ suite('VenvManager auto-selection for a project', () => {
         const baseManager = { getEnvironments: sinon.stub().resolves([]) } as unknown as EnvironmentManager;
         const log = { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() } as unknown as LogOutputChannel;
         const manager = new VenvManager({} as NativePythonFinder, api, baseManager, log);
-        (manager as unknown as { _initialized: unknown })._initialized = {
-            completed: true,
-            promise: Promise.resolve(),
-        };
+        await manager.initialize();
         return manager;
     }
 
@@ -67,9 +64,7 @@ suite('VenvManager auto-selection for a project', () => {
         const rootVenv = makeVenv(venvIn(), '3.12.14');
         const toolsVenv = makeVenv(venvIn('tools'), '3.13.15');
         sinon.stub(venvUtils, 'findVirtualEnvironments').resolves([toolsVenv, rootVenv]);
-        const manager = createManager();
-
-        await manager.refresh(undefined);
+        const manager = await createManager();
 
         assert.strictEqual((await manager.get(projectUri))?.envId.id, rootVenv.envId.id);
     });
@@ -77,9 +72,7 @@ suite('VenvManager auto-selection for a project', () => {
     test('still selects a nested environment when the project root has none', async () => {
         const toolsVenv = makeVenv(venvIn('tools'), '3.13.15');
         sinon.stub(venvUtils, 'findVirtualEnvironments').resolves([toolsVenv]);
-        const manager = createManager();
-
-        await manager.refresh(undefined);
+        const manager = await createManager();
 
         assert.strictEqual((await manager.get(projectUri))?.envId.id, toolsVenv.envId.id);
     });
@@ -88,9 +81,7 @@ suite('VenvManager auto-selection for a project', () => {
         const brokenRoot = Object.assign(makeVenv(venvIn(), '3.12.14'), { error: 'Python executable not found' });
         const toolsVenv = makeVenv(venvIn('tools'), '3.13.15');
         sinon.stub(venvUtils, 'findVirtualEnvironments').resolves([brokenRoot, toolsVenv]);
-        const manager = createManager();
-
-        await manager.refresh(undefined);
+        const manager = await createManager();
 
         assert.strictEqual((await manager.get(projectUri))?.envId.id, toolsVenv.envId.id);
     });
@@ -98,9 +89,7 @@ suite('VenvManager auto-selection for a project', () => {
     test('still selects a broken root environment when it is the only one', async () => {
         const brokenRoot = Object.assign(makeVenv(venvIn(), '3.12.14'), { error: 'Python executable not found' });
         sinon.stub(venvUtils, 'findVirtualEnvironments').resolves([brokenRoot]);
-        const manager = createManager();
-
-        await manager.refresh(undefined);
+        const manager = await createManager();
 
         assert.strictEqual((await manager.get(projectUri))?.envId.id, brokenRoot.envId.id);
     });
