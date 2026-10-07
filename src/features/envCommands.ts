@@ -231,7 +231,9 @@ export async function createAnyEnvironmentCommand(
         if (manager) {
             const env = await manager.create('global', { ...options });
             if (select && env) {
-                await manager.set(undefined, env);
+                // Go through the authoritative default-context write path so the selection is
+                // recorded, persisted and published like any other explicit selection.
+                await em.setEnvironment(undefined, env);
             }
             return env;
         }
@@ -511,6 +513,10 @@ async function setEnvironmentCommandInternal(
     } else if (Array.isArray(context) && context.length > 0 && context.every((c) => c instanceof Uri)) {
         const uris = context as Uri[];
         const projects = wm.getProjects(uris).map((p) => p);
+        // Ordinary loose files (no owning project, no script-specific routing) resolve to the
+        // shared default context. Without this they would disappear into an empty project list
+        // and the selection would silently do nothing.
+        const targetsDefaultContext = uris.some((uri) => em.resolveContext(uri).kind === 'default');
         const projectEnvManagers = em.getProjectEnvManagers(uris);
         const recommended =
             projectEnvManagers.length === 1 && uris.length === 1 ? await projectEnvManagers[0].get(uris[0]) : undefined;
@@ -521,9 +527,17 @@ async function setEnvironmentCommandInternal(
         });
 
         if (selected) {
-            // Use the same logic for checking already set environments
-            await setEnvironmentForProjects(projects, selected, em);
+            if (targetsDefaultContext) {
+                await em.setEnvironment(undefined, selected);
+            }
+            if (projects.length > 0) {
+                // Use the same logic for checking already set environments
+                await setEnvironmentForProjects(projects, selected, em);
+            }
         }
+    } else if (Array.isArray(context) && context.length === 0) {
+        // Nothing to target: an empty selection is a deliberate no-op.
+        traceVerbose('No targets provided for setting environment command; ignoring.');
     } else {
         traceError(`Invalid context for setting environment command: ${context}`);
         showErrorMessage('Invalid context for setting environment');
