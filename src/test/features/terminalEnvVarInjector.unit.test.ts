@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
+import fse from 'fs-extra';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
@@ -149,6 +150,107 @@ suite('TerminalEnvVarInjector', () => {
             await new Promise((resolve) => setTimeout(resolve, 50));
 
             assert.strictEqual(mockScopedCollection.replace.called, false);
+        });
+
+        suite('env file changes', () => {
+            let envChangeCallback: ((args: { uri?: Uri; changeType: number }) => void) | undefined;
+            let variables: Record<string, string>;
+            let existingFiles: Set<string>;
+            const defaultEnvFile = path.join(testWorkspaceFolder.uri.fsPath, '.env');
+            const configuredEnvFile = path.join(testWorkspaceFolder.uri.fsPath, 'configured.env');
+
+            setup(() => {
+                variables = {};
+                existingFiles = new Set();
+                sinon.stub(fse, 'pathExists').callsFake(async (filePath) => existingFiles.has(path.resolve(filePath.toString())));
+                sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(testWorkspaceFolder);
+                envVarManager.reset();
+                envVarManager.setup((m) => m.onDidChangeEnvironmentVariables).returns(
+                    () => (listener) => {
+                        envChangeCallback = listener;
+                        return new Disposable(() => {});
+                    },
+                );
+                envVarManager
+                    .setup((m) => m.getEnvironmentVariables(typeMoq.It.isAny()))
+                    .returns(() => Promise.resolve({ ...variables }));
+            });
+
+            async function fireChange(changeType: number, filePath = defaultEnvFile): Promise<void> {
+                assert.ok(envChangeCallback);
+                envChangeCallback({ uri: Uri.file(filePath), changeType });
+                await new Promise((resolve) => setTimeout(resolve, 20));
+            }
+
+            test('creating an env file with injection disabled preserves shell activation variables', async () => {
+                getConfigurationStub.returns(createMockConfig({ useEnvFile: false }) as WorkspaceConfiguration);
+                injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+                await fireChange(2);
+
+                sinon.assert.notCalled(mockScopedCollection.clear);
+                sinon.assert.notCalled(mockScopedCollection.delete);
+                sinon.assert.notCalled(mockScopedCollection.replace);
+            });
+
+            test('creating, editing, and deleting an env file updates only its injected variables', async () => {
+                getConfigurationStub.returns(createMockConfig({ useEnvFile: true }) as WorkspaceConfiguration);
+                injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+                await new Promise((resolve) => setTimeout(resolve, 20));
+
+                existingFiles.add(defaultEnvFile);
+                variables = { TERMINAL_PROBE_VALUE: 'created' };
+                await fireChange(2);
+                sinon.assert.calledWith(mockScopedCollection.replace, 'TERMINAL_PROBE_VALUE', 'created');
+
+                variables = { OTHER_VALUE: 'edited' };
+                await fireChange(1);
+                sinon.assert.calledWith(mockScopedCollection.delete, 'TERMINAL_PROBE_VALUE');
+                sinon.assert.calledWith(mockScopedCollection.replace, 'OTHER_VALUE', 'edited');
+
+                existingFiles.delete(defaultEnvFile);
+                variables = {};
+                await fireChange(3);
+                sinon.assert.calledWith(mockScopedCollection.delete, 'OTHER_VALUE');
+                sinon.assert.notCalled(mockScopedCollection.clear);
+            });
+
+            test('deleting one env file retains variables from the other configured file', async () => {
+                getConfigurationStub.returns(
+                    createMockConfig({ useEnvFile: true, envFilePath: configuredEnvFile }) as WorkspaceConfiguration,
+                );
+                existingFiles.add(defaultEnvFile);
+                existingFiles.add(configuredEnvFile);
+                variables = { CONFIGURED_VALUE: 'configured', PROJECT_VALUE: 'project' };
+                injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+                await new Promise((resolve) => setTimeout(resolve, 20));
+
+                existingFiles.delete(configuredEnvFile);
+                variables = { PROJECT_VALUE: 'project' };
+                await fireChange(3, configuredEnvFile);
+
+                sinon.assert.calledWith(mockScopedCollection.delete, 'CONFIGURED_VALUE');
+                sinon.assert.neverCalledWith(mockScopedCollection.delete, 'PROJECT_VALUE');
+                sinon.assert.notCalled(mockScopedCollection.clear);
+            });
+
+            test('deleting the project env file retains variables from the configured file', async () => {
+                getConfigurationStub.returns(
+                    createMockConfig({ useEnvFile: true, envFilePath: configuredEnvFile }) as WorkspaceConfiguration,
+                );
+                existingFiles.add(defaultEnvFile);
+                existingFiles.add(configuredEnvFile);
+                variables = { CONFIGURED_VALUE: 'configured', PROJECT_VALUE: 'project' };
+                injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+                await new Promise((resolve) => setTimeout(resolve, 20));
+
+                existingFiles.delete(defaultEnvFile);
+                variables = { CONFIGURED_VALUE: 'configured' };
+                await fireChange(3);
+
+                sinon.assert.calledWith(mockScopedCollection.delete, 'PROJECT_VALUE');
+                sinon.assert.neverCalledWith(mockScopedCollection.delete, 'CONFIGURED_VALUE');
+                sinon.assert.notCalled(mockScopedCollection.clear);
+            });
         });
 
         test('should NOT inject when useEnvFile is false even with python.envFile configured', async () => {

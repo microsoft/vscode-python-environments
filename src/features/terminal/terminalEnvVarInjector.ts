@@ -76,14 +76,9 @@ export class TerminalEnvVarInjector implements Disposable {
                     });
                 }
 
-                if (args.changeType === 2) {
-                    // FileChangeType.Deleted
-                    this.clearWorkspaceVariables(affectedWorkspace);
-                } else {
-                    this.updateEnvironmentVariables(affectedWorkspace).catch((error) => {
-                        traceError('Failed to update environment variables:', error);
-                    });
-                }
+                this.updateEnvironmentVariables(affectedWorkspace).catch((error) => {
+                    traceError('Failed to update environment variables:', error);
+                });
             }),
         );
 
@@ -170,8 +165,13 @@ export class TerminalEnvVarInjector implements Disposable {
                 : undefined;
             const defaultEnvFilePath: string = path.join(workspaceUri.fsPath, '.env');
 
-            let activeEnvFilePath: string = resolvedEnvFilePath || defaultEnvFilePath;
-            if (activeEnvFilePath && (await fse.pathExists(activeEnvFilePath))) {
+            const activeEnvFilePath =
+                resolvedEnvFilePath && (await fse.pathExists(resolvedEnvFilePath))
+                    ? resolvedEnvFilePath
+                    : (await fse.pathExists(defaultEnvFilePath))
+                      ? defaultEnvFilePath
+                      : undefined;
+            if (activeEnvFilePath) {
                 traceVerbose(`TerminalEnvVarInjector: Using env file: ${activeEnvFilePath}`);
             } else {
                 traceVerbose(
@@ -263,18 +263,6 @@ export class TerminalEnvVarInjector implements Disposable {
     private getEnvironmentVariableCollectionScoped(scope: EnvironmentVariableScope = {}) {
         const envVarCollection = this.envVarCollection as GlobalEnvironmentVariableCollection;
         return envVarCollection.getScoped(scope);
-    }
-
-    /**
-     * Clear all environment variables for a workspace.
-     */
-    private clearWorkspaceVariables(workspaceFolder: WorkspaceFolder): void {
-        try {
-            const scope = this.getEnvironmentVariableCollectionScoped({ workspaceFolder });
-            scope.clear();
-        } catch (error) {
-            traceError(`Failed to clear environment variables for workspace ${workspaceFolder.uri.fsPath}:`, error);
-        }
     }
 
     /**
