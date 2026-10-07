@@ -24,14 +24,18 @@ function makeEnvironment(id: string, managerId: string): PythonEnvironment {
 class RecordingEnvsProvider implements ShellEnvsProvider {
     public readonly shellType = 'pwsh';
     public readonly updated: PythonEnvironment[] = [];
+    public readonly updatedCollections: unknown[] = [];
+    public readonly removedCollections: unknown[] = [];
     public removeCalls = 0;
 
-    updateEnvVariables(_collection: unknown, env: PythonEnvironment): void {
+    updateEnvVariables(collection: unknown, env: PythonEnvironment): void {
         this.updated.push(env);
+        this.updatedCollections.push(collection);
     }
 
-    removeEnvVariables(): void {
+    removeEnvVariables(collection: unknown): void {
         this.removeCalls += 1;
+        this.removedCollections.push(collection);
     }
 
     getEnvVariables(): Map<string, string | undefined> | undefined {
@@ -62,6 +66,7 @@ suite('ShellStartupActivationVariablesManager', () => {
 
         sinon.stub(terminalUtils, 'getAutoActivationType').returns(terminalUtils.ACT_TYPE_SHELL);
         sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
         sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => undefined));
 
         getEnvironmentStub = sinon.stub().resolves(folderEnvironment);
@@ -125,6 +130,51 @@ suite('ShellStartupActivationVariablesManager', () => {
         assert.strictEqual(provider.updated.length, 0);
         assert.strictEqual(provider.removeCalls, 1);
     });
+
+    test('refreshes global startup variables after a global selection changes', async () => {
+        const newEnvironment = makeEnvironment('global-venv-b', 'ms-python.python:venv');
+        await changeListener!({ uri: undefined, new: folderEnvironment, old: undefined });
+        getEnvironmentStub.resolves(newEnvironment);
+
+        await changeListener!({ uri: undefined, new: newEnvironment, old: folderEnvironment });
+
+        sinon.assert.calledTwice(getEnvironmentStub);
+        sinon.assert.alwaysCalledWithExactly(getEnvironmentStub, undefined);
+        assert.deepStrictEqual(provider.updated, [folderEnvironment, newEnvironment]);
+        assert.deepStrictEqual(provider.updatedCollections, [envCollection, envCollection]);
+    });
+
+    test('removes stale global startup variables when no environment remains selected', async () => {
+        getEnvironmentStub.resolves(undefined);
+
+        await changeListener!({ uri: undefined, new: undefined, old: folderEnvironment });
+
+        sinon.assert.calledOnceWithExactly(getEnvironmentStub, undefined);
+        assert.deepStrictEqual(provider.removedCollections, [envCollection]);
+        assert.strictEqual(provider.updated.length, 0);
+    });
+
+    test('does not overwrite folder startup variables on a global selection change', async () => {
+        (workspaceApis.getWorkspaceFolders as sinon.SinonStub).returns([workspaceFolder]);
+
+        await changeListener!({ uri: undefined, new: scriptEnvironment, old: undefined });
+
+        sinon.assert.notCalled(getEnvironmentStub);
+        assert.strictEqual(provider.updated.length, 0);
+        assert.strictEqual(provider.removeCalls, 0);
+    });
+
+    for (const mode of ['command', 'off']) {
+        test(`ignores global environment changes when activation mode is ${mode}`, async () => {
+            (terminalUtils.getAutoActivationType as sinon.SinonStub).returns(mode);
+
+            await changeListener!({ uri: undefined, new: scriptEnvironment, old: undefined });
+
+            sinon.assert.notCalled(getEnvironmentStub);
+            assert.strictEqual(provider.updated.length, 0);
+            assert.strictEqual(provider.removeCalls, 0);
+        });
+    }
 
     test('ignores environment changes when shell startup activation is off', async () => {
         (terminalUtils.getAutoActivationType as sinon.SinonStub).returns('command');

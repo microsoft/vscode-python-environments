@@ -48,7 +48,13 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
 
     private async handleEnvironmentChange(e: DidChangeEnvironmentEventArgs) {
         const autoActType = getAutoActivationType();
-        if (autoActType !== ACT_TYPE_SHELL || !e.uri) {
+        if (autoActType !== ACT_TYPE_SHELL) {
+            return;
+        }
+        if (!e.uri) {
+            if (!getWorkspaceFolders()?.length) {
+                await this.initializeInternal();
+            }
             return;
         }
         const wf = getWorkspaceFolder(e.uri);
