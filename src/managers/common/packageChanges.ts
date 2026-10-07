@@ -56,11 +56,12 @@ export async function updatePackagesAndNotify(
     before: Package[] | undefined,
     onChanges: PackageChangesCallback,
     fetchPackages?: PackageFetcher,
+    skipDirectDependencies = false,
 ): Promise<Package[] | undefined> {
     const [after, afterDirectDependenciesNames] = await Promise.all([
         fetchPackages?.() ?? packageManager.getPackages(environment, { skipCache: true }),
         // Handle transitive dependencies (best-effort, don't break package refresh on failure)
-        packageManager.getDirectPackageNames?.(environment).catch(() => undefined),
+        skipDirectDependencies ? undefined : packageManager.getDirectPackageNames?.(environment).catch(() => undefined),
     ]);
 
     if (after === undefined) {

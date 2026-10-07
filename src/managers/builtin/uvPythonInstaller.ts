@@ -1,3 +1,5 @@
+import * as os from 'os';
+import * as path from 'path';
 import {
     LogOutputChannel,
     ProgressLocation,
@@ -17,9 +19,10 @@ import { executeTask, onDidEndTaskProcess } from '../../common/tasks.apis';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred } from '../../common/utils/deferred';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import { showErrorMessage, showInformationMessage, showQuickPick, withProgress } from '../../common/window.apis';
-import { isUvInstalled, resetUvInstallationCache } from './helpers';
+import { getUvExecutable, isUvInstalled, setUvExecutable } from './helpers';
 
 export const UV_INSTALL_PYTHON_DONT_ASK_KEY = 'python-envs:uv:UV_INSTALL_PYTHON_DONT_ASK';
 
@@ -176,6 +179,31 @@ async function runTaskAndWait(name: string, executable: string, args: string[]):
 }
 
 /**
+ * Returns the executable destination used by uv's standalone installers.
+ * Honors their explicit overrides, legacy Cargo layout, and XDG defaults.
+ */
+function getInstalledUvExecutable(): string {
+    const home = os.homedir();
+    const forced =
+        process.env.UV_INSTALL_DIR || process.env.CARGO_DIST_FORCE_INSTALL_DIR || process.env.UV_UNMANAGED_INSTALL;
+    let directory: string;
+    if (forced) {
+        const cargoHome = process.env.CARGO_HOME || path.join(home, '.cargo');
+        directory =
+            normalizePath(path.resolve(forced)) === normalizePath(path.resolve(cargoHome))
+                ? path.join(forced, 'bin')
+                : forced;
+    } else {
+        directory =
+            process.env.XDG_BIN_HOME ||
+            (process.env.XDG_DATA_HOME
+                ? path.join(process.env.XDG_DATA_HOME, '..', 'bin')
+                : path.join(home, '.local', 'bin'));
+    }
+    return path.resolve(directory, isWindows() ? 'uv.exe' : 'uv');
+}
+
+/**
  * Installs uv using the platform-appropriate method.
  * @param log Optional log output channel
  * @returns Promise that resolves to true if uv was installed successfully
@@ -187,8 +215,8 @@ export async function installUv(_log?: LogOutputChannel): Promise<boolean> {
     const success = await runTaskAndWait(UvInstallStrings.installingUv, executable, args);
 
     if (success) {
-        // Reset the cache so isUvInstalled() will re-check
-        resetUvInstallationCache();
+        // Shell-profile updates cannot change the running extension host's PATH.
+        setUvExecutable(getInstalledUvExecutable());
         traceInfo('uv installed successfully');
     } else {
         traceError('Failed to install uv');
@@ -240,11 +268,16 @@ export async function ensureUvForInlineScriptVersionLookup(
  * @returns Promise that resolves to the Python path, or undefined if not found
  */
 export async function getUvPythonPath(version?: string): Promise<string | undefined> {
+    const executable = await getUvExecutable();
+    if (!executable) {
+        traceError('Cannot list installed Python versions: uv is unavailable');
+        return undefined;
+    }
     return new Promise((resolve) => {
         const chunks: string[] = [];
         // Use --only-installed --managed-python to find only uv-managed Pythons
         const args = ['python', 'list', '--only-installed', '--managed-python', '--output-format', 'json'];
-        const proc = spawnProcess('uv', args);
+        const proc = spawnProcess(executable, args);
         proc.stdout?.on('data', (data) => chunks.push(data.toString()));
         proc.on('error', () => resolve(undefined));
         proc.on('exit', (code) => {
@@ -292,6 +325,11 @@ export async function getUvPythonPath(version?: string): Promise<string | undefi
 export async function getAvailablePythonVersions(
     options?: GetAvailablePythonVersionsOptions,
 ): Promise<UvPythonVersion[]> {
+    const executable = await getUvExecutable();
+    if (!executable) {
+        traceError('Cannot list available Python versions: uv is unavailable');
+        return [];
+    }
     return new Promise((resolve) => {
         const chunks: string[] = [];
         const args = ['python', 'list'];
@@ -299,7 +337,7 @@ export async function getAvailablePythonVersions(
             args.push('--all-versions');
         }
         args.push('--output-format', 'json');
-        const proc = spawnProcess('uv', args);
+        const proc = spawnProcess(executable, args);
         proc.stdout?.on('data', (data) => chunks.push(data.toString()));
         proc.on('error', () => resolve([]));
         proc.on('exit', (code) => {
@@ -388,15 +426,20 @@ export async function selectPythonVersionToInstall(): Promise<string | undefined
  * @param version Optional Python version to install (e.g., "3.12"). If not specified, installs the latest.
  * @returns Promise that resolves to true if Python was installed successfully
  */
-export async function installPythonViaUv(_log?: LogOutputChannel, version?: string): Promise<boolean> {
+export async function installPythonViaUv(log?: LogOutputChannel, version?: string): Promise<boolean> {
+    const executable = await getUvExecutable(log);
+    if (!executable) {
+        traceError('Cannot install Python: uv is unavailable');
+        return false;
+    }
     const args = ['python', 'install'];
     if (version) {
         args.push(version);
     }
 
-    traceInfo(`Installing Python via uv: uv ${args.join(' ')}`);
+    traceInfo(`Installing Python via uv: ${executable} ${args.join(' ')}`);
 
-    const success = await runTaskAndWait(UvInstallStrings.installingPython, 'uv', args);
+    const success = await runTaskAndWait(UvInstallStrings.installingPython, executable, args);
 
     if (success) {
         traceInfo('Python installed successfully via uv');

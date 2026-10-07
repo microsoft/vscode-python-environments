@@ -40,7 +40,19 @@ export async function handlePythonPath(
     projectEnvManagers: InternalEnvironmentManager[],
     reporter?: Progress<{ message?: string; increment?: number }>,
     token?: CancellationToken,
+    toolExecution = false,
 ): Promise<PythonEnvironment | undefined> {
+    const resolve = (manager: InternalEnvironmentManager) => {
+        if (!toolExecution) {
+            return manager.resolve(interpreterUri);
+        }
+        const tools = manager.tools;
+        if (!tools) {
+            traceVerbose(`Skipping ${manager.id}: no non-interactive interpreter resolver.`);
+            return undefined;
+        }
+        return tools.resolve(interpreterUri);
+    };
     // Use the managers user has set for the project first. Likely, these
     // managers are the ones that should be used.
     for (const manager of sortManagersByPriority(projectEnvManagers)) {
@@ -49,7 +61,7 @@ export async function handlePythonPath(
         }
         reporter?.report({ message: `Checking ${manager.displayName}` });
         traceVerbose(`Checking ${manager.displayName} (${manager.id}) for ${interpreterUri.fsPath}`);
-        const env = await manager.resolve(interpreterUri);
+        const env = await resolve(manager);
         if (env) {
             traceVerbose(`Using ${manager.displayName} (${manager.id}) to handle ${interpreterUri.fsPath}`);
             return env;
@@ -68,7 +80,7 @@ export async function handlePythonPath(
         }
         reporter?.report({ message: `Checking ${manager.displayName}` });
         traceVerbose(`Checking ${manager.displayName} (${manager.id}) for ${interpreterUri.fsPath}`);
-        const env = await manager.resolve(interpreterUri);
+        const env = await resolve(manager);
         if (env) {
             traceVerbose(`Using ${manager.displayName} (${manager.id}) to handle ${interpreterUri.fsPath}`);
             return env;

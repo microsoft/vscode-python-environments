@@ -33,6 +33,12 @@ export class CondaInstallCommand extends InstallCommand {
     }
 
     async execute(executeArgs: InstallExecuteArgs): Promise<void> {
-        await runCondaExecutable(this.buildCommand(executeArgs), this.log, executeArgs.cancellationToken);
+        await runCondaExecutable(
+            this.buildCommand(executeArgs),
+            this.log,
+            executeArgs.cancellationToken,
+            this.timeout ?? (executeArgs.toolExecution ? 300_000 : undefined),
+            executeArgs.toolExecution,
+        );
     }
 }

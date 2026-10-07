@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { ConfigurationTarget, Disposable, Event, EventEmitter, Uri, workspace } from 'vscode';
+import { CancellationToken, ConfigurationTarget, Disposable, Event, EventEmitter, l10n, Uri, workspace } from 'vscode';
 import type {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -31,6 +31,7 @@ import { getCallingExtension } from '../common/utils/frameUtils';
 import { normalizePath } from '../common/utils/pathUtils';
 import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import { ProjectScopedPackageManagerCache } from '../managers/common/projectScopedPackageManagerCache';
+import { PythonToolError, throwIfCancelled } from '../internal/pythonToolSupport';
 import type { PythonProjectManager, PythonProjectSettings } from './projectManager';
 import {
     EditAllManagerSettings,
@@ -152,6 +153,7 @@ export interface EnvironmentManagers extends Disposable {
         shouldPersistSettings?: boolean,
         options?: SetEnvironmentOptions,
     ): Promise<void>;
+    setEnvironmentForTools(scope: Uri, environment: PythonEnvironment, token: CancellationToken): Promise<void>;
     /**
      * Sets environments for multiple scopes.
      * @param scope - Array of URIs or 'global'
@@ -590,15 +592,36 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         return this.setEnvironmentCore(scope, environment, shouldPersistSettings, explicit);
     }
 
+    /**
+     * Selects an environment without interactive prompts and persists the exact project target.
+     * @param scope The project or script targeted by the tool.
+     * @param environment The resolved environment to select.
+     * @param token Cancellation for the tool-owned selection operation.
+     */
+    public setEnvironmentForTools(scope: Uri, environment: PythonEnvironment, token: CancellationToken): Promise<void> {
+        const run = () => this.setEnvironmentCore(scope, environment, true, true, token);
+        return this.shouldSerializeInlineScriptProjectSelection(scope, environment, true)
+            ? this.enqueueInlineScriptProjectSelection(run)
+            : run();
+    }
+
     private async setEnvironmentCore(
         scope: Uri | undefined,
         environment: PythonEnvironment | undefined,
         shouldPersistSettings: boolean,
         explicit: boolean,
+        token?: CancellationToken,
     ): Promise<void> {
+        throwIfCancelled(token);
         const customScope = environment ? environment : scope;
         const manager = this.getEnvironmentManager(customScope);
         if (!manager) {
+            if (token) {
+                throw new PythonToolError(
+                    'MANAGER_UNAVAILABLE',
+                    l10n.t('The environment manager is no longer registered.'),
+                );
+            }
             traceError(
                 `No environment manager found for scope: ${
                     customScope instanceof Uri ? customScope.fsPath : customScope?.environmentPath?.fsPath
@@ -607,6 +630,12 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
             traceError(this.managers.map((m) => m.id).join(', '));
             return;
+        }
+        if (token && (!scope || !environment || !manager.tools)) {
+            throw new PythonToolError(
+                'UNSUPPORTED_MANAGER',
+                l10n.t('Non-interactive selection is not supported by {0}.', manager.id),
+            );
         }
         const inlineRegistration =
             scope && environment && manager.id === INLINE_SCRIPT_MANAGER_ID && shouldPersistSettings
@@ -632,7 +661,13 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 ? this.beginSelectionOperation(this.getInlineScriptSelectionKey(scope))
                 : undefined;
         try {
-            await manager.set(scope, environment);
+            throwIfCancelled(token);
+            if (token && scope && environment && manager.tools?.set) {
+                await manager.tools.set(scope, environment, token);
+            } else {
+                await manager.set(scope, environment);
+            }
+            throwIfCancelled(token);
         } catch (error) {
             if (inlineRegistration) {
                 await this.rollbackInlineScriptProjectRegistration(inlineRegistration);
@@ -649,19 +684,23 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         // Only persist to settings when explicitly requested
         if (shouldPersistSettings && scope) {
+            throwIfCancelled(token);
             const packageManager = this.getPackageManager(environment);
             const canPersistSettings =
                 project &&
                 packageManager &&
                 this.canPersistManagerSettingForScope(scope, manager, project);
             if (canPersistSettings) {
-                await setAllManagerSettings([
-                    {
-                        project,
-                        envManager: manager.id,
-                        packageManager: packageManager.id,
-                    },
-                ]);
+                await setAllManagerSettings(
+                    [
+                        {
+                            project,
+                            envManager: manager.id,
+                            packageManager: packageManager.id,
+                        },
+                    ],
+                    !!token,
+                );
             }
             traceVerbose(
                 `[setEnvironment] scope=${scope instanceof Uri ? scope.fsPath : scope}, ` +
@@ -1358,7 +1397,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     }
 
     private shouldPublishInlineSelectionImmediately(scope: Uri, manager: InternalEnvironmentManager): boolean {
-        return !this.inlineScriptRouting || manager.id !== INLINE_SCRIPT_MANAGER_ID || this.inlineScriptRouting.shouldRoute(scope);
+        return (
+            !this.inlineScriptRouting ||
+            manager.id !== INLINE_SCRIPT_MANAGER_ID ||
+            this.inlineScriptRouting.shouldRoute(scope)
+        );
     }
 
     private clearInlineActiveSelection(
@@ -1390,7 +1433,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         const operation =
             manager.id === INLINE_SCRIPT_MANAGER_ID
                 ? selectionOperation
-                : (inlineOverrideHandoffOperation ?? inlineClearOperation);
+                : inlineOverrideHandoffOperation ?? inlineClearOperation;
         return (
             operation === undefined ||
             this.commitSelectionOperation(this.getInlineScriptSelectionKey(scope), operation)
