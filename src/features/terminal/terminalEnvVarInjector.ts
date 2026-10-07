@@ -29,6 +29,7 @@ export class TerminalEnvVarInjector implements Disposable {
     private disposables: Disposable[] = [];
     // Track which .env variables we've set for each workspace to avoid clearing shell activation variables
     private envVarKeys: Map<string, Set<string>> = new Map();
+    private refreshGenerations: Map<string, number> = new Map();
     private envFileNotificationShown = false;
 
     constructor(
@@ -49,19 +50,17 @@ export class TerminalEnvVarInjector implements Disposable {
             this.envVarManager.onDidChangeEnvironmentVariables((args) => {
                 if (!args.uri) {
                     // No specific URI, reload all workspaces
-                    this.updateEnvironmentVariables().catch((error) => {
+                    return this.updateEnvironmentVariables().catch((error) => {
                         traceError('Failed to update environment variables:', error);
                     });
-                    return;
                 }
 
                 const affectedWorkspace = getWorkspaceFolder(args.uri);
                 if (!affectedWorkspace) {
                     // No workspace folder found for this URI, reloading all workspaces
-                    this.updateEnvironmentVariables().catch((error) => {
+                    return this.updateEnvironmentVariables().catch((error) => {
                         traceError('Failed to update environment variables:', error);
                     });
-                    return;
                 }
 
                 // Check if env file injection is enabled when variables change
@@ -76,7 +75,7 @@ export class TerminalEnvVarInjector implements Disposable {
                     });
                 }
 
-                this.updateEnvironmentVariables(affectedWorkspace).catch((error) => {
+                return this.updateEnvironmentVariables(affectedWorkspace).catch((error) => {
                     traceError('Failed to update environment variables:', error);
                 });
             }),
@@ -105,12 +104,17 @@ export class TerminalEnvVarInjector implements Disposable {
      */
     private async updateEnvironmentVariables(workspaceFolder?: WorkspaceFolder): Promise<void> {
         try {
+            let workspaceUpdates: { folder: WorkspaceFolder; generation: number }[];
             if (workspaceFolder) {
-                // Update only the specified workspace
+                workspaceUpdates = [
+                    {
+                        folder: workspaceFolder,
+                        generation: this.beginWorkspaceRefresh(workspaceFolder),
+                    },
+                ];
                 traceVerbose(
                     `TerminalEnvVarInjector: Updating environment variables for workspace: ${workspaceFolder.uri.fsPath}`,
                 );
-                await this.injectEnvironmentVariablesForWorkspace(workspaceFolder);
             } else {
                 // No provided workspace - update all workspaces
 
@@ -121,9 +125,14 @@ export class TerminalEnvVarInjector implements Disposable {
                 }
 
                 traceVerbose('TerminalEnvVarInjector: Updating environment variables for all workspaces');
-                for (const folder of workspaceFolders) {
-                    await this.injectEnvironmentVariablesForWorkspace(folder);
-                }
+                workspaceUpdates = workspaceFolders.map((folder) => ({
+                    folder,
+                    generation: this.beginWorkspaceRefresh(folder),
+                }));
+            }
+
+            for (const { folder, generation } of workspaceUpdates) {
+                await this.injectEnvironmentVariablesForWorkspace(folder, generation);
             }
 
             traceVerbose('TerminalEnvVarInjector: Environment variable injection completed');
@@ -135,7 +144,10 @@ export class TerminalEnvVarInjector implements Disposable {
     /**
      * Inject environment variables for a specific workspace.
      */
-    private async injectEnvironmentVariablesForWorkspace(workspaceFolder: WorkspaceFolder): Promise<void> {
+    private async injectEnvironmentVariablesForWorkspace(
+        workspaceFolder: WorkspaceFolder,
+        generation: number,
+    ): Promise<void> {
         const workspaceUri = workspaceFolder.uri;
         const workspaceKey = workspaceUri.fsPath;
 
@@ -154,6 +166,9 @@ export class TerminalEnvVarInjector implements Disposable {
                 traceVerbose(
                     `TerminalEnvVarInjector: Env file injection disabled for workspace: ${workspaceUri.fsPath}`,
                 );
+                if (!this.isCurrentWorkspaceRefresh(workspaceFolder, generation)) {
+                    return;
+                }
                 // Clear only the .env variables we previously set, not shell activation variables
                 this.clearTrackedEnvVariables(envVarScope, workspaceKey);
                 return;
@@ -171,6 +186,9 @@ export class TerminalEnvVarInjector implements Disposable {
                     : (await fse.pathExists(defaultEnvFilePath))
                       ? defaultEnvFilePath
                       : undefined;
+            if (!this.isCurrentWorkspaceRefresh(workspaceFolder, generation)) {
+                return;
+            }
             if (activeEnvFilePath) {
                 traceVerbose(`TerminalEnvVarInjector: Using env file: ${activeEnvFilePath}`);
             } else {
@@ -212,6 +230,17 @@ export class TerminalEnvVarInjector implements Disposable {
                 error,
             );
         }
+    }
+
+    private beginWorkspaceRefresh(workspaceFolder: WorkspaceFolder): number {
+        const workspaceKey = workspaceFolder.uri.fsPath;
+        const generation = (this.refreshGenerations.get(workspaceKey) ?? 0) + 1;
+        this.refreshGenerations.set(workspaceKey, generation);
+        return generation;
+    }
+
+    private isCurrentWorkspaceRefresh(workspaceFolder: WorkspaceFolder, generation: number): boolean {
+        return this.refreshGenerations.get(workspaceFolder.uri.fsPath) === generation;
     }
 
     /**

@@ -19,6 +19,7 @@ import {
 import { ActivationStrings, Common } from '../../common/localize';
 import * as logging from '../../common/logging';
 import * as persistentState from '../../common/persistentState';
+import { createDeferred } from '../../common/utils/deferred';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import { EnvVarManager } from '../../features/execution/envVariableManager';
@@ -153,16 +154,21 @@ suite('TerminalEnvVarInjector', () => {
         });
 
         suite('env file changes', () => {
-            let envChangeCallback: ((args: { uri?: Uri; changeType: number }) => void) | undefined;
+            let envChangeCallback: ((args: { uri?: Uri; changeType: number }) => Promise<void>) | undefined;
             let variables: Record<string, string>;
+            let variableReads: Promise<Record<string, string>>[];
             let existingFiles: Set<string>;
             const defaultEnvFile = path.join(testWorkspaceFolder.uri.fsPath, '.env');
             const configuredEnvFile = path.join(testWorkspaceFolder.uri.fsPath, 'configured.env');
 
             setup(() => {
                 variables = {};
+                variableReads = [];
                 existingFiles = new Set();
-                sinon.stub(fse, 'pathExists').callsFake(async (filePath) => existingFiles.has(path.resolve(filePath.toString())));
+                workspaceFoldersValue = undefined;
+                sinon
+                    .stub(fse, 'pathExists')
+                    .callsFake(async (filePath) => existingFiles.has(path.resolve(filePath.toString())));
                 sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(testWorkspaceFolder);
                 envVarManager.reset();
                 envVarManager.setup((m) => m.onDidChangeEnvironmentVariables).returns(
@@ -173,13 +179,12 @@ suite('TerminalEnvVarInjector', () => {
                 );
                 envVarManager
                     .setup((m) => m.getEnvironmentVariables(typeMoq.It.isAny()))
-                    .returns(() => Promise.resolve({ ...variables }));
+                    .returns(() => variableReads.shift() ?? Promise.resolve({ ...variables }));
             });
 
             async function fireChange(changeType: number, filePath = defaultEnvFile): Promise<void> {
                 assert.ok(envChangeCallback);
-                envChangeCallback({ uri: Uri.file(filePath), changeType });
-                await new Promise((resolve) => setTimeout(resolve, 20));
+                await envChangeCallback({ uri: Uri.file(filePath), changeType });
             }
 
             test('creating an env file with injection disabled preserves shell activation variables', async () => {
@@ -195,7 +200,6 @@ suite('TerminalEnvVarInjector', () => {
             test('creating, editing, and deleting an env file updates only its injected variables', async () => {
                 getConfigurationStub.returns(createMockConfig({ useEnvFile: true }) as WorkspaceConfiguration);
                 injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
-                await new Promise((resolve) => setTimeout(resolve, 20));
 
                 existingFiles.add(defaultEnvFile);
                 variables = { TERMINAL_PROBE_VALUE: 'created' };
@@ -222,7 +226,7 @@ suite('TerminalEnvVarInjector', () => {
                 existingFiles.add(configuredEnvFile);
                 variables = { CONFIGURED_VALUE: 'configured', PROJECT_VALUE: 'project' };
                 injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
-                await new Promise((resolve) => setTimeout(resolve, 20));
+                await fireChange(2, configuredEnvFile);
 
                 existingFiles.delete(configuredEnvFile);
                 variables = { PROJECT_VALUE: 'project' };
@@ -241,7 +245,7 @@ suite('TerminalEnvVarInjector', () => {
                 existingFiles.add(configuredEnvFile);
                 variables = { CONFIGURED_VALUE: 'configured', PROJECT_VALUE: 'project' };
                 injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
-                await new Promise((resolve) => setTimeout(resolve, 20));
+                await fireChange(2);
 
                 existingFiles.delete(defaultEnvFile);
                 variables = { CONFIGURED_VALUE: 'configured' };
@@ -250,6 +254,27 @@ suite('TerminalEnvVarInjector', () => {
                 sinon.assert.calledWith(mockScopedCollection.delete, 'PROJECT_VALUE');
                 sinon.assert.neverCalledWith(mockScopedCollection.delete, 'CONFIGURED_VALUE');
                 sinon.assert.notCalled(mockScopedCollection.clear);
+            });
+
+            test('does not let an older env file refresh overwrite newer variables', async () => {
+                getConfigurationStub.returns(createMockConfig({ useEnvFile: true }) as WorkspaceConfiguration);
+                existingFiles.add(defaultEnvFile);
+                const olderRefresh = createDeferred<Record<string, string>>();
+                const newerRefresh = createDeferred<Record<string, string>>();
+                variableReads.push(olderRefresh.promise, newerRefresh.promise);
+                injector = new TerminalEnvVarInjector(envVarCollection.object, envVarManager.object);
+
+                assert.ok(envChangeCallback);
+                const firstChange = envChangeCallback({ uri: Uri.file(defaultEnvFile), changeType: 3 });
+                const secondChange = envChangeCallback({ uri: Uri.file(defaultEnvFile), changeType: 2 });
+
+                newerRefresh.resolve({ NEW_VALUE: 'new' });
+                await secondChange;
+                olderRefresh.resolve({ OLD_VALUE: 'old' });
+                await firstChange;
+
+                sinon.assert.calledOnceWithExactly(mockScopedCollection.replace, 'NEW_VALUE', 'new');
+                sinon.assert.neverCalledWith(mockScopedCollection.replace, 'OLD_VALUE', 'old');
             });
         });
 
