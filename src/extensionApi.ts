@@ -284,6 +284,10 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         }
         return this.envManagers.getLastKnownEnvironment(currentScope);
     }
+    getEnvironmentSync(scope: GetEnvironmentScope): PythonEnvironment | undefined {
+        const currentScope = checkUri(scope) as GetEnvironmentScope;
+        return this.envManagers.getLastKnownEnvironment(currentScope);
+    }
     onDidChangeEnvironment: Event<DidChangeEnvironmentEventArgs> = this._onDidChangeEnvironment.event;
     async resolveEnvironment(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
         await waitForAllEnvManagers();
