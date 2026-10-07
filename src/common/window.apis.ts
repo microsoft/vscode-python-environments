@@ -160,6 +160,38 @@ export function showQuickPick<T extends QuickPickItem>(
     return window.showQuickPick(items, options, token);
 }
 
+export interface QuickPickToggleResult<T extends QuickPickItem> {
+    readonly item: T | undefined;
+    readonly toggled: boolean;
+}
+
+/**
+ * Shows a single-select Quick Pick with a labeled item that toggles between two states.
+ *
+ * @param items Items available for selection.
+ * @param options Standard Quick Pick presentation options.
+ * @param toggleItem Item representations for the off and on states.
+ * @param token Optional cancellation token.
+ * @returns The selected item and final toggle state.
+ */
+export async function showQuickPickWithToggle<T extends QuickPickItem>(
+    items: readonly T[],
+    options: QuickPickOptions | undefined,
+    toggleItem: { readonly off: QuickPickItem; readonly on: QuickPickItem; readonly value?: boolean },
+    token?: CancellationToken,
+): Promise<QuickPickToggleResult<T>> {
+    let toggled = toggleItem.value ?? false;
+    // Regenerate the quick pick with the current toggle state
+    while (true) {
+        const currentToggleItem = toggled ? toggleItem.on : toggleItem.off;
+        const selectedItem = await showQuickPick([...items, currentToggleItem], options, token);
+        if (selectedItem !== currentToggleItem) {
+            return { item: selectedItem as T | undefined, toggled };
+        }
+        toggled = !toggled;
+    }
+}
+
 export function withProgress<R>(
     options: ProgressOptions,
     task: (
