@@ -1639,8 +1639,9 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
 
         const warningPending = new Promise<undefined>(() => {});
         const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').returns(warningPending);
+        const clock = sandbox.useFakeTimers();
 
-        const setupCompleted = await Promise.race([
+        const setupCompletion = Promise.race([
             applyInitialEnvironmentSelection(
                 mockEnvManagers as unknown as EnvironmentManagers,
                 mockProjectManager as unknown as PythonProjectManager,
@@ -1649,6 +1650,8 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
             ).then(() => true),
             new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_000)),
         ]);
+        await clock.tickAsync(1_000);
+        const setupCompleted = await setupCompletion;
 
         assert.strictEqual(setupCompleted, true, 'Initial selection should not wait for the warning response');
         assert.ok(showWarnStub.calledOnce, 'The unresolved interpreter warning should still be shown');
