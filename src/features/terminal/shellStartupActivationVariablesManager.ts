@@ -11,6 +11,8 @@ export interface ShellStartupActivationVariablesManager extends Disposable {
 
 export class ShellStartupActivationVariablesManagerImpl implements ShellStartupActivationVariablesManager {
     private readonly disposables: Disposable[] = [];
+    private globalRefreshGeneration = 0;
+
     constructor(
         private readonly envCollection: GlobalEnvironmentVariableCollection,
         private readonly shellEnvsProviders: ShellEnvsProvider[],
@@ -33,6 +35,7 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
             if (autoActType === ACT_TYPE_SHELL) {
                 await this.initializeInternal();
             } else {
+                ++this.globalRefreshGeneration;
                 const workspaces = getWorkspaceFolders() ?? [];
                 if (workspaces.length > 0) {
                     workspaces.forEach((workspace) => {
@@ -95,7 +98,11 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
             });
             await Promise.all(promises);
         } else {
+            const generation = ++this.globalRefreshGeneration;
             const env = await this.api.getEnvironment(undefined);
+            if (generation !== this.globalRefreshGeneration || getWorkspaceFolders()?.length) {
+                return;
+            }
             await Promise.all(
                 this.shellEnvsProviders.map(async (provider) => {
                     if (env) {

@@ -1,8 +1,9 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { Disposable, GlobalEnvironmentVariableCollection, Uri, WorkspaceFolder } from 'vscode';
+import { ConfigurationChangeEvent, Disposable, GlobalEnvironmentVariableCollection, Uri, WorkspaceFolder } from 'vscode';
 
 import { DidChangeEnvironmentEventArgs, PythonEnvironment, PythonProjectEnvironmentApi } from '../../../api';
+import { createDeferred } from '../../../common/utils/deferred';
 import * as workspaceApis from '../../../common/workspace.apis';
 import { ShellStartupActivationVariablesManagerImpl } from '../../../features/terminal/shellStartupActivationVariablesManager';
 import { ShellEnvsProvider } from '../../../features/terminal/shells/startupProvider';
@@ -53,6 +54,7 @@ suite('ShellStartupActivationVariablesManager', () => {
     let scopedCollection: object;
     let envCollection: GlobalEnvironmentVariableCollection;
     let getEnvironmentStub: sinon.SinonStub;
+    let configurationListener: ((e: ConfigurationChangeEvent) => void | Promise<void>) | undefined;
     let changeListener: ((e: DidChangeEnvironmentEventArgs) => Promise<void>) | undefined;
     let manager: ShellStartupActivationVariablesManagerImpl;
 
@@ -67,7 +69,10 @@ suite('ShellStartupActivationVariablesManager', () => {
         sinon.stub(terminalUtils, 'getAutoActivationType').returns(terminalUtils.ACT_TYPE_SHELL);
         sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
         sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
-        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => undefined));
+        sinon.stub(workspaceApis, 'onDidChangeConfiguration').callsFake((listener) => {
+            configurationListener = listener;
+            return new Disposable(() => undefined);
+        });
 
         getEnvironmentStub = sinon.stub().resolves(folderEnvironment);
         const api = {
@@ -142,6 +147,41 @@ suite('ShellStartupActivationVariablesManager', () => {
         sinon.assert.alwaysCalledWithExactly(getEnvironmentStub, undefined);
         assert.deepStrictEqual(provider.updated, [folderEnvironment, newEnvironment]);
         assert.deepStrictEqual(provider.updatedCollections, [envCollection, envCollection]);
+    });
+
+    test('does not let an older global refresh overwrite a newer selection', async () => {
+        const newEnvironment = makeEnvironment('global-venv-b', 'ms-python.python:venv');
+        const olderRefresh = createDeferred<PythonEnvironment | undefined>();
+        const newerRefresh = createDeferred<PythonEnvironment | undefined>();
+        getEnvironmentStub.onFirstCall().returns(olderRefresh.promise);
+        getEnvironmentStub.onSecondCall().returns(newerRefresh.promise);
+
+        const firstChange = changeListener!({ uri: undefined, new: folderEnvironment, old: undefined });
+        const secondChange = changeListener!({ uri: undefined, new: newEnvironment, old: folderEnvironment });
+
+        newerRefresh.resolve(newEnvironment);
+        await secondChange;
+        olderRefresh.resolve(folderEnvironment);
+        await firstChange;
+
+        assert.deepStrictEqual(provider.updated, [newEnvironment]);
+        assert.deepStrictEqual(provider.updatedCollections, [envCollection]);
+    });
+
+    test('does not restore global startup variables after shell startup activation is disabled', async () => {
+        const pendingRefresh = createDeferred<PythonEnvironment | undefined>();
+        getEnvironmentStub.returns(pendingRefresh.promise);
+        const initialization = manager.initialize();
+        (terminalUtils.getAutoActivationType as sinon.SinonStub).returns('command');
+
+        await configurationListener!({
+            affectsConfiguration: (section) => section === 'python-envs.terminal.autoActivationType',
+        } as ConfigurationChangeEvent);
+        pendingRefresh.resolve(folderEnvironment);
+        await initialization;
+
+        assert.strictEqual(provider.updated.length, 0);
+        assert.deepStrictEqual(provider.removedCollections, [envCollection]);
     });
 
     test('removes stale global startup variables when no environment remains selected', async () => {
