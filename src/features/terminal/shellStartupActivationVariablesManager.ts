@@ -56,7 +56,8 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
         }
         if (!e.uri) {
             if (!getWorkspaceFolders()?.length) {
-                await this.initializeInternal();
+                ++this.globalRefreshGeneration;
+                this.updateGlobalEnvironment(e.new);
             }
             return;
         }
@@ -103,16 +104,18 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
             if (generation !== this.globalRefreshGeneration || getWorkspaceFolders()?.length) {
                 return;
             }
-            await Promise.all(
-                this.shellEnvsProviders.map(async (provider) => {
-                    if (env) {
-                        provider.updateEnvVariables(this.envCollection, env);
-                    } else {
-                        provider.removeEnvVariables(this.envCollection);
-                    }
-                }),
-            );
+            this.updateGlobalEnvironment(env);
         }
+    }
+
+    private updateGlobalEnvironment(environment: DidChangeEnvironmentEventArgs['new']): void {
+        this.shellEnvsProviders.forEach((provider) => {
+            if (environment) {
+                provider.updateEnvVariables(this.envCollection, environment);
+            } else {
+                provider.removeEnvVariables(this.envCollection);
+            }
+        });
     }
 
     public async initialize(): Promise<void> {

@@ -139,30 +139,32 @@ suite('ShellStartupActivationVariablesManager', () => {
     test('refreshes global startup variables after a global selection changes', async () => {
         const newEnvironment = makeEnvironment('global-venv-b', 'ms-python.python:venv');
         await changeListener!({ uri: undefined, new: folderEnvironment, old: undefined });
-        getEnvironmentStub.resolves(newEnvironment);
-
         await changeListener!({ uri: undefined, new: newEnvironment, old: folderEnvironment });
 
-        sinon.assert.calledTwice(getEnvironmentStub);
-        sinon.assert.alwaysCalledWithExactly(getEnvironmentStub, undefined);
+        sinon.assert.notCalled(getEnvironmentStub);
         assert.deepStrictEqual(provider.updated, [folderEnvironment, newEnvironment]);
         assert.deepStrictEqual(provider.updatedCollections, [envCollection, envCollection]);
     });
 
-    test('does not let an older global refresh overwrite a newer selection', async () => {
+    test('uses the global change payload while the API still returns the previous selection', async () => {
         const newEnvironment = makeEnvironment('global-venv-b', 'ms-python.python:venv');
-        const olderRefresh = createDeferred<PythonEnvironment | undefined>();
-        const newerRefresh = createDeferred<PythonEnvironment | undefined>();
-        getEnvironmentStub.onFirstCall().returns(olderRefresh.promise);
-        getEnvironmentStub.onSecondCall().returns(newerRefresh.promise);
+        getEnvironmentStub.resolves(folderEnvironment);
 
-        const firstChange = changeListener!({ uri: undefined, new: folderEnvironment, old: undefined });
-        const secondChange = changeListener!({ uri: undefined, new: newEnvironment, old: folderEnvironment });
+        await changeListener!({ uri: undefined, new: newEnvironment, old: folderEnvironment });
 
-        newerRefresh.resolve(newEnvironment);
-        await secondChange;
-        olderRefresh.resolve(folderEnvironment);
-        await firstChange;
+        sinon.assert.notCalled(getEnvironmentStub);
+        assert.deepStrictEqual(provider.updated, [newEnvironment]);
+    });
+
+    test('does not let pending global initialization overwrite a newer selection', async () => {
+        const newEnvironment = makeEnvironment('global-venv-b', 'ms-python.python:venv');
+        const pendingInitialization = createDeferred<PythonEnvironment | undefined>();
+        getEnvironmentStub.returns(pendingInitialization.promise);
+
+        const initialization = manager.initialize();
+        await changeListener!({ uri: undefined, new: newEnvironment, old: folderEnvironment });
+        pendingInitialization.resolve(folderEnvironment);
+        await initialization;
 
         assert.deepStrictEqual(provider.updated, [newEnvironment]);
         assert.deepStrictEqual(provider.updatedCollections, [envCollection]);
@@ -189,7 +191,7 @@ suite('ShellStartupActivationVariablesManager', () => {
 
         await changeListener!({ uri: undefined, new: undefined, old: folderEnvironment });
 
-        sinon.assert.calledOnceWithExactly(getEnvironmentStub, undefined);
+        sinon.assert.notCalled(getEnvironmentStub);
         assert.deepStrictEqual(provider.removedCollections, [envCollection]);
         assert.strictEqual(provider.updated.length, 0);
     });
