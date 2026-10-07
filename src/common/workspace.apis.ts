@@ -24,6 +24,7 @@ export function getWorkspaceFolders(): readonly WorkspaceFolder[] | undefined {
     return workspace.workspaceFolders;
 }
 
+/** Returns whether the workspace is trusted. */
 export function isWorkspaceTrusted(): boolean {
     return workspace.isTrusted;
 }
