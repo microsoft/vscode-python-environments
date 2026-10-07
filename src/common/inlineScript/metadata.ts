@@ -3,7 +3,7 @@
 
 import * as tomljs from '@iarna/toml';
 import * as fs from 'fs/promises';
-import { Uri } from 'vscode';
+import { l10n, Uri } from 'vscode';
 import { traceVerbose, traceWarn } from '../logging';
 import { PythonVersion } from '../pythonVersion';
 import { PythonVersionSpecifier } from '../pythonVersionSpecifier';
@@ -654,8 +654,13 @@ export function sliceHeaderBytes(text: string): string {
  *  - any I/O error (logged at `traceVerbose`);
  *  - any of the malformed-metadata cases handled by
  *    `readInlineScriptMetadata`.
+ * @param uri The local script to read.
+ * @param strict Throw on I/O errors or invalid metadata instead of treating them as absent.
  */
-export async function readInlineScriptMetadataFromFile(uri: Uri): Promise<InlineScriptMetadata | undefined> {
+export async function readInlineScriptMetadataFromFile(
+    uri: Uri,
+    strict = false,
+): Promise<InlineScriptMetadata | undefined> {
     if (uri.scheme !== 'file') {
         traceVerbose(`inline script metadata: skipping non-file URI scheme '${uri.scheme}'`);
         return undefined;
@@ -671,11 +676,22 @@ export async function readInlineScriptMetadataFromFile(uri: Uri): Promise<Inline
             await handle.close();
         }
     } catch (err) {
+        if (strict) {
+            throw err;
+        }
         traceVerbose(`inline script metadata: failed to read ${uri.fsPath}:`, err);
         return undefined;
     }
 
-    return readInlineScriptMetadata(text, uri.fsPath);
+    const result = parseInlineScriptMetadata(text, uri.fsPath);
+    if (
+        strict &&
+        (result.kind === 'invalid' ||
+            (result.kind === 'parsed' && result.problems.some((problem) => problem.severity === 'error')))
+    ) {
+        throw new Error(l10n.t('Fix the PEP 723 metadata in {0} before configuring its environment.', uri.fsPath));
+    }
+    return result.kind === 'parsed' ? result.metadata : undefined;
 }
 
 /**

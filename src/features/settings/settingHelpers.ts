@@ -162,7 +162,10 @@ interface EditAllManagerSettingsInternal {
     envManager: string;
     packageManager: string;
 }
-export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Promise<void> {
+export async function setAllManagerSettings(
+    edits: EditAllManagerSettings[],
+    persistNewProjects = false,
+): Promise<void> {
     const noWorkspace: EditAllManagerSettingsInternal[] = [];
     const workspaces = new Map<WorkspaceFolder, EditAllManagerSettingsInternal[]>();
     const projectEdits = edits.filter((e): e is EditAllManagerSettingsInternal => !!e.project);
@@ -227,7 +230,10 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
                 if (index >= 0) {
                     overrides.splice(index, 1);
                 }
-                if (config.get('defaultEnvManager') !== e.envManager) {
+                const currentManager = persistNewProjects
+                    ? config.inspect<string>('defaultEnvManager')?.workspaceValue
+                    : config.get('defaultEnvManager');
+                if (currentManager !== e.envManager) {
                     promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
                 }
                 if (config.get('defaultPackageManager') !== e.packageManager) {
@@ -245,9 +251,10 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
                 if (overrides[index].path === '') {
                     overrides[index].path = '.';
                 }
-            } else if (workspaceFile) {
+            } else if (workspaceFile || persistNewProjects) {
                 // Use "." for workspace root instead of empty string
-                const relativePath = path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/');
+                const projectPath = persistNewProjects ? e.project.uri.fsPath : pwPath;
+                const relativePath = path.relative(w.uri.fsPath, projectPath).replace(/\\/g, '/');
                 overrides.push({
                     path: relativePath || '.',
                     envManager: e.envManager,

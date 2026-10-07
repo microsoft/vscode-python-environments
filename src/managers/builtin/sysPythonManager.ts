@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri, window } from 'vscode';
+import { EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -20,6 +20,8 @@ import {
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
+import { EnvironmentToolSupport, pythonToolSupport } from '../../internal/pythonToolSupport';
+import { withProgress } from '../../common/window.apis';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest } from '../common/utils';
@@ -66,17 +68,27 @@ export class SysPythonManager implements EnvironmentManager {
     }
 
     private _initialized: Deferred<void> | undefined;
+    private discovery: Deferred<void> | undefined;
+    private initializationError: unknown;
+    readonly [pythonToolSupport]: EnvironmentToolSupport = {
+        initialize: async () => {
+            await this.initializeDiscovery();
+            if (this.initializationError) {
+                throw this.initializationError;
+            }
+        },
+        get: (scope) => this.get(scope, true),
+        getEnvironments: (scope) => this.getEnvironments(scope, true),
+        resolve: (scope) => this.resolve(scope),
+    };
+
     async initialize(): Promise<void> {
         if (this._initialized) {
             return this._initialized.promise;
         }
-
         this._initialized = createDeferred();
-
         try {
-            await this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering);
-
-            // If no Python environments were found, offer to install via uv
+            await this.initializeDiscovery();
             if (this.collection.length === 0) {
                 const pythonPath = await promptInstallPythonViaUv('activation', this.log);
                 if (pythonPath) {
@@ -101,12 +113,28 @@ export class SysPythonManager implements EnvironmentManager {
         }
     }
 
+    private async initializeDiscovery(): Promise<void> {
+        if (this.discovery) {
+            return this.discovery.promise;
+        }
+        const discovery = (this.discovery = createDeferred());
+        try {
+            await this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering);
+        } catch (error) {
+            this.initializationError = error;
+            this.discovery = undefined;
+            throw error;
+        } finally {
+            discovery.resolve();
+        }
+    }
+
     refresh(_scope: RefreshEnvironmentsScope): Promise<void> {
         return this.internalRefresh(true, SysManagerStrings.sysManagerRefreshing);
     }
 
     private async internalRefresh(hardRefresh: boolean, title: string) {
-        await window.withProgress(
+        await withProgress(
             {
                 location: ProgressLocation.Window,
                 title,
@@ -125,12 +153,13 @@ export class SysPythonManager implements EnvironmentManager {
                 ];
 
                 this._onDidChangeEnvironments.fire(args);
+                this.initializationError = undefined;
             },
         );
     }
 
-    async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
-        await this.initialize();
+    async getEnvironments(scope: GetEnvironmentsScope, toolExecution = false): Promise<PythonEnvironment[]> {
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (scope === 'all' || scope === 'global') {
             return Array.from(this.collection);
@@ -146,8 +175,8 @@ export class SysPythonManager implements EnvironmentManager {
         return [];
     }
 
-    async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        const fastResult = await tryFastPathGet({
+    async get(scope: GetEnvironmentScope, toolExecution = false): Promise<PythonEnvironment | undefined> {
+        const fastResult = toolExecution ? undefined : await tryFastPathGet({
             initialized: this._initialized,
             setInitialized: (deferred) => {
                 this._initialized = deferred;
@@ -158,13 +187,13 @@ export class SysPythonManager implements EnvironmentManager {
             getPersistedPath: (fsPath) => getSystemEnvForWorkspace(fsPath),
             getGlobalPersistedPath: () => getSystemEnvForGlobal(),
             resolve: (p) => resolveSystemPythonEnvironmentPath(p, this.nativeFinder, this.api, this),
-            startBackgroundInit: () => this.internalRefresh(false, SysManagerStrings.sysManagerDiscovering),
+            startBackgroundInit: () => this.initializeDiscovery(),
         });
         if (fastResult) {
             return fastResult.env;
         }
 
-        await this.initialize();
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (scope instanceof Uri) {
             return this.fromEnvMap(scope) ?? this.globalEnv;

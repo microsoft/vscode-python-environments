@@ -1,6 +1,15 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
+import {
+    CancellationToken,
+    EventEmitter,
+    l10n,
+    LogOutputChannel,
+    MarkdownString,
+    ProgressLocation,
+    ThemeIcon,
+    Uri,
+} from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -27,6 +36,14 @@ import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { PythonVersion } from '../../common/pythonVersion';
+import {
+    EnvironmentToolSupport,
+    PythonToolError,
+    PythonToolOperation,
+    pythonToolSupport,
+    supportsEnvironmentTools,
+    throwIfCancelled,
+} from '../../internal/pythonToolSupport';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
@@ -88,17 +105,136 @@ export class VenvManager implements EnvironmentManager {
     }
 
     private _initialized: Deferred<void> | undefined;
+    private discovery: Deferred<void> | undefined;
+    private initializationError: unknown;
+    readonly [pythonToolSupport]: EnvironmentToolSupport = {
+        initialize: async () => {
+            if (!supportsEnvironmentTools(this.baseManager)) {
+                throw new PythonToolError(
+                    'UNSUPPORTED_MANAGER',
+                    l10n.t('The base Python manager does not support non-interactive discovery.'),
+                );
+            }
+            await this.baseManager[pythonToolSupport].initialize();
+            await this.initializeDiscovery();
+            if (this.initializationError) {
+                throw this.initializationError;
+            }
+        },
+        get: (scope) => this.get(scope, true),
+        getEnvironments: (scope) => this.getEnvironments(scope, true),
+        resolve: (scope) => this.resolve(scope),
+        create: (scope, operation) => this.createForTools(scope, operation),
+        set: (scope, environment, token) => this.set(scope, environment, token),
+    };
+
     async initialize(): Promise<void> {
         if (this._initialized) {
             return this._initialized.promise;
         }
-
-        this._initialized = createDeferred();
-
+        const initialized = (this._initialized = createDeferred<void>());
         try {
-            await this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize);
+            await this.initializeWithBase();
+        } catch (error) {
+            if (this._initialized === initialized) {
+                this._initialized = undefined;
+            }
+            throw error;
         } finally {
-            this._initialized.resolve();
+            initialized.resolve();
+        }
+    }
+
+    private async initializeWithBase(): Promise<void> {
+        await this.initializeDiscovery();
+        const discovery = this.discovery;
+        try {
+            await this.loadGlobalEnv(await this.baseManager.getEnvironments('global'));
+        } catch (error) {
+            // Discovery alone is not a complete human initialization when the base step fails.
+            if (this.discovery === discovery) {
+                this.discovery = undefined;
+            }
+            throw error;
+        }
+    }
+
+    private async initializeDiscovery(): Promise<void> {
+        if (this.discovery) {
+            return this.discovery.promise;
+        }
+        const discovery = (this.discovery = createDeferred());
+        try {
+            await this.internalRefresh(
+                undefined,
+                false,
+                VenvManagerStrings.venvInitialize,
+                ProgressLocation.Window,
+                true,
+            );
+        } catch (error) {
+            this.initializationError = error;
+            this.discovery = undefined;
+            throw error;
+        } finally {
+            discovery.resolve();
+        }
+    }
+
+    private async createForTools(scope: Uri, operation: PythonToolOperation): Promise<PythonEnvironment> {
+        const base =
+            operation.baseEnvironment ??
+            getLatest(
+                (await operation.getGlobalEnvironments()).filter(
+                    (environment) => PythonVersion.tryParse(environment.version)?.major === 3,
+                ),
+            );
+        if (!base || PythonVersion.tryParse(base.version)?.major !== 3) {
+            throw new PythonToolError(
+                'MISSING_PYTHON',
+                l10n.t('Install or select Python 3 before creating a virtual environment.'),
+            );
+        }
+        throwIfCancelled(operation.token);
+        this.skipWatcherRefresh = true;
+        try {
+            const result = await quickCreateVenv(
+                this.nativeFinder,
+                this.api,
+                this.log,
+                this,
+                base,
+                scope,
+                undefined,
+                operation,
+            );
+            if (!result?.environment) {
+                throw new PythonToolError(
+                    'CREATION_FAILED',
+                    result?.envCreationErr ?? l10n.t('Virtual environment creation returned no environment.'),
+                );
+            }
+            this.addEnvironment(result.environment, true);
+            try {
+                await fs.writeFile(path.join(result.environment.sysPrefix, '.gitignore'), '*\n', { flag: 'w' });
+            } catch (error) {
+                throw new PythonToolError(
+                    'CREATION_FAILED',
+                    l10n.t(
+                        'The environment was created, but writing its .gitignore failed: {0}',
+                        error instanceof Error ? error.message : String(error),
+                    ),
+                    result.environment,
+                );
+            }
+            return result.environment;
+        } catch (error) {
+            if (error instanceof PythonToolError && error.environment) {
+                this.addEnvironment(error.environment, true);
+            }
+            throw error;
+        } finally {
+            this.skipWatcherRefresh = false;
         }
     }
 
@@ -345,6 +481,7 @@ export class VenvManager implements EnvironmentManager {
         hardRefresh: boolean,
         title: string,
         location: ProgressLocation = ProgressLocation.Window,
+        toolExecution = false,
     ): Promise<void> {
         const selectionRevisions = new Map(this.projectSelectionRevisions);
         await withProgress(
@@ -367,16 +504,17 @@ export class VenvManager implements EnvironmentManager {
                         this,
                         scope ? [scope] : undefined,
                     )) ?? [];
-                await this.loadEnvMap(selectionRevisions);
+                await this.loadEnvMap(selectionRevisions, toolExecution);
 
                 const added = this.collection.map((env) => ({ environment: env, kind: EnvironmentChangeKind.add }));
                 this._onDidChangeEnvironments.fire([...discard, ...added]);
+                this.initializationError = undefined;
             },
         );
     }
 
-    async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
-        await this.initialize();
+    async getEnvironments(scope: GetEnvironmentsScope, toolExecution = false): Promise<PythonEnvironment[]> {
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (scope === 'all') {
             return Array.from(this.collection);
@@ -389,8 +527,8 @@ export class VenvManager implements EnvironmentManager {
         return env ? [env] : [];
     }
 
-    async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        const fastResult = await tryFastPathGet({
+    async get(scope: GetEnvironmentScope, toolExecution = false): Promise<PythonEnvironment | undefined> {
+        const fastResult = toolExecution ? undefined : await tryFastPathGet({
             initialized: this._initialized,
             setInitialized: (deferred) => {
                 this._initialized = deferred;
@@ -400,13 +538,13 @@ export class VenvManager implements EnvironmentManager {
             getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getVenvForWorkspace(fsPath),
             resolve: (p) => resolveVenvPythonEnvironmentPath(p, this.nativeFinder, this.api, this, this.baseManager),
-            startBackgroundInit: () => this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize),
+            startBackgroundInit: () => this.initializeWithBase(),
         });
         if (fastResult) {
             return fastResult.env;
         }
 
-        await this.initialize();
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (!scope) {
             // `undefined` for venv scenario return the global environment.
@@ -426,7 +564,8 @@ export class VenvManager implements EnvironmentManager {
         return env ?? this.globalEnv;
     }
 
-    async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
+    async set(scope: SetEnvironmentScope, environment?: PythonEnvironment, token?: CancellationToken): Promise<void> {
+        throwIfCancelled(token);
         if (scope === undefined) {
             const before = this.globalEnv;
             this.globalEnv = environment;
@@ -445,7 +584,7 @@ export class VenvManager implements EnvironmentManager {
             }
 
             // Notify user if VIRTUAL_ENV is set and they're trying to select a different environment
-            if (process.env.VIRTUAL_ENV && environment) {
+            if (!token && process.env.VIRTUAL_ENV && environment) {
                 const virtualEnvPath = process.env.VIRTUAL_ENV;
                 const selectedPath = environment.sysPrefix;
                 // Only show notification if they selected a different environment
@@ -608,9 +747,12 @@ export class VenvManager implements EnvironmentManager {
      * Preserves project selections changed after this refresh began, including queued change notifications.
      * Skips unresolvable selections without preventing other projects from restoring their environments.
      */
-    private async loadEnvMap(selectionRevisions: ReadonlyMap<string, number>) {
+    private async loadEnvMap(selectionRevisions: ReadonlyMap<string, number>, toolExecution = false) {
         const isCurrent = (key: string) => this.projectSelectionRevisions.get(key) === selectionRevisions.get(key);
-        const globals = await this.baseManager.getEnvironments('global');
+        const tools = supportsEnvironmentTools(this.baseManager) ? this.baseManager[pythonToolSupport] : undefined;
+        const globals = await (toolExecution && tools?.getEnvironments
+            ? tools.getEnvironments('global')
+            : this.baseManager.getEnvironments('global'));
         await this.loadGlobalEnv(globals);
 
         this.fsPathToEnv.forEach((_env, key) => {

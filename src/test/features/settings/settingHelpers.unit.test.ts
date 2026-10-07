@@ -435,6 +435,36 @@ suite('Setting Helpers - Empty Path Bug Fix', () => {
     });
 
     suite('setAllManagerSettings - Multi-root Workspace', () => {
+        for (const persistNewProjects of [false, true]) {
+            test(`preserves ${
+                persistNewProjects ? 'original tool path casing' : 'public path normalization'
+            }`, async () => {
+                sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+                sinon
+                    .stub(workspaceApis, 'getWorkspaceFile')
+                    .returns(Uri.file(path.join(workspacePath, 'multi.code-workspace')));
+                sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+                const config = createMockConfigForWorkspace();
+                sinon.stub(config, 'inspect').returns(undefined);
+                sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+                const project = new PythonProjectsImpl('Mixed Service', Uri.joinPath(workspaceUri, 'Mixed Service'));
+                await setAllManagerSettings(
+                    [{ project, envManager: VENV_MANAGER_ID, packageManager: PIP_MANAGER_ID }],
+                    persistNewProjects,
+                );
+                const update = updateCalls.find((call) => call.key === 'pythonProjects');
+                assert.ok(update);
+                assert.deepStrictEqual(update.value, [
+                    {
+                        path: process.platform === 'win32' && !persistNewProjects ? 'mixed service' : 'Mixed Service',
+                        envManager: VENV_MANAGER_ID,
+                        packageManager: PIP_MANAGER_ID,
+                    },
+                ]);
+                assert.strictEqual(update.target, ConfigurationTarget.WorkspaceFolder);
+            });
+        }
+
         test('should use "." for workspace root path instead of empty string when workspaceFile exists', async () => {
             // Setup: multi-root workspace with workspace file
             sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
