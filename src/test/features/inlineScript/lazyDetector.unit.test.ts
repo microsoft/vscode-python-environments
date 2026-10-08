@@ -536,6 +536,37 @@ suite('InlineScriptLazyDetector', () => {
         detector.dispose();
     });
 
+    test('does not restore stale routing when a pending read completes after a live metadata edit', async () => {
+        const uri = Uri.file(path.join(process.cwd(), 'pending-header-read.py'));
+        const original = '# /// script\n# dependencies = ["requests"]\n# ///\n';
+        const changed = original.replace('requests', 'httpx');
+        const metadata = ism.readInlineScriptMetadata(original);
+        assert.ok(metadata?.sourceHash);
+        const staleRead = createDeferred<ism.InlineScriptMetadata>();
+        readMetadataStub.returns(staleRead.promise);
+        routingRegistry.setMetadata(uri, metadata);
+        routingRegistry.setValidatedAssociation(uri, true, '3.12.4');
+        const detector = createDetector();
+
+        const opening = fireOpen(uri);
+        assert.strictEqual(readMetadataStub.callCount, 1);
+        changeListener!({
+            document: { ...makeDoc(uri), isDirty: true, getText: () => changed },
+            contentChanges: [
+                { range: undefined as never, rangeOffset: original.indexOf('requests'), rangeLength: 8, text: 'httpx' },
+            ],
+            reason: undefined,
+        });
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+
+        staleRead.resolve(metadata);
+        await opening;
+
+        assert.deepStrictEqual(routingRegistry.getMetadata(uri), metadata);
+        assert.strictEqual(routingRegistry.shouldRoute(uri), false);
+        detector.dispose();
+    });
+
     test('invalidates dependency edits after an unchanged block moves beyond its old offsets', async () => {
         const uri = Uri.file(path.join(process.cwd(), 'moved-header.py'));
         const original = '# /// script\n# dependencies = ["requests"]\n# ///\n';

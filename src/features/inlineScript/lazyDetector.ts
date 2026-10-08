@@ -284,9 +284,14 @@ export class InlineScriptLazyDetector implements Disposable {
             const metadata = this.routingRegistry.getMetadata(e.document.uri);
             // Saved offsets can become stale when an unchanged block moves, so fingerprinted headers are compared directly.
             if (metadata?.sourceHash) {
+                const liveMetadataMatchesSaved =
+                    getInlineScriptSourceHash(sliceHeaderBytes(e.document.getText())) === metadata.sourceHash;
+                if (!liveMetadataMatchesSaved && this.inFlight.has(key)) {
+                    this.advanceRoutingReadGeneration(key);
+                }
                 this.routingRegistry.setLiveMetadataMatchesSaved(
                     e.document.uri,
-                    getInlineScriptSourceHash(sliceHeaderBytes(e.document.getText())) === metadata.sourceHash,
+                    liveMetadataMatchesSaved,
                 );
             } else if (
                 (metadata &&
