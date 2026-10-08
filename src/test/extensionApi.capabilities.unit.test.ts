@@ -3,7 +3,6 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { It, Mock } from 'typemoq';
 import { Disposable, EventEmitter, Uri } from 'vscode';
 import type {
     DidChangeEnvironmentVariablesEventArgs,
@@ -64,24 +63,20 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         const projectChanges = new EventEmitter<PythonProject[]>();
         const variablesChanged = new EventEmitter<DidChangeEnvironmentVariablesEventArgs>();
         disposables.push(projectChanges, variablesChanged);
-        const pm = Mock.ofType<PythonProjectManager>();
-        pm.setup((m) => m.getProjects()).returns(() => projects);
-        pm.setup((m) => m.get(It.isAny())).returns((uri: Uri) =>
-            projects.find((candidate) => candidate.uri.toString() === uri.toString()),
-        );
-        pm.setup((m) => m.onDidChangeProjects).returns(() => projectChanges.event);
-        projectManager = pm.object;
+        projectManager = {
+            getProjects: () => projects,
+            get: (uri: Uri) => projects.find((candidate) => candidate.uri.toString() === uri.toString()),
+            onDidChangeProjects: projectChanges.event,
+        } as unknown as PythonProjectManager;
         managers = new PythonEnvironmentManagers(projectManager);
         selectedEnvironment = sinon.stub(managers, 'getLastKnownEnvironment').returns(environment);
         type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
-        const variables = Mock.ofType<ApiArgs[4]>();
-        variables.setup((m) => m.onDidChangeEnvironmentVariables).returns(() => variablesChanged.event);
         api = new PythonEnvironmentApiImpl(
             managers,
             projectManager,
-            Mock.ofType<ApiArgs[2]>().object,
-            Mock.ofType<ApiArgs[3]>().object,
-            variables.object,
+            {} as ApiArgs[2],
+            {} as ApiArgs[3],
+            { onDidChangeEnvironmentVariables: variablesChanged.event } as unknown as ApiArgs[4],
             disposables,
         );
         envProbe = sinon.stub<[CapabilityContext], Promise<Support>>().resolves({ supported: true });
