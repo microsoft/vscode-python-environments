@@ -17,21 +17,16 @@ export const allSupportedEnvironmentCapabilities: Capabilities<EnvironmentManage
     'environments.setSelected': supportedCapability,
     'environments.create': supportedCapability,
     'environments.create.quick': supportedCapability,
-    'environments.create.additionalPackages': supportedCapability,
     'environments.remove': supportedCapability,
-    'environments.remove.headless': supportedCapability,
 };
 
 export const allSupportedPackageCapabilities: Capabilities<PackageManagerCapability> = {
     'packages.list': supportedCapability,
-    'packages.list.skipCache': supportedCapability,
     'packages.refresh': supportedCapability,
     'packages.manage': supportedCapability,
     'packages.manage.install': supportedCapability,
     'packages.manage.uninstall': supportedCapability,
     'packages.manage.upgrade': supportedCapability,
-    'packages.manage.headless': supportedCapability,
-    'packages.manage.showSkipOption': supportedCapability,
     'packages.direct': supportedCapability,
     'packages.availableVersions': supportedCapability,
 };

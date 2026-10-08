@@ -45,12 +45,9 @@ import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../i
 export class CondaPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         ...requiredPackageCapabilities,
-        'packages.list.skipCache': supportedCapability,
         'packages.manage.install': supportedCapability,
         'packages.manage.uninstall': supportedCapability,
         'packages.manage.upgrade': supportedCapability,
-        'packages.manage.headless': supportedCapability,
-        'packages.manage.showSkipOption': supportedCapability,
         'packages.availableVersions': supportedCapability,
         'packages.direct': async () => ({
             supported: false,

@@ -76,11 +76,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         'environments.create': supportedCapability,
         'environments.create.quick': async (context) =>
             resolveEnvironmentManagerCapability(this, 'environments.create', context),
-        'environments.create.additionalPackages': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.create', context),
         'environments.remove': supportedCapability,
-        'environments.remove.headless': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.remove', context),
     };
 
     private collection: PythonEnvironment[] = [];

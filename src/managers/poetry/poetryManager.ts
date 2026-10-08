@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, l10n, MarkdownString, ProgressLocation, Uri } from 'vscode';
+import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -15,7 +15,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
+import { Capabilities, EnvironmentManagerCapability } from '../../capabilities';
 import { PoetryStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -27,7 +27,7 @@ import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
 import { getConfiguration } from '../../common/workspace.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
-import { requiredEnvironmentCapabilities } from '../common/capabilityDeclarations';
+import { discoveryOnlyEnvironmentCapabilities } from '../common/capabilityDeclarations';
 import { NativePythonEnvironmentKind, NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
 import {
@@ -49,23 +49,7 @@ import {
 } from './poetryUtils';
 
 export class PoetryManager implements EnvironmentManager, Disposable {
-    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
-        ...requiredEnvironmentCapabilities,
-        'environments.create': async () => ({
-            supported: false,
-            reason: l10n.t('Poetry does not support creating environments.'),
-        }),
-        'environments.create.quick': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.create', context),
-        'environments.create.additionalPackages': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.create', context),
-        'environments.remove': async () => ({
-            supported: false,
-            reason: l10n.t('Poetry does not support removing environments.'),
-        }),
-        'environments.remove.headless': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.remove', context),
-    };
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = discoveryOnlyEnvironmentCapabilities('Poetry');
 
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();

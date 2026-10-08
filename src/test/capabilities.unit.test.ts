@@ -32,21 +32,16 @@ const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = 
     'environments.setSelected': async () => supported,
     'environments.create': async () => supported,
     'environments.create.quick': async () => supported,
-    'environments.create.additionalPackages': async () => supported,
     'environments.remove': async () => supported,
-    'environments.remove.headless': async () => supported,
 };
 
 const fullPackageCapabilities: Capabilities<PackageManagerCapability> = {
     'packages.list': async () => supported,
-    'packages.list.skipCache': async () => supported,
     'packages.refresh': async () => supported,
     'packages.manage': async () => supported,
     'packages.manage.install': async () => supported,
     'packages.manage.uninstall': async () => supported,
     'packages.manage.upgrade': async () => supported,
-    'packages.manage.headless': async () => supported,
-    'packages.manage.showSkipOption': async () => supported,
     'packages.direct': async () => supported,
     'packages.availableVersions': async () => supported,
 };

@@ -49,15 +49,11 @@ import { PackageToolSupport, PythonToolError, pythonToolSupport, throwIfCancelle
 export class PoetryPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         'packages.list': async () => this.checkProjectSupport(),
-        'packages.list.skipCache': async (context) =>
-            resolvePackageManagerCapability(this, 'packages.list', context),
         'packages.direct': async () => this.checkProjectSupport(),
         'packages.manage': async () => this.checkProjectSupport(),
         'packages.manage.install': async (context) =>
             resolvePackageManagerCapability(this, 'packages.manage', context),
         'packages.manage.uninstall': async (context) =>
-            resolvePackageManagerCapability(this, 'packages.manage', context),
-        'packages.manage.headless': async (context) =>
             resolvePackageManagerCapability(this, 'packages.manage', context),
         'packages.refresh': async () => this.checkProjectSupport(),
         'packages.availableVersions': async () => ({
@@ -67,10 +63,6 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         'packages.manage.upgrade': async () => ({
             supported: false,
             reason: l10n.t('Poetry package management does not support the upgrade option.'),
-        }),
-        'packages.manage.showSkipOption': async () => ({
-            supported: false,
-            reason: l10n.t('Poetry package management does not support the skip option.'),
         }),
     };
 
