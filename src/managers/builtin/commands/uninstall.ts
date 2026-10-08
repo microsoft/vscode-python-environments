@@ -18,7 +18,8 @@ export class PipUninstallCommand extends UninstallCommand {
             undefined,
             this.log,
             executeArgs.cancellationToken,
-            this.timeout,
+            this.timeout ?? (executeArgs.toolExecution ? 300_000 : undefined),
+            executeArgs.toolExecution,
         );
     }
 }
@@ -36,6 +37,14 @@ export class UvUninstallCommand extends UninstallCommand {
     }
 
     async execute(executeArgs: UninstallExecuteArgs): Promise<void> {
-        await runUV(this.buildCommand(executeArgs), undefined, this.log, executeArgs.cancellationToken, this.timeout, this.uvExecutable);
+        await runUV(
+            this.buildCommand(executeArgs),
+            undefined,
+            this.log,
+            executeArgs.cancellationToken,
+            this.timeout ?? (executeArgs.toolExecution ? 300_000 : undefined),
+            this.uvExecutable,
+            executeArgs.toolExecution,
+        );
     }
 }

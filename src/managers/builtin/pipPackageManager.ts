@@ -11,6 +11,7 @@ import {
     MarkdownString,
     ProgressLocation,
     ThemeIcon,
+    Uri,
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
@@ -47,6 +48,7 @@ import {
 } from './commands/index';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
+import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 
 export class PipPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -71,7 +73,25 @@ export class PipPackageManager implements PackageManager, Disposable {
     readonly tooltip?: string | MarkdownString;
     readonly iconPath?: IconPath;
 
-    async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+    readonly [pythonToolSupport]: PackageToolSupport = {
+        manage: (environment, options, token, scope) =>
+            this.manage(environment, { ...options, runHeadless: true }, token, scope),
+        getPackages: async (environment, token) => {
+            const packages = await this.fetchPackages(environment, false, token);
+            if (!packages) {
+                throw new Error('Package listing returned no result.');
+            }
+            return packages;
+        },
+    };
+
+    async manage(
+        environment: PythonEnvironment,
+        options: PackageManagementOptions,
+        toolToken?: CancellationToken,
+        scope?: Uri,
+    ): Promise<void> {
+        throwIfCancelled(toolToken);
         let toInstall: string[] = [...(options.install ?? [])];
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
@@ -102,6 +122,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                 const manageCommandOptions: CommandConstructorOptions = {
                     pythonExecutable,
                     log: this.log,
+                    cwd: scope?.fsPath,
+                    cancellationToken: token,
+                    toolExecution: !!toolToken,
                 };
 
                 if (toUninstall.length > 0) {
@@ -114,6 +137,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                     await command.execute({
                         packages: parsePackageSpecs(toUninstall),
                         cancellationToken: token,
+                        toolExecution: !!toolToken,
                     });
                 }
 
@@ -128,6 +152,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                         packages: parsePackageSpecs(toInstall),
                         upgrade: options.upgrade,
                         cancellationToken: token,
+                        toolExecution: !!toolToken,
                     });
                 }
 
@@ -138,7 +163,8 @@ export class PipPackageManager implements PackageManager, Disposable {
                     (changes) => {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
-                    () => this.fetchPackages(environment, !options.runHeadless),
+                    () => this.fetchPackages(environment, !options.runHeadless, toolToken),
+                    !!toolToken,
                 );
             } catch (e) {
                 if (e instanceof CancellationError) {
@@ -159,7 +185,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         };
 
         if (options.runHeadless) {
-            await execute();
+            await execute(toolToken);
             return;
         }
 
@@ -206,8 +232,13 @@ export class PipPackageManager implements PackageManager, Disposable {
         return this.packages.get(environment.envId.id);
     }
 
-    private async fetchPackages(environment: PythonEnvironment, showErrors = true): Promise<Package[] | undefined> {
+    private async fetchPackages(
+        environment: PythonEnvironment,
+        showErrors = true,
+        token?: CancellationToken,
+    ): Promise<Package[] | undefined> {
         try {
+            throwIfCancelled(token);
             const pythonExecutable = environment.execInfo?.run?.executable;
             if (!pythonExecutable) {
                 throw new Error('Unable to determine Python executable path');
@@ -216,17 +247,25 @@ export class PipPackageManager implements PackageManager, Disposable {
                 {
                     pythonExecutable,
                     log: this.log,
+                    cancellationToken: token,
+                    toolExecution: !!token,
                 },
                 environment.environmentPath.fsPath,
                 PipListCommand,
                 UvListCommand,
             );
-            const data = await listCmd.execute();
+            const data = await listCmd.execute(
+                token ? { cancellationToken: token, strict: true, toolExecution: true } : undefined,
+            );
+            throwIfCancelled(token);
             const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;
         } catch (error) {
             this.log.error('Error refreshing packages', error);
+            if (token) {
+                throw error;
+            }
             if (showErrors) {
                 setImmediate(async () => {
                     await showErrorMessageWithLogs(l10n.t('Error refreshing packages'), this.log);

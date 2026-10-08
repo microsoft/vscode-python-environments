@@ -7,7 +7,15 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { CancellationTokenSource, Disposable, LogOutputChannel, Memento, TextDocument, Uri } from 'vscode';
+import {
+    CancellationError,
+    CancellationTokenSource,
+    Disposable,
+    LogOutputChannel,
+    Memento,
+    TextDocument,
+    Uri,
+} from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     EnvironmentChangeKind,
@@ -36,6 +44,7 @@ import * as uvPythonInstaller from '../../../../managers/builtin/uvPythonInstall
 import * as venvUtils from '../../../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../../../managers/common/nativePythonFinder';
 import { MockDocument } from '../../../mocks/mockDocument';
+import { PythonToolError, PythonToolOperation, pythonToolSupport } from '../../../../internal/pythonToolSupport';
 
 const CACHE_KEY = '0123456789abcdef';
 const NOW = new Date('2026-07-21T12:00:00.000Z');
@@ -499,6 +508,117 @@ suite('InlineScriptEnvManager', () => {
             subscriptions: Disposable[];
         };
     }
+
+    suite('private tool operations', () => {
+        let source: CancellationTokenSource;
+        let operation: PythonToolOperation;
+
+        setup(() => {
+            source = new CancellationTokenSource();
+            operation = {
+                token: source.token,
+                getGlobalEnvironments: async () => [baseEnvironment],
+                managePackages: sinon.stub().resolves(),
+            };
+        });
+
+        teardown(() => {
+            source.dispose();
+        });
+
+        test('tool applicability recognizes saved metadata before a human association exists', async () => {
+            assert.strictEqual(routingRegistry.shouldRoute(scriptUri()), false);
+            assert.strictEqual(await manager[pythonToolSupport].canConfigure!(scriptUri()), true);
+            assert.ok(readMetadataStub.calledWith(scriptUri(), true));
+            assert.strictEqual(routingRegistry.shouldRoute(scriptUri()), false);
+            readMetadataStub.resolves(undefined);
+            assert.strictEqual(await manager[pythonToolSupport].canConfigure!(scriptUri()), false);
+            readMetadataStub.rejects(new Error('Invalid metadata'));
+            await assert.rejects(
+                manager[pythonToolSupport].canConfigure!(scriptUri()),
+                (error) => error instanceof PythonToolError && error.code === 'INVALID_PROJECT',
+            );
+            assert.ok(createWithProgressStub.notCalled && promptInstallPythonViaUvStub.notCalled);
+        });
+
+        test('shares cache and metadata creation without querying interactive public environment discovery', async () => {
+            const environment = await manager[pythonToolSupport].create!(scriptUri(), operation);
+            assert.ok(environment);
+            assert.ok(apiGetEnvironmentsStub.notCalled);
+            assert.strictEqual(createWithProgressStub.firstCall.args[9].operation, operation);
+            const checkCancellation = lockStub.firstCall.args[1].checkCancellation;
+            assert.strictEqual(typeof checkCancellation, 'function');
+            checkCancellation();
+            source.cancel();
+            assert.throws(checkCancellation, CancellationError);
+            assert.ok(writeMetaStub.calledOnce);
+            assert.ok(promptInstallPythonViaUvStub.notCalled);
+        });
+
+        test('reports missing compatible Python without attempting an installation question', async () => {
+            operation.getGlobalEnvironments = async () => [];
+            await assert.rejects(
+                manager[pythonToolSupport].create!(scriptUri(), operation),
+                (error: unknown) => error instanceof PythonToolError && error.code === 'MISSING_PYTHON',
+            );
+            assert.ok(promptInstallPythonViaUvStub.notCalled);
+            assert.ok(getAvailablePythonVersionsStub.notCalled);
+            assert.ok(createWithProgressStub.notCalled);
+        });
+
+        test('does not wait for or cancel a human setup that owns the same cache entry', async () => {
+            const started = createDeferred<void>();
+            const release = createDeferred<void>();
+            createWithProgressStub.callsFake(async () => {
+                started.resolve();
+                await release.promise;
+                return undefined;
+            });
+            let humanFinished = false;
+            const human = manager.create(scriptUri(), { quickCreate: true }).then(() => {
+                humanFinished = true;
+            });
+            await started.promise;
+            try {
+                await assert.rejects(
+                    manager[pythonToolSupport].create!(scriptUri('second.py'), operation),
+                    (error: unknown) => error instanceof PythonToolError && error.code === 'ENVIRONMENT_BUSY',
+                );
+                assert.strictEqual(humanFinished, false);
+                assert.ok(createWithProgressStub.calledOnce);
+            } finally {
+                release.resolve();
+                await human;
+            }
+        });
+
+        test('propagates creation cancellation and does not publish cache metadata', async () => {
+            createWithProgressStub.callsFake(async () => {
+                source.cancel();
+                throw new CancellationError();
+            });
+            await assert.rejects(manager[pythonToolSupport].create!(scriptUri(), operation), CancellationError);
+            assert.ok(writeMetaStub.notCalled);
+            assert.ok(releaseLockStub.calledOnce);
+        });
+
+        test('retains the cache lock and directory when a process could not be stopped', async () => {
+            createWithProgressStub.callsFake(async () => {
+                await fs.outputFile(getVenvPythonPath(envDir().fsPath), '');
+                throw new PythonToolError(
+                    'PROCESS_TERMINATION_FAILED',
+                    'Process may still be modifying this cache entry.',
+                );
+            });
+            await assert.rejects(
+                manager[pythonToolSupport].create!(scriptUri(), operation),
+                (error: unknown) => error instanceof PythonToolError && error.code === 'PROCESS_TERMINATION_FAILED',
+            );
+            assert.ok(await fs.pathExists(envDir().fsPath));
+            assert.ok(retainLockStub.calledOnce);
+            assert.ok(writeMetaStub.notCalled);
+        });
+    });
 
     suite('static metadata and deferred methods', () => {
         test('exposes creation and removal while leaving generic resolution empty', async () => {
@@ -7720,9 +7840,12 @@ suite('InlineScriptEnvManager', () => {
 
         test('recovers an old usable environment after a single stamp failure without a save', async () => {
             const uri = scriptUri('recover.py');
+            const scriptText = '# /// script\n# requires-python = ">=3.11"\n# dependencies = ["requests"]\n# ///\n';
+            const metadata = metadataReader.readInlineScriptMetadata(scriptText)!;
+            readMetadataStub.resolves(metadata);
             const environment = await createOwnedEnvironment();
             await manager.set(uri, environment);
-            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri, metadata);
             setSidecar(
                 await makeSidecar({
                     lastUsedAt: new Date(NOW.getTime() - 20 * 24 * 60 * 60 * 1000).toISOString(),
@@ -7738,7 +7861,7 @@ suite('InlineScriptEnvManager', () => {
             const provider = new InlineScriptCodeLensProvider(routingRegistry, 'setup');
             try {
                 const document = new MockDocument(
-                    '# /// script\n# dependencies = ["requests"]\n# ///\n',
+                    scriptText,
                     uri.fsPath,
                     async () => true,
                 );
@@ -7754,7 +7877,10 @@ suite('InlineScriptEnvManager', () => {
                 await ready.promise;
 
                 assert.strictEqual(await manager.get(uri), environment);
-                assert.strictEqual(provider.provideCodeLenses(document, {} as never).length, 0);
+                const lenses = provider.provideCodeLenses(document, {} as never);
+                assert.strictEqual(lenses.length, 1);
+                assert.strictEqual(lenses[0].command?.command, '');
+                assert.strictEqual(lenses[0].command?.title, 'Script environment ready (Python 3.12.4)');
                 assert.strictEqual(writeMetaStub.callCount, 2);
                 sinon.assert.notCalled(createWithProgressStub);
             } finally {

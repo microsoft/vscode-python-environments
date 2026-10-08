@@ -5,6 +5,8 @@ import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred } from '../../common/utils/deferred';
 import { getConfiguration, getWorkspaceFolder, isWorkspaceTrusted } from '../../common/workspace.apis';
+import { runLoggedProcess } from '../../common/utils/processRunner';
+import { throwIfCancelled, waitForToolRead } from '../../internal/pythonToolSupport';
 import { getUvEnvironments } from './uvEnvironments';
 
 let available = createDeferred<boolean>();
@@ -51,10 +53,17 @@ export async function isUvInstalled(log?: LogOutputChannel): Promise<boolean> {
  * Resolves uv from this session's installation or PATH, or from pyprojectx in the owning trusted workspace.
  * @param log Optional command log.
  * @param scope Path inside the workspace whose local uv should be considered.
+ * @param token Optional cancellation token for noninteractive tool requests.
  * @returns The command to spawn, or undefined when uv is unavailable.
  */
-export async function getUvExecutable(log?: LogOutputChannel, scope?: string): Promise<string | undefined> {
-    if (await isUvInstalled(log)) {
+export async function getUvExecutable(
+    log?: LogOutputChannel,
+    scope?: string,
+    token?: CancellationToken,
+): Promise<string | undefined> {
+    throwIfCancelled(token);
+    const installed = isUvInstalled(log);
+    if (token ? await waitForToolRead(installed, token) : await installed) {
         return uvExecutable;
     }
     const workspaceFolder = scope && isWorkspaceTrusted() ? getWorkspaceFolder(Uri.file(scope)) : undefined;
@@ -62,12 +71,13 @@ export async function getUvExecutable(log?: LogOutputChannel, scope?: string): P
         return undefined;
     }
     const executable = path.join(workspaceFolder.uri.fsPath, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
-    return new Promise((resolve) => {
+    const probe = new Promise<string | undefined>((resolve) => {
         log?.info(`Running: ${executable} --version`);
         const proc = spawnProcess(executable, ['--version']);
         proc.on('error', () => resolve(undefined));
         proc.on('exit', (code) => resolve(code === 0 ? executable : undefined));
     });
+    return token ? waitForToolRead(probe, token) : probe;
 }
 
 /**
@@ -75,14 +85,21 @@ export async function getUvExecutable(log?: LogOutputChannel, scope?: string): P
  * @param log - Optional log output channel for logging operations
  * @param envPath - Optional environment path to check against UV environments list
  * @param scope - Path used to locate the workspace's uv; defaults to the environment path.
+ * @param token - Optional cancellation token for noninteractive tool requests.
  * @returns True if uv should be used, false otherwise. For UV environments, returns true if uv is installed. For other environments, checks the 'python-envs.alwaysUseUv' setting and uv availability.
  */
-export async function shouldUseUv(log?: LogOutputChannel, envPath?: string, scope = envPath): Promise<boolean> {
+export async function shouldUseUv(
+    log?: LogOutputChannel,
+    envPath?: string,
+    scope = envPath,
+    token?: CancellationToken,
+): Promise<boolean> {
+    throwIfCancelled(token);
     if (envPath) {
         // always use uv if the given environment is stored as a uv env
         const uvEnvs = await getUvEnvironments();
         if (uvEnvs.includes(envPath)) {
-            return (await getUvExecutable(log, scope)) !== undefined;
+            return (await getUvExecutable(log, scope, token)) !== undefined;
         }
     }
 
@@ -91,7 +108,7 @@ export async function shouldUseUv(log?: LogOutputChannel, envPath?: string, scop
     const alwaysUseUv = config.get<boolean>('alwaysUseUv', true);
 
     if (alwaysUseUv) {
-        return (await getUvExecutable(log, scope)) !== undefined;
+        return (await getUvExecutable(log, scope, token)) !== undefined;
     }
     return false;
 }
@@ -103,7 +120,11 @@ export async function runUV(
     token?: CancellationToken,
     timeout?: number,
     executable = uvExecutable,
+    toolExecution = false,
 ): Promise<string> {
+    if (toolExecution) {
+        return runLoggedProcess(executable, args, { cwd }, log, token, timeout);
+    }
     log?.info(`Running: ${executable} ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
         const spawnOptions: { cwd?: string; timeout?: number } = { cwd };
@@ -158,7 +179,11 @@ export async function runPython(
     log?: LogOutputChannel,
     token?: CancellationToken,
     timeout?: number,
+    toolExecution = false,
 ): Promise<string> {
+    if (toolExecution) {
+        return runLoggedProcess(python, args, { cwd }, log, token, timeout, true);
+    }
     log?.info(`Running: ${python} ${args.join(' ')}`);
     return new Promise<string>((resolve, reject) => {
         const proc = spawnProcess(python, args, { cwd: cwd, timeout });

@@ -35,6 +35,8 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
             mockTerminalManager,
             mockEnvVarManager,
         );
+        assert.strictEqual(api.__pythonTools.version, 1);
+        assert.strictEqual(typeof api.getEnvironment, 'function');
 
         let firedEventPayload: unknown = null;
         api.onDidChangePythonProjects((event: unknown) => {
