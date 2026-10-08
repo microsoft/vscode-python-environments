@@ -8,6 +8,7 @@ import * as path from 'path';
 export interface AcquireFileLockOptions {
     readonly timeoutMs: number;
     readonly retryIntervalMs: number;
+    readonly checkCancellation?: () => void;
 }
 
 export interface AcquiredFileLock {
@@ -52,6 +53,7 @@ export async function acquireFileLock(filePath: string, options: AcquireFileLock
     const deadline = Date.now() + options.timeoutMs;
 
     while (true) {
+        options.checkCancellation?.();
         try {
             await fsapi.mkdir(lockPath);
             try {

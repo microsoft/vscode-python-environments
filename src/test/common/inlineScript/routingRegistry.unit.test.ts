@@ -15,6 +15,21 @@ const METADATA = {
 };
 
 suite('InlineScriptRoutingRegistry', () => {
+    test('publishes interpreter versions only for validated associations', () => {
+        const registry = new InlineScriptRoutingRegistry();
+        const uri = Uri.joinPath(Uri.file(process.cwd()), 'script.py');
+        const versions: (string | undefined)[] = [];
+        registry.onDidChangeEnvironmentVersion(() => versions.push(registry.getEnvironmentVersion(uri)));
+        registry.setMetadata(uri, METADATA);
+        registry.setValidatedAssociation(uri, true, '3.12.4');
+        registry.setValidatedAssociation(uri, true, '3.12.4');
+        registry.setValidatedAssociation(uri, true, '3.13.1');
+        registry.setValidatedAssociation(uri, false);
+        assert.deepStrictEqual(versions, ['3.12.4', '3.13.1', undefined]);
+        assert.strictEqual(registry.getEnvironmentVersion(uri), undefined);
+        registry.dispose();
+    });
+
     test('temporary unavailability preserves routing and notifies only on availability changes', () => {
         const registry = new InlineScriptRoutingRegistry();
         const uri = Uri.joinPath(Uri.file(process.cwd()), 'script.py');
@@ -81,6 +96,29 @@ suite('InlineScriptRoutingRegistry', () => {
 
         assert.strictEqual(registry.hasValidatedAssociation(uri), true);
         assert.strictEqual(registry.shouldRoute(uri), true);
+        registry.dispose();
+    });
+
+    test('temporarily suppresses routing while live metadata differs and restores it on Undo', () => {
+        const registry = new InlineScriptRoutingRegistry();
+        const uri = Uri.joinPath(Uri.file(process.cwd()), 'script.py');
+        const routeabilityEvents: boolean[] = [];
+        registry.onDidChangeRouteability((event) => routeabilityEvents.push(event.routeable));
+        registry.setMetadata(uri, { ...METADATA, sourceHash: 'saved-block' });
+        registry.setValidatedAssociation(uri, true, '3.12.4');
+
+        registry.setLiveMetadataMatchesSaved(uri, false);
+
+        assert.strictEqual(registry.shouldRoute(uri), false);
+        assert.strictEqual(registry.hasValidatedAssociation(uri), true);
+        assert.strictEqual(registry.getMetadata(uri)?.sourceHash, 'saved-block');
+        assert.strictEqual(registry.getEnvironmentVersion(uri), undefined);
+
+        registry.setLiveMetadataMatchesSaved(uri, true);
+
+        assert.strictEqual(registry.shouldRoute(uri), true);
+        assert.strictEqual(registry.getEnvironmentVersion(uri), '3.12.4');
+        assert.deepStrictEqual(routeabilityEvents, [true, false, true]);
         registry.dispose();
     });
 

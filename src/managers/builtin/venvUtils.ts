@@ -36,6 +36,13 @@ import {
 } from '../../common/window.apis';
 import { getConfiguration } from '../../common/workspace.apis';
 import {
+    PythonToolError,
+    PythonToolOperation,
+    throwIfCancelled,
+    waitForToolRead,
+} from '../../internal/pythonToolSupport';
+import { ProcessTerminationError, ProcessTimeoutError } from '../../common/utils/processRunner';
+import {
     isNativeEnvInfo,
     NativeEnvInfo,
     NativePythonEnvironmentKind,
@@ -364,6 +371,7 @@ export interface CreateWithProgressOptions {
     readonly progressTitle?: string;
     /** Controls how the created environment's user-facing name is formatted. */
     readonly nameStyle?: VenvNameStyle;
+    readonly operation?: PythonToolOperation;
 }
 
 /**
@@ -416,81 +424,144 @@ export async function createWithProgress(
     options?: CreateWithProgressOptions,
 ): Promise<CreateEnvironmentResult | undefined> {
     const pythonPath = getVenvPythonPath(envPath);
-
-    return await withProgress(
-        {
-            location: ProgressLocation.Notification,
-            title:
-                options?.progressTitle ??
-                l10n.t(
-                    'Creating virtual environment named {0} using python version {1}.',
-                    path.basename(envPath),
-                    basePython.version,
-                ),
-        },
-        async () => {
-            const result: CreateEnvironmentResult = {};
-            try {
-                const useUv = await shouldUseUv(log, basePython.environmentPath.fsPath, venvRoot.fsPath);
-                // env creation
-                const baseExecutable = await getBaseInterpreterForVenv(basePython);
-                if (baseExecutable) {
-                    if (useUv) {
-                        const uvExecutable = await getUvExecutable(log, venvRoot.fsPath);
-                        if (!uvExecutable) {
-                            throw new Error(`uv became unavailable for workspace: ${venvRoot.fsPath}`);
-                        }
-                        await runUV(
-                            ['venv', '--verbose', '--seed', '--python', baseExecutable, envPath],
-                            venvRoot.fsPath,
-                            log,
-                            undefined,
-                            undefined,
-                            uvExecutable,
-                        );
-                    } else {
-                        await runPython(baseExecutable, ['-m', 'venv', envPath], venvRoot.fsPath, manager.log);
-                    }
-                    if (!(await fsapi.pathExists(pythonPath))) {
-                        throw new Error('no python executable found in virtual environment');
-                    }
-                }
-
-                // handle admin of new env
-                const resolved = await nativeFinder.resolve(pythonPath);
-                const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved, options?.nameStyle), manager);
-
-                if (
-                    trackUvEnvironment &&
-                    useUv &&
-                    (resolved.kind === NativePythonEnvironmentKind.venvUv ||
-                        resolved.kind === NativePythonEnvironmentKind.uvWorkspace)
-                ) {
-                    await addUvEnvironment(env.environmentPath.fsPath);
-                }
-
-                // install packages
-                if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
-                    try {
-                        await api.managePackages(env, {
-                            upgrade: false,
-                            install: packages?.install,
-                            uninstall: packages?.uninstall ?? [],
-                        });
-                    } catch (e) {
-                        // error occurred while installing packages
-                        result.pkgInstallationErr = e instanceof Error ? e.message : String(e);
-                        result.pkgInstallationCancelled = e instanceof CancellationError;
-                    }
-                }
-                result.environment = env;
-            } catch (e) {
-                log.error(`Failed to create virtual environment: ${e}`);
-                result.envCreationErr = `Failed to create virtual environment: ${e}`;
+    const operation = options?.operation;
+    const token = operation?.token;
+    const create = async (): Promise<CreateEnvironmentResult> => {
+        const result: CreateEnvironmentResult = {};
+        try {
+            throwIfCancelled(token);
+            const useUv = await shouldUseUv(log, basePython.environmentPath.fsPath, venvRoot.fsPath, token);
+            const baseExecutable = await getBaseInterpreterForVenv(basePython);
+            if (operation && !baseExecutable) {
+                throw new Error(l10n.t('Unable to determine the base Python executable.'));
             }
-            return result;
-        },
-    );
+            throwIfCancelled(token);
+            if (baseExecutable) {
+                if (useUv) {
+                    const uvExecutable = await getUvExecutable(log, venvRoot.fsPath, token);
+                    if (!uvExecutable) {
+                        throw new Error(`uv became unavailable for workspace: ${venvRoot.fsPath}`);
+                    }
+                    await runUV(
+                        ['venv', '--verbose', '--seed', '--python', baseExecutable, envPath],
+                        venvRoot.fsPath,
+                        log,
+                        token,
+                        operation ? 300_000 : undefined,
+                        uvExecutable,
+                        !!operation,
+                    );
+                } else {
+                    await runPython(
+                        baseExecutable,
+                        ['-m', 'venv', envPath],
+                        venvRoot.fsPath,
+                        manager.log,
+                        token,
+                        operation ? 300_000 : undefined,
+                        !!operation,
+                    );
+                }
+                throwIfCancelled(token);
+                if (!(await fsapi.pathExists(pythonPath))) {
+                    throw new Error('no python executable found in virtual environment');
+                }
+            }
+
+            const resolution = nativeFinder.resolve(pythonPath);
+            const resolved = token ? await waitForToolRead(resolution, token) : await resolution;
+            throwIfCancelled(token);
+            const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved, options?.nameStyle), manager);
+            if (operation) {
+                result.environment = env;
+            }
+            if (
+                trackUvEnvironment &&
+                useUv &&
+                (resolved.kind === NativePythonEnvironmentKind.venvUv ||
+                    resolved.kind === NativePythonEnvironmentKind.uvWorkspace)
+            ) {
+                throwIfCancelled(token);
+                await addUvEnvironment(env.environmentPath.fsPath);
+            }
+
+            if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
+                try {
+                    throwIfCancelled(token);
+                    const packageOptions = {
+                        upgrade: false,
+                        install: packages.install,
+                        uninstall: packages.uninstall ?? [],
+                    };
+                    if (operation) {
+                        await operation.managePackages(env, { ...packageOptions, runHeadless: true });
+                    } else {
+                        await api.managePackages(env, packageOptions);
+                    }
+                } catch (error) {
+                    if (operation) {
+                        if (error instanceof CancellationError) {
+                            throw error;
+                        }
+                        throw new PythonToolError(
+                            error instanceof PythonToolError
+                                ? error.code
+                                : error instanceof ProcessTerminationError
+                                  ? 'PROCESS_TERMINATION_FAILED'
+                                  : error instanceof ProcessTimeoutError
+                                    ? 'TIMEOUT'
+                                    : 'PACKAGE_INSTALL_FAILED',
+                            l10n.t(
+                                'The environment was created, but installing project dependencies failed: {0}',
+                                error instanceof Error ? error.message : String(error),
+                            ),
+                            env,
+                        );
+                    }
+                    result.pkgInstallationErr = error instanceof Error ? error.message : String(error);
+                    result.pkgInstallationCancelled = error instanceof CancellationError;
+                }
+            }
+            result.environment = env;
+            throwIfCancelled(token);
+        } catch (error) {
+            log.error(`Failed to create virtual environment: ${error}`);
+            if (operation) {
+                if (error instanceof CancellationError || error instanceof PythonToolError) {
+                    throw error;
+                }
+                throw new PythonToolError(
+                    error instanceof ProcessTerminationError
+                        ? 'PROCESS_TERMINATION_FAILED'
+                        : error instanceof ProcessTimeoutError
+                          ? 'TIMEOUT'
+                          : 'CREATION_FAILED',
+                    l10n.t(
+                        'Failed to create virtual environment: {0}',
+                        error instanceof Error ? error.message : String(error),
+                    ),
+                    result.environment,
+                );
+            }
+            result.envCreationErr = `Failed to create virtual environment: ${error}`;
+        }
+        return result;
+    };
+    return operation
+        ? create()
+        : withProgress(
+              {
+                  location: ProgressLocation.Notification,
+                  title:
+                      options?.progressTitle ??
+                      l10n.t(
+                          'Creating virtual environment named {0} using python version {1}.',
+                          path.basename(envPath),
+                          basePython.version,
+                      ),
+              },
+              create,
+          );
 }
 
 export function ensureGlobalEnv(basePythons: PythonEnvironment[], log: LogOutputChannel): PythonEnvironment[] {
@@ -521,6 +592,7 @@ export async function quickCreateVenv(
     baseEnv: PythonEnvironment,
     venvRoot: Uri,
     additionalPackages?: string[],
+    operation?: PythonToolOperation,
 ): Promise<CreateEnvironmentResult | undefined> {
     const project = api.getPythonProject(venvRoot);
 
@@ -528,6 +600,8 @@ export async function quickCreateVenv(
     const result = await getProjectInstallable(api, project ? [project] : undefined, {
         deduplicateProjectPackages: true,
         preferredRoot: venvRoot,
+        token: operation?.token,
+        runHeadless: !!operation,
     });
     const installables = result.installables;
     const allPackages = [];
@@ -537,7 +611,17 @@ export async function quickCreateVenv(
     }
 
     const validationError = result.validationError;
-    const shouldProceed = await shouldProceedAfterPyprojectValidation(validationError, allPackages);
+    if (operation && validationError) {
+        throw new PythonToolError(
+            'INVALID_PROJECT',
+            l10n.t(
+                'Fix {0} before installing project dependencies: {1}',
+                validationError.fileUri.fsPath,
+                validationError.message,
+            ),
+        );
+    }
+    const shouldProceed = operation || (await shouldProceedAfterPyprojectValidation(validationError, allPackages));
     if (!shouldProceed) {
         return undefined;
     }
@@ -545,6 +629,15 @@ export async function quickCreateVenv(
     // Check if .venv already exists
     let venvPath = path.join(venvRoot.fsPath, '.venv');
     if (await fsapi.pathExists(venvPath)) {
+        if (operation) {
+            throw new PythonToolError(
+                'ENVIRONMENT_EXISTS',
+                l10n.t(
+                    'An environment directory already exists at {0}. Resolve or remove it before creating another environment.',
+                    venvPath,
+                ),
+            );
+        }
         // increment to create a unique name, e.g. .venv-1
         let i = 1;
         while (await fsapi.pathExists(`${venvPath}-${i}`)) {
@@ -554,10 +647,22 @@ export async function quickCreateVenv(
     }
 
     // createWithProgress handles building CreateEnvironmentResult and adding err msgs
-    return await createWithProgress(nativeFinder, api, log, manager, baseEnv, venvRoot, venvPath, {
-        install: allPackages,
-        uninstall: [],
-    });
+    throwIfCancelled(operation?.token);
+    return await createWithProgress(
+        nativeFinder,
+        api,
+        log,
+        manager,
+        baseEnv,
+        venvRoot,
+        venvPath,
+        {
+            install: allPackages,
+            uninstall: [],
+        },
+        true,
+        { operation },
+    );
 }
 
 export async function createPythonVenv(
