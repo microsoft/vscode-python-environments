@@ -17,7 +17,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability, supportedCapability } from '../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability } from '../../capabilities';
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -45,16 +45,10 @@ export class SysPythonManager implements EnvironmentManager {
             supported: false,
             reason: l10n.t('Installing a global Python requires interactive version selection.'),
         }),
-        'environments.create.additionalPackages': async () => ({
-            supported: false,
-            reason: l10n.t('Installing a global Python does not install additional packages.'),
-        }),
         'environments.remove': async () => ({
             supported: false,
             reason: l10n.t('Removing a global Python installation is not supported.'),
         }),
-        'environments.remove.headless': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.remove', context),
     };
 
     private collection: PythonEnvironment[] = [];

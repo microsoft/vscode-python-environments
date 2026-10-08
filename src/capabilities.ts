@@ -29,12 +29,8 @@ const environmentCapabilityKeys = [
     'environments.create',
     /** Offer a quick creation path; requests may still prompt. */
     'environments.create.quick',
-    /** Install extra packages in a documented creation mode, not necessarily every mode. */
-    'environments.create.additionalPackages',
     /** Delete an environment. */
     'environments.remove',
-    /** Delete without confirmation/input; progress and error UI are not suppressed. */
-    'environments.remove.headless',
 ] as const;
 
 /**
@@ -43,8 +39,6 @@ const environmentCapabilityKeys = [
 const packageCapabilityKeys = [
     /** List installed packages in an environment. Required getPackages operation; an empty result is valid. */
     'packages.list',
-    /** Retrieve installed packages without cached results; does not require a separate cache implementation. */
-    'packages.list.skipCache',
     /** Refresh installed package data. Required refresh operation. */
     'packages.refresh',
     /** Execute package management requests. Required manage operation; variants have their own keys. */
@@ -55,10 +49,6 @@ const packageCapabilityKeys = [
     'packages.manage.uninstall',
     /** Honor upgrade for installation, without guaranteeing identical solver behavior. */
     'packages.manage.upgrade',
-    /** Manage packages without confirmation/input, including when installation arrays are empty. */
-    'packages.manage.headless',
-    /** Offer skip during interactive package selection, when applicable. */
-    'packages.manage.showSkipOption',
     /** Identify direct/transitive packages on a best-effort basis, not exact user installation intent. */
     'packages.direct',
     /** Look up available package versions. */

@@ -300,8 +300,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),
         }),
         'environments.remove': supportedCapability,
-        'environments.remove.headless': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.remove', context),
         'environments.create': async ({ scope }) => {
             const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
             if (!scriptUri) {
@@ -317,8 +315,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         },
         // Inline creation has a quick path even though it has no quickCreateConfig UI hook.
         'environments.create.quick': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.create', context),
-        'environments.create.additionalPackages': async (context) =>
             resolveEnvironmentManagerCapability(this, 'environments.create', context),
     };
 

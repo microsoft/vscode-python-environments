@@ -55,12 +55,9 @@ import { VenvManager } from './venvManager';
 export class PipPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         ...requiredPackageCapabilities,
-        'packages.list.skipCache': supportedCapability,
         'packages.manage.install': supportedCapability,
         'packages.manage.uninstall': supportedCapability,
         'packages.manage.upgrade': supportedCapability,
-        'packages.manage.headless': supportedCapability,
-        'packages.manage.showSkipOption': supportedCapability,
         'packages.availableVersions': supportedCapability,
         // Dependency roots are best-effort classification, not exact user install intent.
         'packages.direct': supportedCapability,
