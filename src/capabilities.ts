@@ -11,9 +11,16 @@ import type {
     PythonProject,
 } from './types.js';
 
-/**
- * Environment capability keys. Every environment manager must advertise a check for each key.
- */
+// ---------------------------------------------------------------------------
+// Capability catalogs
+//
+// The catalogs below are the single source of truth for which capability keys exist. Every
+// environment/package manager must advertise a check for each key in its catalog; there are no
+// defaults, so unimplemented capabilities must advertise `unsupportedCapability` explicitly.
+// ---------------------------------------------------------------------------
+
+/** Environment capability keys. Every environment manager must advertise a check for each key. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- only used via `typeof` below to derive the union type.
 const environmentCapabilityKeys = [
     /** List known environments for a scope. Required getEnvironments operation; an empty result is valid. */
     'environments.list',
@@ -33,9 +40,8 @@ const environmentCapabilityKeys = [
     'environments.remove',
 ] as const;
 
-/**
- * Package capability keys. Every package manager must advertise a check for each key.
- */
+/** Package capability keys. Every package manager must advertise a check for each key. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- only used via `typeof` below to derive the union type.
 const packageCapabilityKeys = [
     /** List installed packages in an environment. Required getPackages operation; an empty result is valid. */
     'packages.list',
@@ -55,9 +61,6 @@ const packageCapabilityKeys = [
     'packages.availableVersions',
 ] as const;
 
-const environmentCapabilityKeySet: ReadonlySet<string> = new Set(environmentCapabilityKeys);
-const packageCapabilityKeySet: ReadonlySet<string> = new Set(packageCapabilityKeys);
-
 /** Environment capability keys that every environment manager must advertise a check for. */
 export type EnvironmentManagerCapability = (typeof environmentCapabilityKeys)[number];
 
@@ -65,6 +68,10 @@ export type EnvironmentManagerCapability = (typeof environmentCapabilityKeys)[nu
 export type PackageManagerCapability = (typeof packageCapabilityKeys)[number];
 
 type ManagerCapability = EnvironmentManagerCapability | PackageManagerCapability;
+
+// ---------------------------------------------------------------------------
+// Public types
+// ---------------------------------------------------------------------------
 
 /** General feature support, not a guarantee that a particular operation will succeed. */
 export type Support = { readonly supported: true } | { readonly supported: false; readonly reason: string };
@@ -82,6 +89,13 @@ export type CapabilityCheck = (context: CapabilityContext) => Promise<Support>;
 /** Every capability key must be advertised as a read-only, noninteractive check; there are no defaults. */
 export type Capabilities<C extends ManagerCapability> = Readonly<Record<C, CapabilityCheck>>;
 
+// ---------------------------------------------------------------------------
+// Shared capability checks
+//
+// Convenience constants for the two most common advertisements, so managers don't need to write
+// out `async () => ({ supported: ... })` by hand for unconditional or unimplemented capabilities.
+// ---------------------------------------------------------------------------
+
 /** A capability check that always reports support. Use for unconditionally supported operations. */
 export const supportedCapability: CapabilityCheck = async () => ({ supported: true });
 
@@ -94,84 +108,65 @@ export const unsupportedCapability: CapabilityCheck = async () => ({
     reason: l10n.t('Capability not implemented'),
 });
 
+// ---------------------------------------------------------------------------
+// Public resolvers
+//
+// These are the only two entry points managers and API callers should use. Each pins a manager
+// type to its matching capability-key type, so a capability key for the wrong kind of manager is
+// a compile error rather than a silent runtime mismatch.
+//
+// Callers include both the API layer and managers themselves, which may call these recursively
+// from within a capability check to delegate to a prerequisite (e.g. `'environments.create.quick'`
+// delegating to `'environments.create'`). There is no cycle protection: a manager that delegates
+// in a loop will recurse until the call stack overflows, so keep delegation chains acyclic.
+// ---------------------------------------------------------------------------
+
 /**
  * Resolves environment-manager support without invoking the operation or prompting.
  * @param manager Manager whose advertised capabilities are queried.
- * @param capability Environment capability to query; unknown runtime keys resolve unsupported.
+ * @param capability Environment capability to look up; keys the manager hasn't advertised resolve unsupported.
  * @param context Query context. Forward the received context unchanged when checking prerequisites.
- * @returns Support, including a reason when unsupported. Probe errors and dependency cycles reject.
+ * @returns Support, including a reason when unsupported. Probe errors reject.
  */
 export function resolveEnvironmentManagerCapability(
     manager: EnvironmentManager,
     capability: EnvironmentManagerCapability,
     context: CapabilityContext = {},
 ): Promise<Support> {
-    return resolveCapability(manager, capability, context, environmentCapabilityKeySet);
+    return resolveCapability(manager, capability, context);
 }
 
 /**
  * Resolves package-manager support without invoking the operation or prompting.
  * @param manager Manager whose advertised capabilities are queried, including the project-bound instance when applicable.
- * @param capability Package capability to query; unknown runtime keys resolve unsupported.
+ * @param capability Package capability to look up; keys the manager hasn't advertised resolve unsupported.
  * @param context Query context. Forward the received context unchanged when checking prerequisites.
- * @returns Support, including a reason when unsupported. Probe errors and dependency cycles reject.
+ * @returns Support, including a reason when unsupported. Probe errors reject.
  */
 export function resolvePackageManagerCapability(
     manager: PackageManager,
     capability: PackageManagerCapability,
     context: CapabilityContext = {},
 ): Promise<Support> {
-    return resolveCapability(manager, capability, context, packageCapabilityKeySet);
+    return resolveCapability(manager, capability, context);
 }
 
-// A shared symbol preserves ancestry across separately bundled copies of this public module.
-const ancestryKey = Symbol.for('@vscode/python-environments/capabilityAncestry/v1');
+// ---------------------------------------------------------------------------
+// Resolution engine (internal)
+// ---------------------------------------------------------------------------
 
-interface EvaluationContext extends CapabilityContext {
-    readonly [ancestryKey]?: readonly { readonly manager: object; readonly capability: ManagerCapability }[];
-}
-
-function supportIf(supported: boolean): Support {
-    return supported ? { supported: true } : { supported: false, reason: l10n.t('Capability not implemented') };
-}
-
+/**
+ * Looks up `capability` as the manager's own advertised property and calls it if present.
+ * Anything else - a missing key, an inherited property (e.g. `toString`), or a declared value
+ * that isn't a function - resolves unsupported rather than invoking anything.
+ */
 async function resolveCapability<M extends { readonly capabilities: Capabilities<C> }, C extends ManagerCapability>(
     manager: M,
     capability: C,
-    context: EvaluationContext,
-    validKeys: ReadonlySet<string>,
+    context: CapabilityContext,
 ): Promise<Support> {
-    if (!validKeys.has(capability)) {
-        return supportIf(false);
-    }
-    const ancestry = context[ancestryKey] ?? [];
-    if (ancestry.some((entry) => entry.manager === manager && entry.capability === capability)) {
-        throw new Error(
-            `Capability dependency cycle: ${[...ancestry.map((entry) => entry.capability), capability].join(' -> ')}`,
-        );
-    }
-    const nextContext: EvaluationContext = Object.defineProperty({ ...context }, ancestryKey, {
-        value: [...ancestry, { manager, capability }],
-        enumerable: true,
-    });
-    const advertised: unknown = manager.capabilities;
-    if (!isCapabilityRecord(advertised)) {
-        throw new TypeError(l10n.t('Manager capabilities must be an object.'));
-    }
-    const check = Object.prototype.hasOwnProperty.call(advertised, capability) ? advertised[capability] : undefined;
-    if (check === undefined) {
-        return supportIf(false);
-    }
-    if (typeof check !== 'function') {
-        throw new TypeError(l10n.t('Capability {0} must be advertised as a function.', capability));
-    }
-    return check(nextContext);
-}
-
-function isCapabilityRecord(value: unknown): value is Readonly<Record<PropertyKey, unknown>> {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        return false;
-    }
-    const prototype = Object.getPrototypeOf(value);
-    return prototype === Object.prototype || prototype === null;
+    const check = Object.prototype.hasOwnProperty.call(manager.capabilities, capability)
+        ? manager.capabilities[capability]
+        : undefined;
+    return typeof check === 'function' ? check(context) : unsupportedCapability(context);
 }

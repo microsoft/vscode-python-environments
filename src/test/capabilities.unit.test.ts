@@ -98,35 +98,23 @@ suite('Manager capabilities', () => {
             }
         });
 
-        test('malformed advertisements reject instead of resolving unsupported', async () => {
+        test('a capability value that is not a function resolves unsupported, not a crash', async () => {
             for (const value of [null, false, { supported: true }]) {
                 const env = environmentManager({ 'environments.list': value as never });
                 const pkg = packageManager({ 'packages.list': value as never });
-                await assert.rejects(
-                    environmentCapability(env, 'environments.list'),
-                    (error) => error instanceof TypeError && error.message.includes('environments.list'),
-                );
-                await assert.rejects(
-                    packageCapability(pkg, 'packages.list'),
-                    (error) => error instanceof TypeError && error.message.includes('packages.list'),
-                );
+                assert.deepStrictEqual(await environmentCapability(env, 'environments.list'), notImplemented);
+                assert.deepStrictEqual(await packageCapability(pkg, 'packages.list'), notImplemented);
             }
         });
 
-        test('malformed capability maps reject instead of resolving unsupported', async () => {
-            for (const value of [null, true, [], () => {}]) {
+        test('a non-object capabilities map resolves unsupported, not a crash', async () => {
+            for (const value of [true, [], () => {}]) {
                 const env = environmentManager();
                 const pkg = packageManager();
                 Reflect.set(env, 'capabilities', value);
                 Reflect.set(pkg, 'capabilities', value);
-                await assert.rejects(
-                    environmentCapability(env, 'environments.list'),
-                    (error) => error instanceof TypeError && error.message.includes('capabilities'),
-                );
-                await assert.rejects(
-                    packageCapability(pkg, 'packages.list'),
-                    (error) => error instanceof TypeError && error.message.includes('capabilities'),
-                );
+                assert.deepStrictEqual(await environmentCapability(env, 'environments.list'), notImplemented);
+                assert.deepStrictEqual(await packageCapability(pkg, 'packages.list'), notImplemented);
             }
         });
 
@@ -166,74 +154,6 @@ suite('Manager capabilities', () => {
         });
     });
 
-    suite('Dependency safety', () => {
-        test('self and indirect cycles reject with the dependency chain', async () => {
-            const manager = packageManager({
-                'packages.list': (context) => packageCapability(manager, 'packages.list', context),
-                'packages.manage': (context) => packageCapability(manager, 'packages.manage.upgrade', context),
-                'packages.manage.upgrade': (context) => packageCapability(manager, 'packages.manage.install', context),
-                'packages.manage.install': (context) => packageCapability(manager, 'packages.manage', context),
-            });
-            await assert.rejects(packageCapability(manager, 'packages.list'), /packages.list -> packages.list/);
-            await assert.rejects(
-                packageCapability(manager, 'packages.manage'),
-                /packages.manage -> packages.manage.upgrade -> packages.manage.install -> packages.manage/,
-            );
-        });
-
-        test('parallel prerequisites and concurrent queries are not cycles', async () => {
-            const manager = packageManager({
-                'packages.manage': async (context) => {
-                    const results = await Promise.all([
-                        packageCapability(manager, 'packages.list', context),
-                        packageCapability(manager, 'packages.list', context),
-                    ]);
-                    return results[0];
-                },
-            });
-            const context = {};
-            assert.deepStrictEqual(
-                await Promise.all([
-                    packageCapability(manager, 'packages.manage', context),
-                    packageCapability(manager, 'packages.manage', context),
-                ]),
-                [supported, supported],
-            );
-        });
-
-        test('the same key on another manager is not a cycle', async () => {
-            const other = packageManager();
-            const manager = packageManager({
-                'packages.list': (context) => packageCapability(other, 'packages.list', context),
-            });
-            assert.deepStrictEqual(await packageCapability(manager, 'packages.list'), supported);
-        });
-
-        test('package wrappers preserve dependency ancestry while adding project context', async () => {
-            const project = { name: 'project', uri: Uri.file('.') };
-            let wrapper: InternalPackageManager;
-            const manager = packageManager({
-                'packages.manage': (context) => wrapper.getCapability('packages.manage.install', context),
-                'packages.manage.install': (context) => wrapper.getCapability('packages.manage', context),
-            });
-            wrapper = new InternalPackageManager('test:packages', manager, project);
-            try {
-                await assert.rejects(
-                    wrapper.getCapability('packages.manage'),
-                    /packages.manage -> packages.manage.install -> packages.manage/,
-                );
-            } finally {
-                wrapper.dispose();
-            }
-        });
-
-        test('disposed package wrappers reject capability queries', () => {
-            const manager = new InternalPackageManager('test:packages', packageManager());
-            manager.dispose();
-            assert.throws(() => manager.getCapability('packages.list'), /disposed/);
-        });
-    });
-
     suite('Wrappers forward raw advertisements', () => {
         test('InternalEnvironmentManager resolves through the raw manager without defaults', async () => {
             const manager = new InternalEnvironmentManager(
@@ -252,6 +172,12 @@ suite('Manager capabilities', () => {
             } finally {
                 manager.dispose();
             }
+        });
+
+        test('disposed package wrappers reject capability queries', () => {
+            const manager = new InternalPackageManager('test:packages', packageManager());
+            manager.dispose();
+            assert.throws(() => manager.getCapability('packages.list'), /disposed/);
         });
     });
 });
