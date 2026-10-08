@@ -77,9 +77,7 @@ export type PackageManagerCapability = (typeof packageCapabilityKeys)[number];
 type ManagerCapability = EnvironmentManagerCapability | PackageManagerCapability;
 
 /** General feature support, not a guarantee that a particular operation will succeed. */
-export type Support =
-    | { readonly supported: true }
-    | { readonly supported: false; readonly reason: string };
+export type Support = { readonly supported: true } | { readonly supported: false; readonly reason: string };
 
 /** Context for a support query. Operation arguments and request validation are intentionally excluded. */
 export interface CapabilityContext {
@@ -93,6 +91,18 @@ export type CapabilityCheck = (context: CapabilityContext) => Promise<Support>;
 
 /** Every capability key must be advertised as a read-only, noninteractive check; there are no defaults. */
 export type Capabilities<C extends ManagerCapability> = Readonly<Record<C, CapabilityCheck>>;
+
+/** A capability check that always reports support. Use for unconditionally supported operations. */
+export const supportedCapability: CapabilityCheck = async () => ({ supported: true });
+
+/**
+ * A capability check that always reports the generic "not implemented" reason. Use when a manager
+ * has no reason more specific than "unsupported"; otherwise return a custom `{ supported: false, reason }`.
+ */
+export const unsupportedCapability: CapabilityCheck = async () => ({
+    supported: false,
+    reason: l10n.t('Capability not implemented'),
+});
 
 /**
  * Resolves environment-manager support without invoking the operation or prompting.

@@ -17,6 +17,7 @@ import {
     PythonEnvironments,
     resolveEnvironmentManagerCapability,
     resolvePackageManagerCapability,
+    supportedCapability,
 } from '@vscode/python-environments';
 
 type Equal<Left, Right> =
@@ -52,29 +53,29 @@ if (isPackageVersionLookupNotSupportedError(maybeError)) {
 
 // Legacy providers must now advertise every capability key explicitly; there are no defaults.
 const fullPackageCapabilities: Capabilities<PackageManagerCapability> = {
-    'packages.list': async () => ({ supported: true }),
-    'packages.list.skipCache': async () => ({ supported: true }),
-    'packages.refresh': async () => ({ supported: true }),
-    'packages.manage': async () => ({ supported: true }),
-    'packages.manage.install': async () => ({ supported: true }),
-    'packages.manage.uninstall': async () => ({ supported: true }),
-    'packages.manage.upgrade': async () => ({ supported: true }),
-    'packages.manage.headless': async () => ({ supported: true }),
-    'packages.manage.showSkipOption': async () => ({ supported: true }),
-    'packages.direct': async () => ({ supported: true }),
-    'packages.availableVersions': async () => ({ supported: true }),
+    'packages.list': supportedCapability,
+    'packages.list.skipCache': supportedCapability,
+    'packages.refresh': supportedCapability,
+    'packages.manage': supportedCapability,
+    'packages.manage.install': supportedCapability,
+    'packages.manage.uninstall': supportedCapability,
+    'packages.manage.upgrade': supportedCapability,
+    'packages.manage.headless': supportedCapability,
+    'packages.manage.showSkipOption': supportedCapability,
+    'packages.direct': supportedCapability,
+    'packages.availableVersions': supportedCapability,
 };
 const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
-    'environments.list': async () => ({ supported: true }),
-    'environments.refresh': async () => ({ supported: true }),
-    'environments.resolve': async () => ({ supported: true }),
-    'environments.getSelected': async () => ({ supported: true }),
-    'environments.setSelected': async () => ({ supported: true }),
-    'environments.create': async () => ({ supported: true }),
-    'environments.create.quick': async () => ({ supported: true }),
-    'environments.create.additionalPackages': async () => ({ supported: true }),
-    'environments.remove': async () => ({ supported: true }),
-    'environments.remove.headless': async () => ({ supported: true }),
+    'environments.list': supportedCapability,
+    'environments.refresh': supportedCapability,
+    'environments.resolve': supportedCapability,
+    'environments.getSelected': supportedCapability,
+    'environments.setSelected': supportedCapability,
+    'environments.create': supportedCapability,
+    'environments.create.quick': supportedCapability,
+    'environments.create.additionalPackages': supportedCapability,
+    'environments.remove': supportedCapability,
+    'environments.remove.headless': supportedCapability,
 };
 
 const legacyPackageManager: PackageManager = {

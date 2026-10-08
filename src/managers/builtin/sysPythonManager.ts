@@ -17,7 +17,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability, supportedCapability } from '../../capabilities';
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -40,7 +40,7 @@ import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToIns
 export class SysPythonManager implements EnvironmentManager {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         ...requiredEnvironmentCapabilities,
-        'environments.create': async () => ({ supported: true }),
+        'environments.create': supportedCapability,
         'environments.create.quick': async () => ({
             supported: false,
             reason: l10n.t('Installing a global Python requires interactive version selection.'),

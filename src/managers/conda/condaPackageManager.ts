@@ -23,7 +23,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { Capabilities, PackageManagerCapability } from '../../capabilities';
+import { Capabilities, PackageManagerCapability, supportedCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
@@ -45,13 +45,13 @@ import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../i
 export class CondaPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         ...requiredPackageCapabilities,
-        'packages.list.skipCache': async () => ({ supported: true }),
-        'packages.manage.install': async () => ({ supported: true }),
-        'packages.manage.uninstall': async () => ({ supported: true }),
-        'packages.manage.upgrade': async () => ({ supported: true }),
-        'packages.manage.headless': async () => ({ supported: true }),
-        'packages.manage.showSkipOption': async () => ({ supported: true }),
-        'packages.availableVersions': async () => ({ supported: true }),
+        'packages.list.skipCache': supportedCapability,
+        'packages.manage.install': supportedCapability,
+        'packages.manage.uninstall': supportedCapability,
+        'packages.manage.upgrade': supportedCapability,
+        'packages.manage.headless': supportedCapability,
+        'packages.manage.showSkipOption': supportedCapability,
+        'packages.availableVersions': supportedCapability,
         'packages.direct': async () => ({
             supported: false,
             reason: l10n.t('Conda does not classify direct and transitive packages.'),
