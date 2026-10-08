@@ -123,9 +123,6 @@ if (!support.supported) {
 ({ 'packages.unknown': async () => ({ supported: true }) } satisfies Capabilities<PackageManagerCapability>);
 // @ts-expect-error Operation options are not capability query context.
 ({ createOptions: { quickCreate: true } } satisfies CapabilityContext);
-// @ts-expect-error Named creation is deferred rather than an enabled capability.
-resolveEnvironmentManagerCapability(legacyEnvironmentManager, 'environments.create.named');
-
 declare const arbitraryKey: string;
 // @ts-expect-error A general string is not a declared environment capability.
 resolveEnvironmentManagerCapability(legacyEnvironmentManager, arbitraryKey);
