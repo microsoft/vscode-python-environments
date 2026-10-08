@@ -7,33 +7,31 @@
  * constants into their fake managers instead of repeating the full key list.
  */
 
-import type { Capabilities, EnvironmentManagerCapability, PackageManagerCapability } from '../capabilities';
-
-const supported = async () => ({ supported: true }) as const;
+import { Capabilities, EnvironmentManagerCapability, PackageManagerCapability, supportedCapability } from '../capabilities';
 
 export const allSupportedEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
-    'environments.list': supported,
-    'environments.refresh': supported,
-    'environments.resolve': supported,
-    'environments.getSelected': supported,
-    'environments.setSelected': supported,
-    'environments.create': supported,
-    'environments.create.quick': supported,
-    'environments.create.additionalPackages': supported,
-    'environments.remove': supported,
-    'environments.remove.headless': supported,
+    'environments.list': supportedCapability,
+    'environments.refresh': supportedCapability,
+    'environments.resolve': supportedCapability,
+    'environments.getSelected': supportedCapability,
+    'environments.setSelected': supportedCapability,
+    'environments.create': supportedCapability,
+    'environments.create.quick': supportedCapability,
+    'environments.create.additionalPackages': supportedCapability,
+    'environments.remove': supportedCapability,
+    'environments.remove.headless': supportedCapability,
 };
 
 export const allSupportedPackageCapabilities: Capabilities<PackageManagerCapability> = {
-    'packages.list': supported,
-    'packages.list.skipCache': supported,
-    'packages.refresh': supported,
-    'packages.manage': supported,
-    'packages.manage.install': supported,
-    'packages.manage.uninstall': supported,
-    'packages.manage.upgrade': supported,
-    'packages.manage.headless': supported,
-    'packages.manage.showSkipOption': supported,
-    'packages.direct': supported,
-    'packages.availableVersions': supported,
+    'packages.list': supportedCapability,
+    'packages.list.skipCache': supportedCapability,
+    'packages.refresh': supportedCapability,
+    'packages.manage': supportedCapability,
+    'packages.manage.install': supportedCapability,
+    'packages.manage.uninstall': supportedCapability,
+    'packages.manage.upgrade': supportedCapability,
+    'packages.manage.headless': supportedCapability,
+    'packages.manage.showSkipOption': supportedCapability,
+    'packages.direct': supportedCapability,
+    'packages.availableVersions': supportedCapability,
 };

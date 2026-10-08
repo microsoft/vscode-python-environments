@@ -24,7 +24,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { Capabilities, PackageManagerCapability } from '../../capabilities';
+import { Capabilities, PackageManagerCapability, supportedCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -55,15 +55,15 @@ import { VenvManager } from './venvManager';
 export class PipPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         ...requiredPackageCapabilities,
-        'packages.list.skipCache': async () => ({ supported: true }),
-        'packages.manage.install': async () => ({ supported: true }),
-        'packages.manage.uninstall': async () => ({ supported: true }),
-        'packages.manage.upgrade': async () => ({ supported: true }),
-        'packages.manage.headless': async () => ({ supported: true }),
-        'packages.manage.showSkipOption': async () => ({ supported: true }),
-        'packages.availableVersions': async () => ({ supported: true }),
+        'packages.list.skipCache': supportedCapability,
+        'packages.manage.install': supportedCapability,
+        'packages.manage.uninstall': supportedCapability,
+        'packages.manage.upgrade': supportedCapability,
+        'packages.manage.headless': supportedCapability,
+        'packages.manage.showSkipOption': supportedCapability,
+        'packages.availableVersions': supportedCapability,
         // Dependency roots are best-effort classification, not exact user install intent.
-        'packages.direct': async () => ({ supported: true }),
+        'packages.direct': supportedCapability,
     };
 
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();

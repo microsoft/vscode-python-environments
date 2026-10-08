@@ -34,7 +34,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
-import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability, supportedCapability } from '../../../capabilities';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -299,7 +299,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             supported: false,
             reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),
         }),
-        'environments.remove': async () => ({ supported: true }),
+        'environments.remove': supportedCapability,
         'environments.remove.headless': async (context) =>
             resolveEnvironmentManagerCapability(this, 'environments.remove', context),
         'environments.create': async ({ scope }) => {
