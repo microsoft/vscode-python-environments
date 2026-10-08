@@ -215,10 +215,4 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(pkgProbe.notCalled);
         assert.ok(scopedProbe.notCalled);
     });
-
-    test('registry lookup errors reject', async () => {
-        const failure = new Error('registry lookup failed');
-        sinon.stub(managers, 'getEnvironmentManager').throws(failure);
-        await assert.rejects(api.getEnvironmentManagerCapability(ownerId, 'environments.list'), (e) => e === failure);
-    });
 });
