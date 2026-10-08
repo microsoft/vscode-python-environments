@@ -150,15 +150,19 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(envProbe.notCalled);
     });
 
-    test('missing environment manager is unavailable immediately and can be queried after registration', async () => {
+    test('availability tracks the registration lifecycle rather than caching a stale result', async () => {
         const support = await api.getEnvironmentManagerCapability(ownerId, 'environments.list');
         assert.ok(!support.supported && support.reason.includes(ownerId));
         assert.ok(envProbe.notCalled);
         assert.strictEqual(clock.countTimers(), 0);
-        registerOwner();
+        const registration = registerOwner();
         assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, 'environments.list'), {
             supported: true,
         });
+        envProbe.resetHistory();
+        registration.dispose();
+        assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, false);
+        assert.ok(envProbe.notCalled);
     });
 
     test('provider probe failures reach the public caller', async () => {
@@ -261,14 +265,5 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         const failure = new Error('registry lookup failed');
         sinon.stub(managers, 'getEnvironmentManager').throws(failure);
         await assert.rejects(api.getEnvironmentManagerCapability(ownerId, 'environments.list'), (e) => e === failure);
-    });
-
-    test('unregistered environment managers are unavailable rather than cached', async () => {
-        const registration = registerOwner();
-        assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, true);
-        envProbe.resetHistory();
-        registration.dispose();
-        assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, 'environments.list')).supported, false);
-        assert.ok(envProbe.notCalled);
     });
 });
