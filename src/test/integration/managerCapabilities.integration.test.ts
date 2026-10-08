@@ -160,7 +160,7 @@ suite('Manager capabilities integration', function () {
             'packages.manage.install': (context) =>
                 resolvePackageManagerCapability(packages, 'packages.manage', context),
         };
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.upgrade'), denied);
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.install'), denied);
     });
 
     test('prerequisite cycles are detected across separately loaded API modules', async () => {
@@ -168,6 +168,8 @@ suite('Manager capabilities integration', function () {
             ...noPackageCapabilities,
             'packages.manage': (context) =>
                 resolvePackageManagerCapability(packages, 'packages.manage.install', context),
+            'packages.manage.install': (context) =>
+                resolvePackageManagerCapability(packages, 'packages.manage', context),
         };
         await assert.rejects(
             () => api.getPackageManagerCapability(environment, 'packages.manage'),
