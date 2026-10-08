@@ -16,8 +16,8 @@ Use this manual to:
 The runtime facade is [`src/api.ts`](../src/api.ts). The authoritative public
 contracts are in [`src/types.ts`](../src/types.ts), with public errors and type
 guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
-Capability types, catalogs, default dictionaries, and raw-provider resolvers are
-in [`src/capabilities.ts`](../src/capabilities.ts).
+Capability types, catalog key sets, and raw-provider resolvers are in
+[`src/capabilities.ts`](../src/capabilities.ts).
 
 > [!IMPORTANT]
 > The API is flat. Call `api.getEnvironments()`, not
@@ -1555,7 +1555,7 @@ trigger, as the specification.
 | `name` | `string` | Yes | Manager name. Allowed characters: `a-z`, `A-Z`, `0-9`, `-`, `_`. |
 | `displayName` | `string` | No | Name shown in the UI. |
 | `preferredPackageManagerId` | `string` | Yes | Package manager to pair with, formatted `<publisher>.<extension>:<manager-name>`, for example `ms-python.python:pip`. |
-| `capabilities` | `Capabilities<EnvironmentManagerCapability>` | No | Dynamic support overrides; omitted entries use the [external defaults](#manager-capabilities). |
+| `capabilities` | `Capabilities<EnvironmentManagerCapability>` | Yes | Explicit support for every environment capability key; see [manager capabilities](#manager-capabilities). |
 | `description` | `string` | No | Secondary text shown in the UI. |
 | `tooltip` | `string \| MarkdownString` | No | Hover text for the manager. |
 | `iconPath` | [`IconPath`](#iconpath) | No | Icon shown for the manager. |
@@ -1624,7 +1624,7 @@ Reports and changes the packages of an environment.
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
 | `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
-| `capabilities` | `Capabilities<PackageManagerCapability>` | No | Dynamic support overrides evaluated on the correct project-bound instance; see [capabilities](#manager-capabilities). |
+| `capabilities` | `Capabilities<PackageManagerCapability>` | Yes | Explicit support for every package capability key, evaluated on the correct project-bound instance; see [manager capabilities](#manager-capabilities). |
 | `dispose()` | `() => void` | No | Releases resources owned by the manager. The extension disposes project-scoped managers when their project is removed or replaced, their provider is unregistered, or the extension shuts down. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
@@ -1887,14 +1887,18 @@ if (typeof api.getPackageManagerCapability === 'function') {
 
 ### Advertising manager support
 
-Managers remain interfaces. Their optional `capabilities` map contains only
-overrides; omitted entries use the defaults below. Checks receive
-`CapabilityContext` and return `Promise<Support>`.
+Managers must advertise every capability key as a `capabilities` map. There are
+no defaults: a missing key resolves `{ supported: false, reason: 'Capability not
+implemented' }`. Checks receive `CapabilityContext` and return `Promise<Support>`.
 
 ```typescript
 // Members of a PackageManager implementation:
 readonly capabilities: Capabilities<PackageManagerCapability> = {
+    ...requiredPackageCapabilities, // shared, universally-true operations
+    'packages.direct': async () => ({ supported: true }),
     'packages.availableVersions': async (context) => this.checkVersionLookupSupport(context),
+    'packages.manage.install': async (context) =>
+        resolvePackageManagerCapability(this, 'packages.manage', context),
     'packages.manage.upgrade': async (_context) => ({
         supported: false,
         reason: l10n.t('This manager does not support upgrading packages.'),
@@ -1902,63 +1906,48 @@ readonly capabilities: Capabilities<PackageManagerCapability> = {
 };
 ```
 
-To change one manager:
+`src/managers/common/capabilityDeclarations.ts` exports
+`requiredEnvironmentCapabilities`/`requiredPackageCapabilities`: small,
+internal-only spreadable literals for the handful of operations every built-in
+manager unconditionally supports (for example `environments.list` or
+`packages.manage`). They are a convenience to reduce duplication, not a runtime
+fallback — a manager's `capabilities` object must still include every key.
 
-- **Add an override** when its support differs from the default or depends on
-  context or tool state.
-- **Remove an override** to restore the default. Removing an entry does not mean
-  unsupported.
-- **Disable support** with an explicit `{ supported: false, reason }` result.
+Guidance for authoring checks:
+
+- Advertise every key explicitly, even when the answer is unsupported. There is
+  no partial-map or inheritance mechanism in the resolver; any key your manager
+  omits resolves unsupported with the generic reason above.
+- Disable support with an explicit `{ supported: false, reason }` result that
+  explains why, instead of omitting the key.
 - Keep checks read-only and noninteractive. Do not invoke the operation to test
   it. Let unexpected probe errors reject.
-- When one check depends on another, call
-  `resolveEnvironmentManagerCapability` or `resolvePackageManagerCapability` and
-  forward the received context unchanged.
+- When one check depends on another (for example `create.quick` depending on
+  `create`), call `resolveEnvironmentManagerCapability` or
+  `resolvePackageManagerCapability` explicitly from within that key's check and
+  forward the received context unchanged. This delegation is a per-manager
+  choice, not an automatic cascade.
 
-Built-in environment managers share cache and event declarations from
-`src/managers/common/capabilityDeclarations.ts`; manager-specific overrides stay
-on the manager class.
-
-### Defaults
-
-The exported `defaultEnvironmentCapabilities` and
-`defaultPackageCapabilities` dictionaries are the source of truth. Required
-operations default supported. The optional methods and events listed under
-**Raw hook** follow raw hook presence. Option capabilities inherit their parent
-unless explicitly overridden; install-spec formatting uses an extension fallback.
-
-| Default | Environment capabilities |
-| --- | --- |
-| Supported | `environments.list`, `environments.refresh`, `environments.resolve`, `environments.getSelected`, `environments.setSelected` |
-| Raw hook | `environments.create`, `environments.remove`, `environments.clearCache`, `environments.events.changed`, `environments.events.selectionChanged` |
-| Inherited | `environments.create.additionalPackages` from `environments.create`; `environments.remove.headless` from `environments.remove` |
-| Special | `environments.create.quick` requires raw `create` and `quickCreateConfig`, then inherits `environments.create` |
-
-| Default | Package capabilities |
-| --- | --- |
-| Supported | `packages.list`, `packages.refresh`, `packages.manage`, `packages.formatInstallSpec` |
-| Raw hook | `packages.direct`, `packages.version`, `packages.availableVersions`, `packages.clearCache`, `packages.watchTargets`, `packages.events.changed` |
-| Inherited | `packages.list.skipCache` from `packages.list`; install, uninstall, headless, and show-skip from `packages.manage`; upgrade from `packages.manage.install` |
-
-Legacy providers do not need a capability map. Advertisements must be plain
-objects whose values are checker functions or `undefined`; malformed maps reject.
-Unknown runtime keys are unsupported.
+Legacy providers without a `capabilities` map no longer compile: `capabilities`
+is a required property on `EnvironmentManager` and `PackageManager`.
+Advertisements must be plain objects whose values are checker functions;
+malformed maps reject. Unknown runtime keys are unsupported.
 
 ### Adding or removing catalog capabilities
 
-Capability key types are derived from the default dictionary keys. To add a
-public capability:
+Capability key types are derived from the private key lists in
+`src/capabilities.ts`. To add a public capability:
 
-1. Add a documented entry to the appropriate default dictionary in
-   `src/capabilities.ts`.
-2. Choose a backward-compatible default. New behavior should default unsupported
-   unless an existing contract or fallback proves support.
-3. Add manager overrides only where the default is inaccurate.
-4. Update capability tests and this summary.
+1. Add a documented key to the appropriate key list in `src/capabilities.ts`.
+2. Update every built-in manager to advertise the new key explicitly (true,
+   false with a reason, or a delegating check).
+3. Update capability tests and this summary.
 
-Removing a key from a manager map only removes that manager's override. Removing
-a key from a default dictionary removes it from the public type union and is a
-breaking API change; deprecate it first and remove it only in a major release.
+Removing a key from a manager's `capabilities` map only removes that manager's
+advertisement for that key (it resolves unsupported at runtime for that
+manager). Removing a key from the catalog in `src/capabilities.ts` removes it
+from the public type union and is a breaking API change; deprecate it first and
+remove it only in a major release.
 
 ## Compatibility guidance
 

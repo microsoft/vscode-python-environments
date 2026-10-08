@@ -30,6 +30,7 @@ import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 import { CommandConstructorOptions } from '../base/commands/index';
+import { requiredPackageCapabilities } from '../common/capabilityDeclarations';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import { createPipOrUvCommand, createPipOrUvCommandWithKind } from './commands/factory';
@@ -53,8 +54,13 @@ import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
-        'packages.version': async () => ({ supported: true }),
-        'packages.events.changed': async () => ({ supported: true }),
+        ...requiredPackageCapabilities,
+        'packages.list.skipCache': async () => ({ supported: true }),
+        'packages.manage.install': async () => ({ supported: true }),
+        'packages.manage.uninstall': async () => ({ supported: true }),
+        'packages.manage.upgrade': async () => ({ supported: true }),
+        'packages.manage.headless': async () => ({ supported: true }),
+        'packages.manage.showSkipOption': async () => ({ supported: true }),
         'packages.availableVersions': async () => ({ supported: true }),
         // Dependency roots are best-effort classification, not exact user install intent.
         'packages.direct': async () => ({ supported: true }),

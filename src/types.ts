@@ -379,12 +379,10 @@ export interface RemoveEnvironmentOptions {
  */
 export interface EnvironmentManager {
     /**
-     * Dynamic support overrides. Missing entries use the external environment capability defaults.
-     * Optional methods/events default to raw hook availability; existing options inherit parent support.
-     * Quick creation additionally requires the raw create and quickCreateConfig hooks unless advertised.
+     * Advertises support for every environment capability key; there are no defaults.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
-    readonly capabilities?: Capabilities<EnvironmentManagerCapability>;
+    readonly capabilities: Capabilities<EnvironmentManagerCapability>;
 
     /**
      * The name of the environment manager. Allowed characters (a-z, A-Z, 0-9, -, _).
@@ -665,12 +663,10 @@ export interface DidChangePackagesEventArgs {
  */
 export interface PackageManager {
     /**
-     * Dynamic support overrides. Missing entries use the external package capability defaults.
-     * Optional methods/events default to raw hook availability; existing options inherit parent support.
-     * Advertise unsupported stubs and context/tool restrictions explicitly to refine these defaults.
+     * Advertises support for every package capability key; there are no defaults.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
-    readonly capabilities?: Capabilities<PackageManagerCapability>;
+    readonly capabilities: Capabilities<PackageManagerCapability>;
 
     /**
      * The name of the package manager. Allowed characters (a-z, A-Z, 0-9, -, _).

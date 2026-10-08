@@ -91,7 +91,7 @@ import { PythonVersion } from '../../../common/pythonVersion';
 import { PythonVersionSpecifier, splitClause } from '../../../common/pythonVersionSpecifier';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import { getOpenTextDocuments, onDidDeleteFiles, onDidRenameFiles } from '../../../common/workspace.apis';
-import { environmentManagerCacheAndEventCapabilities } from '../../common/capabilityDeclarations';
+import { requiredEnvironmentCapabilities } from '../../common/capabilityDeclarations';
 import { NativePythonFinder } from '../../common/nativePythonFinder';
 import { sortEnvironments } from '../../common/utils';
 import { resolveSystemPythonEnvironmentPath } from '../utils';
@@ -294,12 +294,14 @@ interface SavedMetadataSnapshot {
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
-        ...environmentManagerCacheAndEventCapabilities,
+        ...requiredEnvironmentCapabilities,
         'environments.resolve': async () => ({
             supported: false,
             reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),
         }),
         'environments.remove': async () => ({ supported: true }),
+        'environments.remove.headless': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.remove', context),
         'environments.create': async ({ scope }) => {
             const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
             if (!scriptUri) {
@@ -315,6 +317,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         },
         // Inline creation has a quick path even though it has no quickCreateConfig UI hook.
         'environments.create.quick': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
+        'environments.create.additionalPackages': async (context) =>
             resolveEnvironmentManagerCapability(this, 'environments.create', context),
     };
 

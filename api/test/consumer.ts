@@ -12,8 +12,6 @@ import type {
     Support,
 } from '@vscode/python-environments';
 import {
-    defaultEnvironmentCapabilities,
-    defaultPackageCapabilities,
     isPackageVersionLookupNotSupportedError,
     PackageVersionLookupNotSupportedError,
     PythonEnvironments,
@@ -52,12 +50,39 @@ if (isPackageVersionLookupNotSupportedError(maybeError)) {
     maybeError.code satisfies 'PackageVersionLookupNotSupported';
 }
 
-// Legacy providers remain structurally assignable without maps or inheritance.
+// Legacy providers must now advertise every capability key explicitly; there are no defaults.
+const fullPackageCapabilities: Capabilities<PackageManagerCapability> = {
+    'packages.list': async () => ({ supported: true }),
+    'packages.list.skipCache': async () => ({ supported: true }),
+    'packages.refresh': async () => ({ supported: true }),
+    'packages.manage': async () => ({ supported: true }),
+    'packages.manage.install': async () => ({ supported: true }),
+    'packages.manage.uninstall': async () => ({ supported: true }),
+    'packages.manage.upgrade': async () => ({ supported: true }),
+    'packages.manage.headless': async () => ({ supported: true }),
+    'packages.manage.showSkipOption': async () => ({ supported: true }),
+    'packages.direct': async () => ({ supported: true }),
+    'packages.availableVersions': async () => ({ supported: true }),
+};
+const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
+    'environments.list': async () => ({ supported: true }),
+    'environments.refresh': async () => ({ supported: true }),
+    'environments.resolve': async () => ({ supported: true }),
+    'environments.getSelected': async () => ({ supported: true }),
+    'environments.setSelected': async () => ({ supported: true }),
+    'environments.create': async () => ({ supported: true }),
+    'environments.create.quick': async () => ({ supported: true }),
+    'environments.create.additionalPackages': async () => ({ supported: true }),
+    'environments.remove': async () => ({ supported: true }),
+    'environments.remove.headless': async () => ({ supported: true }),
+};
+
 const legacyPackageManager: PackageManager = {
     name: 'legacy',
     manage: async () => {},
     refresh: async () => {},
     getPackages: async () => [],
+    capabilities: fullPackageCapabilities,
 };
 const legacyEnvironmentManager: EnvironmentManager = {
     name: 'legacy',
@@ -67,10 +92,12 @@ const legacyEnvironmentManager: EnvironmentManager = {
     get: async () => undefined,
     set: async () => {},
     resolve: async () => undefined,
+    capabilities: fullEnvironmentCapabilities,
 };
 
 // Capability authoring and raw-provider resolution.
 const advertised: Capabilities<PackageManagerCapability> = {
+    ...fullPackageCapabilities,
     'packages.manage.install': (context: CapabilityContext) =>
         resolvePackageManagerCapability(legacyPackageManager, 'packages.manage', context),
     'packages.direct': async (_context) => ({ supported: false, reason: 'Unavailable' }),
@@ -80,10 +107,6 @@ resolvePackageManagerCapability(managerWithCapabilities, 'packages.direct', { en
 resolveEnvironmentManagerCapability(legacyEnvironmentManager, 'environments.create', {
     scope: 'global',
 }) satisfies Promise<Support>;
-
-// Shared default checkers.
-defaultPackageCapabilities['packages.list'](legacyPackageManager, {}) satisfies Promise<Support>;
-defaultEnvironmentCapabilities['environments.list'](legacyEnvironmentManager, {}) satisfies Promise<Support>;
 
 // Public queries and support-result narrowing.
 api.getPackageManagerCapability(environment, 'packages.list') satisfies Promise<Support>;
@@ -116,7 +139,9 @@ resolvePackageManagerCapability(legacyPackageManager, arbitraryKey);
 api.getEnvironmentManagerCapability('example:legacy', arbitraryKey);
 // @ts-expect-error Public package queries require a catalog key.
 api.getPackageManagerCapability(environment, arbitraryKey);
-// @ts-expect-error Default dictionaries have no arbitrary string index signature.
-defaultPackageCapabilities[arbitraryKey];
-// @ts-expect-error Default dictionaries have no arbitrary string index signature.
-defaultEnvironmentCapabilities[arbitraryKey];
+// @ts-expect-error Capability dictionaries have no arbitrary string index signature.
+fullPackageCapabilities[arbitraryKey];
+// @ts-expect-error Capability dictionaries have no arbitrary string index signature.
+fullEnvironmentCapabilities[arbitraryKey];
+// @ts-expect-error Capability dictionaries must advertise every catalog key; partial maps are rejected.
+({ 'packages.list': async () => ({ supported: true }) } satisfies Capabilities<PackageManagerCapability>);

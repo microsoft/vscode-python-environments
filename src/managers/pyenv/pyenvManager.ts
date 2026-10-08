@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
+import { Disposable, EventEmitter, l10n, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -15,6 +15,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability } from '../../capabilities';
 import { PYENV_MANAGER_ID } from '../../common/constants';
 import { PyenvStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
@@ -26,7 +27,7 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
-import { environmentManagerCacheAndEventCapabilities } from '../common/capabilityDeclarations';
+import { requiredEnvironmentCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
@@ -45,7 +46,23 @@ import {
 } from './pyenvUtils';
 
 export class PyEnvManager implements EnvironmentManager, Disposable {
-    readonly capabilities = environmentManagerCacheAndEventCapabilities;
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        ...requiredEnvironmentCapabilities,
+        'environments.create': async () => ({
+            supported: false,
+            reason: l10n.t('Pyenv does not support creating environments.'),
+        }),
+        'environments.create.quick': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
+        'environments.create.additionalPackages': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
+        'environments.remove': async () => ({
+            supported: false,
+            reason: l10n.t('Pyenv does not support removing environments.'),
+        }),
+        'environments.remove.headless': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.remove', context),
+    };
 
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
