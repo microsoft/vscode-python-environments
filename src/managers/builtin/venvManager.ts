@@ -808,10 +808,17 @@ export class VenvManager implements EnvironmentManager {
                 }
             } else {
                 // Search through all known environments (e) and check if any are associated with the current project path. If so, add that environment and path in the map.
-                const found = sorted.find((e) => {
+                const projectEnvs = sorted.filter((e) => {
                     const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
                     return t && normalizePath(t) === normalizedPath;
                 });
+                // Prefer the project's own environment (e.g. `<project>/.venv`) over one nested in a
+                // subfolder (e.g. `<project>/tools/.venv`), even when the nested one has a newer Python.
+                // Broken environments are not preferred, matching their last place in the sort order.
+                const found =
+                    projectEnvs.find(
+                        (e) => !e.error && normalizePath(path.dirname(e.sysPrefix)) === normalizedPath,
+                    ) ?? projectEnvs[0];
                 if (found) {
                     this.fsPathToEnv.set(normalizedPath, found);
                 }

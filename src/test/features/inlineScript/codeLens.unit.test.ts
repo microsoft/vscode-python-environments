@@ -2,32 +2,19 @@
 // Licensed under the MIT License.
 
 import assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
-import { Position, TextDocument, Uri } from 'vscode';
-import { InlineScriptMetadata } from '../../../common/inlineScript/metadata';
+import { Uri } from 'vscode';
+import { MAX_HEADER_BYTES, readInlineScriptMetadata } from '../../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../../common/inlineScript/routingRegistry';
-import { InlineScriptCodeLensProvider, READY_CONFIRMATION_TIMEOUT_MS } from '../../../features/inlineScript/codeLens';
+import { InlineScriptCodeLensProvider } from '../../../features/inlineScript/codeLens';
+import { MockDocument } from '../../mocks/mockDocument';
 
 const SETUP_COMMAND = 'python-envs.setupInlineScriptEnv';
-
-function makeMetadata(): InlineScriptMetadata {
-    return {
-        dependencies: ['requests'],
-        range: { start: 0, end: 24 },
-        sourceRange: { start: 0, end: 24 },
-    };
-}
-
-function makeDocument(uri: Uri, isDirty = false): TextDocument {
-    return {
-        uri,
-        isDirty,
-        positionAt: (offset: number) => new Position(0, offset),
-    } as unknown as TextDocument;
-}
+const SCRIPT = '# /// script\n# dependencies = ["requests"]\n# ///\n\nprint("hello")\n';
 
 suite('Inline script CodeLens provider', () => {
-    const scriptUri = Uri.file('/workspace/app.py');
+    const scriptUri = Uri.file(path.join(process.cwd(), 'lens-tests', 'app.py'));
     let routing: InlineScriptRoutingRegistry;
     let provider: InlineScriptCodeLensProvider;
 
@@ -39,130 +26,210 @@ suite('Inline script CodeLens provider', () => {
     teardown(() => {
         provider.dispose();
         routing.dispose();
+        sinon.restore();
     });
 
-    test('shows no CodeLens when the file has no saved inline metadata', () => {
-        const lenses = provider.provideCodeLenses(makeDocument(scriptUri), {} as never);
-        assert.strictEqual(lenses.length, 0);
-    });
+    function document(text = SCRIPT, dirty = false, uri = scriptUri): MockDocument {
+        const doc = new MockDocument(text, uri.fsPath, async () => true);
+        sinon.stub(doc, 'uri').get(() => uri);
+        sinon.stub(doc, 'isDirty').get(() => dirty);
+        return doc;
+    }
 
-    test('shows a setup CodeLens when metadata exists but no environment is associated', () => {
-        routing.setMetadata(scriptUri, makeMetadata());
+    function ready(text = SCRIPT, version: string | undefined = '3.12.4', uri = scriptUri): void {
+        const metadata = readInlineScriptMetadata(text);
+        assert.ok(metadata);
+        routing.setMetadata(uri, metadata);
+        routing.setValidatedAssociation(uri, true, version);
+    }
 
-        const lenses = provider.provideCodeLenses(makeDocument(scriptUri), {} as never);
-
+    function lens(text = SCRIPT, dirty = false, uri = scriptUri) {
+        const lenses = provider.provideCodeLenses(document(text, dirty, uri), {} as never);
         assert.strictEqual(lenses.length, 1);
-        assert.strictEqual(lenses[0].command?.command, SETUP_COMMAND);
-        assert.deepStrictEqual(lenses[0].command?.arguments, [scriptUri]);
+        return lenses[0];
+    }
+
+    test('does not decorate ordinary Python files', () => {
+        assert.deepStrictEqual(provider.provideCodeLenses(document('print("hello")'), {} as never), []);
     });
 
-    test('shows no CodeLens while the document has unsaved changes', () => {
-        routing.setMetadata(scriptUri, makeMetadata());
-
-        const lenses = provider.provideCodeLenses(makeDocument(scriptUri, true), {} as never);
-
-        assert.strictEqual(lenses.length, 0);
+    test('offers setup for a newly typed block before detection or saving', () => {
+        const result = lens(SCRIPT, true);
+        assert.strictEqual(result.command?.command, SETUP_COMMAND);
+        assert.deepStrictEqual(result.command?.arguments, [scriptUri]);
+        assert.strictEqual(routing.getMetadata(scriptUri), undefined, 'presentation must not seed saved routing');
     });
 
-    test('hides the CodeLens once a validated association makes the script routeable', () => {
-        routing.setMetadata(scriptUri, makeMetadata());
-        routing.setValidatedAssociation(scriptUri, true);
-        assert.strictEqual(routing.shouldRoute(scriptUri), true);
-
-        const lenses = provider.provideCodeLenses(makeDocument(scriptUri), {} as never);
-
-        assert.strictEqual(lenses.length, 0);
-    });
-
-    test('offers setup while a selected environment is temporarily unavailable and hides it on recovery', () => {
-        routing.setMetadata(scriptUri, makeMetadata());
-        routing.setValidatedAssociation(scriptUri, true);
-        let refreshes = 0;
-        const subscription = provider.onDidChangeCodeLenses(() => {
-            refreshes += 1;
+    for (const text of [
+        '# /// script',
+        '# /// script\n# dependencies = [',
+        '# /// script\n# dependencies = ["requests",]\nnot_a_comment\n# ///',
+        '# /// script\n# dependencies = 1\n# ///',
+        '# /// script \n# dependencies = []\n# /// ',
+        '  # /// script\n# broken TOML\n# ///',
+    ]) {
+        test(`keeps setup available for malformed metadata: ${JSON.stringify(text)}`, () => {
+            assert.strictEqual(lens(text, true).command?.command, SETUP_COMMAND);
+            assert.strictEqual(lens(text).command?.command, SETUP_COMMAND);
         });
+    }
 
+    test('always shows the ready interpreter for a validated unchanged block', () => {
+        ready();
+        assert.strictEqual(lens().command?.title, 'Script environment ready (Python 3.12.4)');
+        assert.strictEqual(lens().command?.command, '');
+    });
+
+    test('does not expire the ready label', () => {
+        const clock = sinon.useFakeTimers();
+        ready();
+        clock.tick(60_000);
+        assert.strictEqual(lens().command?.title, 'Script environment ready (Python 3.12.4)');
+        assert.strictEqual(clock.countTimers(), 0);
+    });
+
+    test('shows the ready label when the association was restored before the provider was created', () => {
+        provider.dispose();
+        ready(SCRIPT, '3.13.2.final.0');
+        provider = new InlineScriptCodeLensProvider(routing, SETUP_COMMAND);
+        assert.strictEqual(lens().command?.title, 'Script environment ready (Python 3.13.2)');
+    });
+
+    test('omits an unknown interpreter version without hiding the ready label', () => {
+        ready(SCRIPT, '');
+        assert.strictEqual(lens().command?.title, 'Script environment ready');
+    });
+
+    test('keeps ready visible during unsaved body-only edits', () => {
+        ready();
+        assert.strictEqual(lens(SCRIPT.replace('hello', 'changed body'), true).command?.command, '');
+    });
+
+    test('offers setup immediately for raw block edits even before routing catches up', () => {
+        ready();
+        assert.strictEqual(lens(SCRIPT.replace('requests', 'Requests'), true).command?.command, SETUP_COMMAND);
+        assert.strictEqual(routing.shouldRoute(scriptUri), true, 'the lens must not change interpreter routing');
+    });
+
+    test('keeps setup visible after the detector clears dirty metadata', () => {
+        ready();
+        routing.clearMetadata(scriptUri);
+        routing.setValidatedAssociation(scriptUri, false);
+        assert.strictEqual(lens(SCRIPT.replace('"requests"', '"requests'), true).command?.command, SETUP_COMMAND);
+    });
+
+    test('returns to ready after unchanged requirements are saved and revalidated', () => {
+        ready();
+        const edited = SCRIPT.replace('requests', 'Requests');
+        assert.strictEqual(lens(edited, true).command?.command, SETUP_COMMAND);
+        ready(edited);
+        assert.strictEqual(lens(edited).command?.command, '');
+    });
+
+    test('does not show ready for an additional unsaved script block', () => {
+        ready();
+        assert.strictEqual(lens(`${SCRIPT}\n# /// script\n# ///`, true).command?.command, SETUP_COMMAND);
+    });
+
+    for (const invalid of [
+        `${SCRIPT}\n# /// script\n#bad`,
+        SCRIPT.replace('["requests"]', '["requests", ""]'),
+        SCRIPT.replace('# dependencies', '# requires-python = "invalid"\n# dependencies'),
+    ]) {
+        test(`keeps setup after malformed metadata is saved over a ready association: ${JSON.stringify(invalid)}`, () => {
+            ready();
+            const parsed = readInlineScriptMetadata(invalid);
+            assert.ok(parsed, 'the tolerant parser intentionally retains usable metadata');
+            routing.setMetadata(scriptUri, parsed);
+            routing.setValidatedAssociation(scriptUri, true, '3.12.4');
+            assert.strictEqual(lens(invalid).command?.command, SETUP_COMMAND);
+        });
+    }
+
+    test('shows ready when the editor normalizes saved mixed line endings', () => {
+        const disk = '# /// script\r\n# dependencies = ["requests"]\n# ///\rprint("hello")';
+        ready(disk);
+        assert.strictEqual(lens(disk.replace(/\r\n?/g, '\n')).command?.command, '');
+    });
+
+    test('offers setup if a preceding non-script opener hides the previously validated block', () => {
+        const original = `# note\n${SCRIPT}`;
+        ready(original);
+        assert.strictEqual(lens(original.replace('# note', '# /// other'), true).command?.command, SETUP_COMMAND);
+    });
+
+    test('keeps ready for body edits following an ignored metadata example', () => {
+        const original = `${SCRIPT}\n"""\n# /// script\n# dependencies = ["example"]\n"""\nprint("body")`;
+        ready(original);
+        assert.strictEqual(lens(original.replace('"body"', '"changed"'), true).command?.command, '');
+    });
+
+    test('keeps a lens when the closing marker is removed', () => {
+        ready();
+        assert.strictEqual(lens(SCRIPT.replace('# ///\n', ''), true).command?.command, SETUP_COMMAND);
+    });
+
+    test('removes the lens when the script block is removed', () => {
+        ready();
+        assert.deepStrictEqual(provider.provideCodeLenses(document('print("hello")', true), {} as never), []);
+    });
+
+    test('anchors the lens to the live marker with BOM and CRLF', () => {
+        const text = `\uFEFF#!/usr/bin/env python\r\n${SCRIPT.replace(/\n/g, '\r\n')}`;
+        ready(text);
+        const result = lens(text);
+        assert.strictEqual(result.range.start.line, 1);
+        assert.strictEqual(result.range.start.character, 0);
+        assert.strictEqual(result.command?.command, '');
+    });
+
+    test('offers retry during temporary unavailability and restores ready on recovery', () => {
+        ready();
         routing.setEnvironmentUnavailable(scriptUri, true);
-        const lenses = provider.provideCodeLenses(makeDocument(scriptUri), {} as never);
-        assert.strictEqual(lenses.length, 1);
-        assert.strictEqual(lenses[0].command?.command, SETUP_COMMAND);
-        assert.strictEqual(routing.shouldRoute(scriptUri), true);
+        assert.strictEqual(lens().command?.command, SETUP_COMMAND);
         routing.setEnvironmentUnavailable(scriptUri, false);
-
-        assert.strictEqual(provider.provideCodeLenses(makeDocument(scriptUri), {} as never).length, 0);
-        assert.strictEqual(refreshes, 2);
-        subscription.dispose();
+        assert.strictEqual(lens().command?.title, 'Script environment ready (Python 3.12.4)');
     });
 
-    test('refreshes CodeLenses when routing state changes', () => {
-        let fireCount = 0;
-        const sub = provider.onDidChangeCodeLenses(() => (fireCount += 1));
-
-        routing.setMetadata(scriptUri, makeMetadata());
-        routing.setValidatedAssociation(scriptUri, true);
-
-        sub.dispose();
-        assert.ok(fireCount >= 1, 'onDidChangeCodeLenses should fire when routing state changes');
+    test('offers setup after an environment is invalidated', () => {
+        ready();
+        routing.setValidatedAssociation(scriptUri, false);
+        assert.strictEqual(lens().command?.command, SETUP_COMMAND);
     });
 
-    suite('post-setup confirmation', () => {
-        let clock: sinon.SinonFakeTimers;
+    test('keeps two scripts and their interpreter versions independent', () => {
+        const other = Uri.file(path.join(process.cwd(), 'lens-tests', 'other.py'));
+        ready();
+        ready(SCRIPT, '3.11.9', other);
+        assert.strictEqual(lens().command?.title, 'Script environment ready (Python 3.12.4)');
+        assert.strictEqual(lens(SCRIPT, true, other).command?.title, 'Script environment ready (Python 3.11.9)');
+    });
 
-        setup(() => {
-            clock = sinon.useFakeTimers();
-            routing.setMetadata(scriptUri, makeMetadata());
-            routing.setValidatedAssociation(scriptUri, true);
-        });
+    test('refreshes when a validated interpreter version changes without a routeability change', () => {
+        ready();
+        const changed = sinon.spy();
+        provider.onDidChangeCodeLenses(changed);
+        routing.setValidatedAssociation(scriptUri, true, '3.13.1');
+        sinon.assert.calledOnce(changed);
+        assert.strictEqual(lens().command?.title, 'Script environment ready (Python 3.13.1)');
+    });
 
-        teardown(() => clock.restore());
+    test('does not decorate resources unsupported by inline setup', () => {
+        for (const uri of [Uri.parse('untitled:app.py'), scriptUri.with({ path: `${scriptUri.path}i` })]) {
+            assert.deepStrictEqual(provider.provideCodeLenses(document(SCRIPT, false, uri), {} as never), []);
+        }
+        assert.deepStrictEqual(
+            provider.provideCodeLenses(document(`${'# padding\n'.repeat(MAX_HEADER_BYTES)}${SCRIPT}`), {} as never),
+            [],
+        );
+    });
 
-        test('replaces the hidden setup lens with a non-clickable confirmation naming the version', () => {
-            provider.noteEnvironmentReady(scriptUri, '3.12.4');
-
-            const lenses = provider.provideCodeLenses(makeDocument(scriptUri), {} as never);
-
-            assert.strictEqual(lenses.length, 1);
-            assert.strictEqual(lenses[0].command?.title, 'Script environment ready (Python 3.12.4)');
-            assert.strictEqual(lenses[0].command?.command, '', 'the confirmation must not be clickable');
-        });
-
-        test('omits the version when none was resolved', () => {
-            provider.noteEnvironmentReady(scriptUri, undefined);
-
-            const lenses = provider.provideCodeLenses(makeDocument(scriptUri), {} as never);
-
-            assert.strictEqual(lenses.length, 1);
-            assert.strictEqual(lenses[0].command?.title, 'Script environment ready');
-        });
-
-        test('expires on its own and refreshes so the lens disappears', () => {
-            provider.noteEnvironmentReady(scriptUri, '3.12.4');
-            let fireCount = 0;
-            const sub = provider.onDidChangeCodeLenses(() => (fireCount += 1));
-
-            clock.tick(READY_CONFIRMATION_TIMEOUT_MS + 1);
-            sub.dispose();
-
-            assert.strictEqual(fireCount, 1, 'expiry must refresh the lenses');
-            assert.strictEqual(provider.provideCodeLenses(makeDocument(scriptUri), {} as never).length, 0);
-        });
-
-        test('shows nothing for a routed script that was not just set up', () => {
-            assert.strictEqual(provider.provideCodeLenses(makeDocument(scriptUri), {} as never).length, 0);
-        });
-
-        test('stays hidden while the document is dirty', () => {
-            provider.noteEnvironmentReady(scriptUri, '3.12.4');
-
-            assert.strictEqual(provider.provideCodeLenses(makeDocument(scriptUri, true), {} as never).length, 0);
-        });
-
-        test('does not leak timers past disposal', () => {
-            provider.noteEnvironmentReady(scriptUri, '3.12.4');
-
-            provider.dispose();
-
-            assert.doesNotThrow(() => clock.tick(READY_CONFIRMATION_TIMEOUT_MS + 1));
-        });
+    test('stops publishing after disposal', () => {
+        const changed = sinon.spy();
+        provider.onDidChangeCodeLenses(changed);
+        provider.dispose();
+        ready();
+        sinon.assert.notCalled(changed);
+        assert.deepStrictEqual(provider.provideCodeLenses(document(), {} as never), []);
     });
 });

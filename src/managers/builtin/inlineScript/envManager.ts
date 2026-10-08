@@ -2370,7 +2370,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             this.clearValidatedRouteableState(uri);
             return;
         }
-        this.routingRegistry.setValidatedAssociation(uri, true);
+        this.routingRegistry.setValidatedAssociation(uri, true, environment.version);
     }
 
     private async updateValidatedStateForSelection(script: ScriptReference): Promise<void> {
@@ -2405,6 +2405,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         this.routingRegistry.setValidatedAssociation(
             script.uri,
             this.routingRegistry.getMetadataIdentity(script.uri) === savedMetadata.identity,
+            environment.version,
         );
     }
 
