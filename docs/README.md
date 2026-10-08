@@ -1926,12 +1926,16 @@ Guidance for authoring checks:
   `create`), call `resolveEnvironmentManagerCapability` or
   `resolvePackageManagerCapability` explicitly from within that key's check and
   forward the received context unchanged. This delegation is a per-manager
-  choice, not an automatic cascade.
+  choice, not an automatic cascade. There is no cycle protection: a manager
+  that delegates in a loop recurses until the call stack overflows, so keep
+  delegation chains acyclic.
 
 Legacy providers without a `capabilities` map no longer compile: `capabilities`
-is a required property on `EnvironmentManager` and `PackageManager`.
-Advertisements must be plain objects whose values are checker functions;
-malformed maps reject. Unknown runtime keys are unsupported.
+is a required property on `EnvironmentManager` and `PackageManager`. The
+resolver looks up `capability` as the manager's own property and calls it if
+it's a function; a missing key, an inherited property (for example
+`toString`), or a declared value that isn't a function all resolve unsupported
+rather than throwing.
 
 ### Adding or removing catalog capabilities
 
