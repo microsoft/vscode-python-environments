@@ -8,6 +8,7 @@ import { Disposable, Uri } from 'vscode';
 import { PackageManager, PythonProject } from '../../../api';
 import { ProjectScopedPackageManagerCache } from '../../../managers/common/projectScopedPackageManagerCache';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
+import { allSupportedPackageCapabilities } from '../../capabilityFixtures';
 
 suite('ProjectScopedPackageManagerCache', () => {
     let invalidate: sinon.SinonStub;
@@ -52,6 +53,7 @@ suite('ProjectScopedPackageManagerCache', () => {
                 manage: async () => undefined,
                 refresh: async () => undefined,
                 getPackages: async () => [],
+                capabilities: allSupportedPackageCapabilities,
                 dispose,
             } satisfies PackageManager;
         });
@@ -60,6 +62,7 @@ suite('ProjectScopedPackageManagerCache', () => {
             manage: async () => undefined,
             refresh: async () => undefined,
             getPackages: async () => [],
+            capabilities: allSupportedPackageCapabilities,
             createForProject,
         });
         return { provider, createForProject, scopedDisposers };
@@ -153,6 +156,7 @@ suite('ProjectScopedPackageManagerCache', () => {
             manage: async () => undefined,
             refresh: async () => undefined,
             getPackages: async () => [],
+            capabilities: allSupportedPackageCapabilities,
         });
 
         const resolved = cache.getOrCreate(provider, createProject('shared-project'));
@@ -169,6 +173,7 @@ suite('ProjectScopedPackageManagerCache', () => {
             manage: async () => undefined,
             refresh: async () => undefined,
             getPackages: async () => [],
+            capabilities: allSupportedPackageCapabilities,
         });
         const project = createProject('provider-kind-change-project');
         cache.getOrCreate(projectAwareProvider.provider, project);

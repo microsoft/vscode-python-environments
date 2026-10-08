@@ -50,26 +50,26 @@ if (environment && typeof api.getPackageManagerCapability === 'function') {
 }
 ```
 
-Managers may advertise an optional `capabilities` map. Omitted entries use
-compatibility defaults: required operations are supported, optional methods and
-events follow raw hook presence, and option capabilities inherit their parent.
-An explicit unsupported result overrides those defaults.
+Managers advertise every capability key explicitly: there are no defaults, and
+`capabilities` is a required property on both `EnvironmentManager` and
+`PackageManager`. A key a manager omits at runtime resolves
+`{ supported: false, reason: 'Capability not implemented' }`.
 
-To change a manager's advertised support, add or remove an entry in its map.
-Removing an entry restores the default; return `{ supported: false, reason }` to
-disable support. Checks must be read-only and noninteractive.
+To change a manager's advertised support, update the check for that key in its
+map; return `{ supported: false, reason }` to disable support. Checks must be
+read-only and noninteractive.
 
-Capability keys come from `defaultEnvironmentCapabilities` and
-`defaultPackageCapabilities`. Adding a public key requires a default dictionary
-entry, tests, documentation, and only the manager overrides that differ from the
-default. Removing a dictionary key is a breaking API change.
+Capability keys come from the `EnvironmentManagerCapability` and
+`PackageManagerCapability` type unions. Adding a public key requires updating
+every built-in manager's `capabilities` map, plus tests and documentation.
+Removing a key from the type union is a breaking API change.
 
 Feature-detect query methods when supporting older extension runtimes. Queries
 use currently registered managers and describe support, not request validity or
 guaranteed success.
 
 See the [capability guide](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#manager-capabilities)
-for defaults and provider maintenance.
+for the full catalog and provider maintenance.
 
 ## Full API reference
 

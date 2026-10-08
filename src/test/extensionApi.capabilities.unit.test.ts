@@ -13,6 +13,7 @@ import type {
     PythonProject,
 } from '../api';
 import type { CapabilityContext, Support } from '../capabilities';
+import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from './capabilityFixtures';
 import * as extensionApis from '../common/extension.apis';
 import * as frameUtils from '../common/utils/frameUtils';
 import * as windowApis from '../common/window.apis';
@@ -109,7 +110,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             get: async () => undefined,
             set: async () => {},
             resolve: async () => undefined,
-            capabilities: { 'environments.list': envProbe },
+            capabilities: { ...allSupportedEnvironmentCapabilities, 'environments.list': envProbe },
         };
         return managers.registerEnvironmentManager(provider, { extensionId });
     }
@@ -120,7 +121,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             manage: async () => {},
             refresh: async () => {},
             getPackages: async () => [],
-            capabilities: { 'packages.list': pkgProbe },
+            capabilities: { ...allSupportedPackageCapabilities, 'packages.list': pkgProbe },
         };
     }
 
@@ -128,7 +129,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         const provider = packageProvider(name);
         const create = scoped ? sinon.stub().callsFake(() => ({
             ...packageProvider(name),
-            capabilities: { 'packages.list': scopedProbe },
+            capabilities: { ...allSupportedPackageCapabilities, 'packages.list': scopedProbe },
         })) : undefined;
         managers.registerPackageManager({ ...provider, createForProject: create }, { extensionId });
         return create;

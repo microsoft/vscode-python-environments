@@ -23,6 +23,7 @@ import {
     InternalEnvironmentManager,
     InternalPackageManager,
 } from '../../managers/common/registeredManagers';
+import { allSupportedEnvironmentCapabilities } from '../capabilityFixtures';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
 suite('Inline environment selection error feedback', () => {
@@ -74,6 +75,7 @@ suite('Inline environment selection error feedback', () => {
                     getEnvironments: async () => [environment],
                     refresh: async () => undefined,
                     resolve: async () => undefined,
+                    capabilities: allSupportedEnvironmentCapabilities,
                 };
                 const parent = new EnvManagerTreeItem(
                     new InternalEnvironmentManager(INLINE_SCRIPT_MANAGER_ID, provider),

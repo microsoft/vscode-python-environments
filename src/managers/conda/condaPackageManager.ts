@@ -7,6 +7,7 @@ import {
     Disposable,
     Event,
     EventEmitter,
+    l10n,
     LogOutputChannel,
     MarkdownString,
     ProgressLocation,
@@ -27,6 +28,7 @@ import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
 
+import { requiredPackageCapabilities } from '../common/capabilityDeclarations';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import {
@@ -42,10 +44,18 @@ import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../i
 
 export class CondaPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
-        'packages.version': async () => ({ supported: true }),
+        ...requiredPackageCapabilities,
+        'packages.list.skipCache': async () => ({ supported: true }),
+        'packages.manage.install': async () => ({ supported: true }),
+        'packages.manage.uninstall': async () => ({ supported: true }),
+        'packages.manage.upgrade': async () => ({ supported: true }),
+        'packages.manage.headless': async () => ({ supported: true }),
+        'packages.manage.showSkipOption': async () => ({ supported: true }),
         'packages.availableVersions': async () => ({ supported: true }),
-        'packages.watchTargets': async () => ({ supported: true }),
-        'packages.events.changed': async () => ({ supported: true }),
+        'packages.direct': async () => ({
+            supported: false,
+            reason: l10n.t('Conda does not classify direct and transitive packages.'),
+        }),
     };
 
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();

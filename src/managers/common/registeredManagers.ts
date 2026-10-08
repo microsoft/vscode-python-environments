@@ -90,6 +90,10 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         return this.manager.getVersion ? this.manager.getVersion() : Promise.resolve(undefined);
     }
 
+    public get capabilities(): EnvironmentManager['capabilities'] {
+        return this.manager.capabilities;
+    }
+
     public get supportsCreate(): boolean {
         return this.manager.create !== undefined;
     }
@@ -306,6 +310,10 @@ export class InternalPackageManager implements PackageManager {
     }
     public get log(): LogOutputChannel | undefined {
         return this.manager.log;
+    }
+
+    public get capabilities(): PackageManager['capabilities'] {
+        return this.manager.capabilities;
     }
 
     async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {

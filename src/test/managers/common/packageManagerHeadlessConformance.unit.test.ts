@@ -16,8 +16,7 @@ import * as windowApis from '../../../common/window.apis';
 import * as workspaceFs from '../../../common/workspace.fs.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
-import { PipInstallCommand } from '../../../managers/builtin/commands/install';
-import { PipListCommand } from '../../../managers/builtin/commands/list';
+import { PipInstallCommand } from '../../../managers/builtin/commands/install';import { PipListCommand } from '../../../managers/builtin/commands/list';
 import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
 import * as pipUtils from '../../../managers/builtin/pipUtils';
@@ -32,6 +31,7 @@ import { PoetryManager } from '../../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../../managers/poetry/poetryPackageManager';
 import * as poetryUtils from '../../../managers/poetry/poetryUtils';
 import { MockChildProcess } from '../../mocks/mockChildProcess';
+import { allSupportedPackageCapabilities } from '../../capabilityFixtures';
 
 suite('Package manager headless conformance', () => {
     const environment = {
@@ -169,6 +169,7 @@ suite('Package manager headless conformance', () => {
             manage: sinon.stub().resolves(),
             refresh: sinon.stub().resolves(),
             getPackages: sinon.stub().resolves([]),
+            capabilities: allSupportedPackageCapabilities,
         });
 
         await assert.rejects(

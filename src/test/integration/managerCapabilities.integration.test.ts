@@ -4,21 +4,30 @@
 import * as assert from 'assert';
 import { ConfigurationTarget, Disposable, extensions, Uri, workspace } from 'vscode';
 import {
+    Capabilities,
     EnvironmentManager,
+    EnvironmentManagerCapability,
     PackageManager,
+    PackageManagerCapability,
     PythonEnvironment,
     PythonEnvironmentApi,
     resolvePackageManagerCapability,
 } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
 
+// Minimal advertisements used by these tests. Only the keys a test cares about need overriding;
+// every other key resolves unsupported, matching the no-defaults contract providers must honor.
+const noPackageCapabilities: Capabilities<PackageManagerCapability> = {} as Capabilities<PackageManagerCapability>;
+const noEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> =
+    {} as Capabilities<EnvironmentManagerCapability>;
+
 suite('Manager capabilities integration', function () {
     this.timeout(60_000);
     let api: PythonEnvironmentApi;
     let environment: PythonEnvironment;
     let packages: PackageManager;
-    let packageCapabilities: PackageManager['capabilities'];
-    let environmentCapabilities: EnvironmentManager['capabilities'];
+    let packageCapabilities: Capabilities<PackageManagerCapability>;
+    let environmentCapabilities: Capabilities<EnvironmentManagerCapability>;
     const disposables: Disposable[] = [];
 
     suiteSetup(async () => {
@@ -29,8 +38,8 @@ suite('Manager capabilities integration', function () {
     });
 
     setup(() => {
-        packageCapabilities = undefined;
-        environmentCapabilities = undefined;
+        packageCapabilities = noPackageCapabilities;
+        environmentCapabilities = noEnvironmentCapabilities;
         packages = {
             name: 'capability-test-packages',
             get capabilities() {
@@ -75,13 +84,14 @@ suite('Manager capabilities integration', function () {
         disposables.splice(0).reverse().forEach((disposable) => disposable.dispose());
     });
 
-    test('environment queries resolve defaults and pass context to provider overrides', async () => {
+    test('environment queries resolve unsupported when not advertised, and honor provider overrides', async () => {
         assert.deepStrictEqual(
             await api.getEnvironmentManagerCapability(environment.envId.managerId, 'environments.list'),
-            { supported: true },
+            { supported: false, reason: 'Capability not implemented' },
         );
         const unsupported = { supported: false, reason: 'Disabled in this scope' } as const;
         environmentCapabilities = {
+            ...noEnvironmentCapabilities,
             'environments.list': async (context) => {
                 assert.strictEqual(context.scope, 'global');
                 return unsupported;
@@ -102,11 +112,15 @@ suite('Manager capabilities integration', function () {
         const provider: PackageManager = {
             ...packages,
             name: 'capability-test-scoped',
-            capabilities: { 'packages.list': async () => assert.fail('The unbound root must not be queried') },
+            capabilities: {
+                ...noPackageCapabilities,
+                'packages.list': async () => assert.fail('The unbound root must not be queried'),
+            },
             createForProject: (boundProject) => ({
                 ...packages,
                 name: 'capability-test-scoped',
                 capabilities: {
+                    ...noPackageCapabilities,
                     'packages.list': async (context) => {
                         assert.strictEqual(boundProject.uri.toString(), project.uri.toString());
                         assert.strictEqual(context.project, boundProject);
@@ -138,6 +152,7 @@ suite('Manager capabilities integration', function () {
     test('package prerequisites preserve context and reasons across separately loaded modules', async () => {
         const denied = { supported: false, reason: 'Disabled by provider' } as const;
         packageCapabilities = {
+            ...noPackageCapabilities,
             'packages.manage': async (context) => {
                 assert.strictEqual(context.environment, environment);
                 return denied;
@@ -150,6 +165,7 @@ suite('Manager capabilities integration', function () {
 
     test('prerequisite cycles are detected across separately loaded API modules', async () => {
         packageCapabilities = {
+            ...noPackageCapabilities,
             'packages.manage': (context) =>
                 resolvePackageManagerCapability(packages, 'packages.manage.install', context),
         };

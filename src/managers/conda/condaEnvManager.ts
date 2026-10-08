@@ -46,7 +46,7 @@ import {
 } from '../../internal/pythonToolSupport';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
-import { environmentManagerCacheAndEventCapabilities } from '../common/capabilityDeclarations';
+import { requiredEnvironmentCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { notifyMissingManagerIfDefault } from '../common/utils';
@@ -74,11 +74,15 @@ import {
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
-        ...environmentManagerCacheAndEventCapabilities,
+        ...requiredEnvironmentCapabilities,
         'environments.create': async () => ({ supported: true }),
-        'environments.remove': async () => ({ supported: true }),
         'environments.create.quick': async (context) =>
             resolveEnvironmentManagerCapability(this, 'environments.create', context),
+        'environments.create.additionalPackages': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.create', context),
+        'environments.remove': async () => ({ supported: true }),
+        'environments.remove.headless': async (context) =>
+            resolveEnvironmentManagerCapability(this, 'environments.remove', context),
     };
 
     private collection: PythonEnvironment[] = [];
