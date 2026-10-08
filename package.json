@@ -138,6 +138,30 @@
                     "default": true,
                     "scope": "machine"
                 },
+                "python-envs.globalPackageInstallationAction": {
+                    "type": "string",
+                    "description": "%python-envs.globalPackageInstallationAction.description%",
+                    "default": "ask",
+                    "enum": [
+                        "ask",
+                        "continueGlobally",
+                        "useExisting",
+                        "createNew"
+                    ],
+                    "enumItemLabels": [
+                        "%python-envs.globalPackageInstallationAction.ask.label%",
+                        "%python-envs.globalPackageInstallationAction.continueGlobally.label%",
+                        "%python-envs.globalPackageInstallationAction.useExisting.label%",
+                        "%python-envs.globalPackageInstallationAction.createNew.label%"
+                    ],
+                    "enumDescriptions": [
+                        "%python-envs.globalPackageInstallationAction.ask.description%",
+                        "%python-envs.globalPackageInstallationAction.continueGlobally.description%",
+                        "%python-envs.globalPackageInstallationAction.useExisting.description%",
+                        "%python-envs.globalPackageInstallationAction.createNew.description%"
+                    ],
+                    "scope": "machine"
+                },
                 "python-envs.packageWatchers": {
                     "type": "boolean",
                     "description": "%python-envs.packageWatchers.description%",

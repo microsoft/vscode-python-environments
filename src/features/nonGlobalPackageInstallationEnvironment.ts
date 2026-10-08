@@ -1,17 +1,17 @@
-import { l10n } from 'vscode';
+import { l10n, QuickPickItem } from 'vscode';
 import { GetEnvironmentsScope, PackageManagementOptions, PythonEnvironment } from '../api';
 import { VENV_MANAGER_ID } from '../common/constants';
-import { getGlobalPersistentState } from '../common/persistentState';
 import { pickEnvironmentFrom } from '../common/pickers/environments';
-import { showQuickPickWithToggle } from '../common/window.apis';
+import { showQuickPick } from '../common/window.apis';
+import { getConfiguration } from '../common/workspace.apis';
 import { waitForAllEnvManagers, waitForEnvManagerId } from './common/managerReady';
 import type { EnvironmentManagers } from './envManagers';
 
-export const GLOBAL_PACKAGE_INSTALLATION_SELECTION_KEY = 'python-envs:packageManagement:GLOBAL_INSTALLATION_SELECTION';
+type GlobalPackageInstallationAction = 'ask' | 'continueGlobally' | 'useExisting' | 'createNew';
 
-type RememberedPackageInstallationTarget =
-    | { readonly kind: 'global' }
-    | { readonly kind: 'environment'; readonly managerId: string; readonly environmentId: string };
+interface PackageInstallationQuickPickItem extends QuickPickItem {
+    readonly action: Exclude<GlobalPackageInstallationAction, 'ask'>;
+}
 
 function hasSameEnvironmentId(first: PythonEnvironment, second: PythonEnvironment): boolean {
     return first.envId.managerId === second.envId.managerId && first.envId.id === second.envId.id;
@@ -49,79 +49,44 @@ export async function selectPackageManagementEnvironment(
         return environment;
     }
 
-    const state = await getGlobalPersistentState();
-    const rememberedTarget = await state.get<RememberedPackageInstallationTarget>(
-        GLOBAL_PACKAGE_INSTALLATION_SELECTION_KEY,
+    let action: GlobalPackageInstallationAction | undefined = getConfiguration('python-envs', null).get(
+        'globalPackageInstallationAction',
+        'ask',
     );
-    if (rememberedTarget?.kind === 'global') {
-        return environment;
-    }
-    if (rememberedTarget?.kind === 'environment') {
-        const environments = await getEnvironments(envManagers, 'all');
-        const rememberedEnvironment = environments.find(
-            (candidate) =>
-                candidate.envId.managerId === rememberedTarget.managerId &&
-                candidate.envId.id === rememberedTarget.environmentId,
+    if (action === 'ask') {
+        const choice = await showQuickPick<PackageInstallationQuickPickItem>(
+            [
+                { label: l10n.t('Continue Globally'), action: 'continueGlobally' },
+                { label: l10n.t('Use Existing Virtual Environment'), action: 'useExisting' },
+                { label: l10n.t('Create New Virtual Environment'), action: 'createNew' },
+            ],
+            {
+                title: l10n.t('You are installing packages into a global Python environment'),
+                placeHolder: l10n.t('Select where to install the packages'),
+            },
         );
-        if (rememberedEnvironment) {
-            return rememberedEnvironment;
-        }
-        await state.clear([GLOBAL_PACKAGE_INSTALLATION_SELECTION_KEY]);
+        action = choice?.action;
     }
 
-    const continueGlobally = { label: l10n.t('Continue Globally') };
-    const useExisting = { label: l10n.t('Use Existing Virtual Environment') };
-    const createNew = { label: l10n.t('Create New Virtual Environment') };
-    const { item: choice, toggled: rememberSelection } = await showQuickPickWithToggle(
-        [continueGlobally, useExisting, createNew],
-        {
-            title: l10n.t('You are installing packages into a global Python environment'),
-            placeHolder: l10n.t('Select where to install the packages'),
-        },
-        {
-            off: { label: `$(circle-large-outline) ${l10n.t('Remember my selection')}`, alwaysShow: true },
-            on: { label: `$(check) ${l10n.t('Remember my selection')}`, alwaysShow: true },
-        },
-    );
-
-    if (choice?.label === createNew.label) {
+    if (action === 'createNew') {
         await waitForEnvManagerId([VENV_MANAGER_ID]);
         const venvManager = envManagers.getEnvironmentManager(VENV_MANAGER_ID);
         if (!venvManager?.supportsCreate) {
             throw new Error(l10n.t('The virtual environment manager is not available.'));
         }
-        const createdEnvironment = await venvManager.create('global', { quickCreate: true });
-        if (rememberSelection && createdEnvironment) {
-            await state.set(GLOBAL_PACKAGE_INSTALLATION_SELECTION_KEY, {
-                kind: 'environment',
-                managerId: createdEnvironment.envId.managerId,
-                environmentId: createdEnvironment.envId.id,
-            });
-        }
-        return createdEnvironment;
+        return venvManager.create('global', { quickCreate: true });
     }
 
-    if (choice?.label === useExisting.label) {
+    if (action === 'useExisting') {
         const environments = await getEnvironments(envManagers, 'all');
         const virtualEnvironments = environments.filter(
             (candidate) =>
                 !globalEnvironments.some((globalEnvironment) => hasSameEnvironmentId(candidate, globalEnvironment)),
         );
-        const selectedEnvironment = await pickEnvironmentFrom(virtualEnvironments);
-        if (rememberSelection && selectedEnvironment) {
-            await state.set(GLOBAL_PACKAGE_INSTALLATION_SELECTION_KEY, {
-                kind: 'environment',
-                managerId: selectedEnvironment.envId.managerId,
-                environmentId: selectedEnvironment.envId.id,
-            });
-        }
-        return selectedEnvironment;
+        return pickEnvironmentFrom(virtualEnvironments);
     }
 
-    if (choice?.label === continueGlobally.label) {
-        if (rememberSelection) {
-            await state.set(GLOBAL_PACKAGE_INSTALLATION_SELECTION_KEY, { kind: 'global' });
-        }
+    if (action === 'continueGlobally') {
         return environment;
     }
 
