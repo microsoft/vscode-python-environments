@@ -4,7 +4,13 @@
 import { commands, Disposable, l10n, QuickPickItem, TextDocument, Uri, window } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
-import { readInlineScriptMetadataFromFile } from '../../common/inlineScript/metadata';
+import {
+    getInlineScriptSetupProblem,
+    parseInlineScriptMetadata,
+    readInlineScriptHeaderFromFile,
+    readInlineScriptMetadataFromFile,
+    sliceHeaderBytes,
+} from '../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { InlineScriptStrings } from '../../common/localize';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
@@ -17,7 +23,6 @@ import {
 } from '../../common/window.apis';
 import { asRelativePath, findFiles, getOpenTextDocuments } from '../../common/workspace.apis';
 import type { EnvironmentManagers } from '../envManagers';
-import { shortenVersionString } from '../../managers/common/utils';
 import { registerInlineScriptCodeLens } from './codeLens';
 import { promptUpdateExtensionsForInlineScripts } from './extensionVersionCheck';
 import { registerInlineScriptSetupCodeAction } from './setupCodeAction';
@@ -107,26 +112,55 @@ function findOpenDocument(scriptUri: Uri): TextDocument | undefined {
 }
 
 /**
- * Save `scriptUri` if it is open with unsaved changes, so setup reads what the user actually sees.
+ * Save dirty scripts and seed saved metadata for open scripts, including clean Undo/Revert results.
  *
  * Returns `false` when the document could not be saved; setup must not run in that case.
  */
 async function saveScriptBeforeSetup(scriptUri: Uri, routing: InlineScriptRoutingRegistry): Promise<boolean> {
     const document = findOpenDocument(scriptUri);
-    if (!document?.isDirty) {
+    if (!document) {
         return true;
     }
-    if (!(await document.save())) {
-        traceError(`Could not save ${scriptUri.fsPath} before setting up its inline-script environment.`);
-        return false;
+    if (document.isDirty) {
+        if (!(await document.save())) {
+            traceError(`Could not save ${scriptUri.fsPath} before setting up its inline-script environment.`);
+            return false;
+        }
+        traceVerbose(`Saved ${scriptUri.fsPath} before setting up its inline-script environment.`);
     }
-    traceVerbose(`Saved ${scriptUri.fsPath} before setting up its inline-script environment.`);
     // Seeding here is load-bearing: without it a just-typed block goes from no metadata to an
     // identity while `create` runs, which `setUpInlineScriptEnvironment` reads as a concurrent edit
     // and silently skips the association.
+    const savedVersion = document.version;
+    const metadataRevision = routing.getMetadataRevision(scriptUri);
     const metadata = await readInlineScriptMetadataFromFile(scriptUri);
-    if (metadata) {
+    if (
+        metadata &&
+        !document.isDirty &&
+        document.version === savedVersion &&
+        routing.getMetadataRevision(scriptUri) === metadataRevision
+    ) {
         routing.setMetadata(scriptUri, metadata);
+    }
+    return true;
+}
+
+async function validateScriptBeforeSetup(uri: Uri): Promise<boolean> {
+    const document = findOpenDocument(uri);
+    const text = document ? sliceHeaderBytes(document.getText()) : await readInlineScriptHeaderFromFile(uri);
+    if (text === undefined) {
+        showErrorMessage(InlineScriptStrings.scriptReadFailedBeforeSetup);
+        return false;
+    }
+    const result = parseInlineScriptMetadata(text, uri.fsPath);
+    const problem = getInlineScriptSetupProblem(result);
+    if (problem === 'metadata') {
+        showWarningMessage(InlineScriptStrings.invalidMetadataBeforeSetup);
+        return false;
+    }
+    if (problem === 'requires-python') {
+        showWarningMessage(InlineScriptStrings.invalidPythonRequirement);
+        return false;
     }
     return true;
 }
@@ -135,7 +169,6 @@ async function saveScriptBeforeSetup(scriptUri: Uri, routing: InlineScriptRoutin
 export function setupInlineScriptEnvironmentHandler(
     em: EnvironmentManagers,
     routing: InlineScriptRoutingRegistry,
-    onEnvironmentReady?: (scriptUri: Uri, version: string | undefined) => void,
 ): (scriptUri?: Uri) => Promise<void> {
     return async (scriptUri?: Uri): Promise<void> => {
         const uri = scriptUri ?? window.activeTextEditor?.document.uri;
@@ -146,12 +179,18 @@ export function setupInlineScriptEnvironmentHandler(
             showErrorMessage(l10n.t('The inline script environment manager is not available yet. Try again shortly.'));
             return;
         }
-        if (!(await saveScriptBeforeSetup(uri, routing))) {
-            showErrorMessage(InlineScriptStrings.saveFailedBeforeSetup);
-            return;
-        }
         let environment: PythonEnvironment | undefined;
         try {
+            if (!(await validateScriptBeforeSetup(uri))) {
+                return;
+            }
+            if (!(await saveScriptBeforeSetup(uri, routing))) {
+                showErrorMessage(InlineScriptStrings.saveFailedBeforeSetup);
+                return;
+            }
+            if (!(await validateScriptBeforeSetup(uri))) {
+                return;
+            }
             environment = await setUpInlineScriptEnvironment(uri, em, routing);
         } catch (error) {
             traceError(`Failed to set up the inline-script environment for ${uri.fsPath}:`, error);
@@ -166,7 +205,6 @@ export function setupInlineScriptEnvironmentHandler(
             notifyInlineScriptSetupOutcome(uri, routing);
             return;
         }
-        onEnvironmentReady?.(uri, shortenVersionString(environment.version));
         // Kept out of the try: the environment is already set up, so a failure in this follow-up
         // must not be reported to the user as a setup failure.
         await promptUpdateExtensionsForInlineScripts().catch((error) =>
@@ -371,9 +409,7 @@ export function registerInlineScriptUx(em: EnvironmentManagers, routing: InlineS
         registerInlineScriptSetupCodeAction(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND),
         commands.registerCommand(
             SETUP_INLINE_SCRIPT_ENV_COMMAND,
-            setupInlineScriptEnvironmentHandler(em, routing, (uri, version) =>
-                codeLens.provider.noteEnvironmentReady(uri, version),
-            ),
+            setupInlineScriptEnvironmentHandler(em, routing),
         ),
         commands.registerCommand(SETUP_INLINE_SCRIPT_ENVS_COMMAND, () =>
             setUpInlineScriptEnvironmentsInWorkspace(em, routing),

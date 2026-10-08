@@ -29,6 +29,7 @@ import type { PythonProjectManager } from '../../features/projectManager';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
+import { EnvironmentToolSupport, pythonToolSupport } from '../../internal/pythonToolSupport';
 import {
     clearPyenvCache,
     getPyenv,
@@ -77,6 +78,20 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
     }
 
     private _initialized: Deferred<void> | undefined;
+    private discovery: Deferred<void> | undefined;
+    private initializationError: unknown;
+    readonly [pythonToolSupport]: EnvironmentToolSupport = {
+        initialize: async () => {
+            await this.initializeDiscovery();
+            if (this.initializationError) {
+                throw this.initializationError;
+            }
+        },
+        get: (scope) => this.get(scope, true),
+        getEnvironments: (scope) => this.getEnvironments(scope, true),
+        resolve: (scope) => this.resolve(scope, true),
+    };
+
     async initialize(): Promise<void> {
         if (this._initialized) {
             return this._initialized.promise;
@@ -95,20 +110,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
                 toolSource = 'local';
             }
 
-            await withProgress(
-                {
-                    location: ProgressLocation.Window,
-                    title: PyenvStrings.pyenvDiscovering,
-                },
-                async () => {
-                    this.collection = (await refreshPyenv(false, this.nativeFinder, this.api, this)) ?? [];
-                    await this.loadEnvMap();
-
-                    this._onDidChangeEnvironments.fire(
-                        this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
-                    );
-                },
-            );
+            await this.initializeDiscovery();
 
             envCount = this.collection.length;
 
@@ -140,8 +142,34 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
         }
     }
 
-    async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
-        await this.initialize();
+    private async initializeDiscovery(): Promise<void> {
+        if (this.discovery) {
+            return this.discovery.promise;
+        }
+        const discovery = (this.discovery = createDeferred());
+        try {
+            await withProgress(
+                { location: ProgressLocation.Window, title: PyenvStrings.pyenvDiscovering },
+                async () => {
+                    this.collection = (await refreshPyenv(false, this.nativeFinder, this.api, this)) ?? [];
+                    await this.loadEnvMap();
+                    this.initializationError = undefined;
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((environment) => ({ environment, kind: EnvironmentChangeKind.add })),
+                    );
+                },
+            );
+        } catch (error) {
+            this.initializationError = error;
+            this.discovery = undefined;
+            throw error;
+        } finally {
+            discovery.resolve();
+        }
+    }
+
+    async getEnvironments(scope: GetEnvironmentsScope, toolExecution = false): Promise<PythonEnvironment[]> {
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (scope === 'all') {
             return Array.from(this.collection);
@@ -174,6 +202,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
                     this.collection = (await refreshPyenv(true, this.nativeFinder, this.api, this)) ?? [];
 
                     await this.loadEnvMap();
+                    this.initializationError = undefined;
 
                     const args = [
                         ...discard.map((env) => ({ kind: EnvironmentChangeKind.remove, environment: env })),
@@ -186,8 +215,8 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
         }
     }
 
-    async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        const fastResult = await tryFastPathGet({
+    async get(scope: GetEnvironmentScope, toolExecution = false): Promise<PythonEnvironment | undefined> {
+        const fastResult = toolExecution ? undefined : await tryFastPathGet({
             initialized: this._initialized,
             setInitialized: (deferred) => {
                 this._initialized = deferred;
@@ -197,23 +226,13 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
             getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getPyenvForWorkspace(fsPath),
             resolve: (p) => resolvePyenvPath(p, this.nativeFinder, this.api, this),
-            startBackgroundInit: () =>
-                withProgress({ location: ProgressLocation.Window, title: PyenvStrings.pyenvDiscovering }, async () => {
-                    this.collection = (await refreshPyenv(false, this.nativeFinder, this.api, this)) ?? [];
-                    await this.loadEnvMap();
-                    this._onDidChangeEnvironments.fire(
-                        this.collection.map((e) => ({
-                            environment: e,
-                            kind: EnvironmentChangeKind.add,
-                        })),
-                    );
-                }),
+            startBackgroundInit: () => this.initializeDiscovery(),
         });
         if (fastResult) {
             return fastResult.env;
         }
 
-        await this.initialize();
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
         if (scope instanceof Uri) {
             let env = this.fsPathToEnv.get(normalizePath(scope.fsPath));
             if (env) {
@@ -280,8 +299,8 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
         }
     }
 
-    async resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
-        await this.initialize();
+    async resolve(context: ResolveEnvironmentContext, toolExecution = false): Promise<PythonEnvironment | undefined> {
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (context instanceof Uri) {
             const env = await resolvePyenvPath(context.fsPath, this.nativeFinder, this.api, this);

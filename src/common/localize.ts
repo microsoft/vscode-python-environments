@@ -31,6 +31,15 @@ export namespace InlineScriptStrings {
     export const saveFailedBeforeSetup = l10n.t(
         'Could not save this script, so its environment was not set up. Save the file and try again.',
     );
+    export const invalidMetadataBeforeSetup = l10n.t(
+        "Fix the '# /// script' metadata before setting up this script's environment. Check the block markers, TOML, and declared dependencies.",
+    );
+    export const invalidPythonRequirement = l10n.t(
+        "The script's 'requires-python' must be a valid Python version specifier, for example '>=3.11'.",
+    );
+    export const scriptReadFailedBeforeSetup = l10n.t(
+        'Could not read this script, so its environment was not set up. Make sure the file is available and try again.',
+    );
 
     export const updatePythonExtension = l10n.t(
         'The environment for this script was created. Update the Python extension for the full inline script experience.',

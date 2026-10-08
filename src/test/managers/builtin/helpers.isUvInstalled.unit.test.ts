@@ -1,7 +1,7 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { LogOutputChannel, Uri, WorkspaceFolder } from 'vscode';
+import { CancellationError, CancellationTokenSource, LogOutputChannel, Uri, WorkspaceFolder } from 'vscode';
 import * as childProcessApis from '../../../common/childProcess.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import { EventNames } from '../../../common/telemetry/constants';
@@ -293,6 +293,41 @@ suite('Helpers - isUvInstalled', () => {
         assert.strictEqual(await result, undefined);
         sinon.assert.notCalled(getWorkspaceFolder);
         sinon.assert.calledOnce(spawnStub);
+    });
+
+    test('does not probe uv for a pre-cancelled tool request', async () => {
+        const source = new CancellationTokenSource();
+        try {
+            source.cancel();
+            await assert.rejects(getUvExecutable(mockLog, process.cwd(), source.token), CancellationError);
+            sinon.assert.notCalled(spawnStub);
+        } finally {
+            source.dispose();
+        }
+    });
+
+    test('cancels a tool request while waiting for the workspace uv probe', async () => {
+        const root = Uri.file(path.join(process.cwd(), 'project'));
+        const executable = path.join(root.fsPath, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').returns({ name: 'project', uri: root, index: 0 });
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        const localProc = new MockChildProcess(executable, ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+        spawnStub.withArgs(executable, ['--version']).returns(localProc);
+        const source = new CancellationTokenSource();
+        try {
+            const result = getUvExecutable(mockLog, root.fsPath, source.token);
+            const rejected = assert.rejects(result, CancellationError);
+            globalProc.emit('error', new Error('ENOENT'));
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            sinon.assert.calledWith(spawnStub, executable, ['--version']);
+            source.cancel();
+            await rejected;
+            localProc.emit('exit', 0, null);
+        } finally {
+            source.dispose();
+        }
     });
 
     test('prefers uv on PATH without looking up a workspace executable', async () => {
