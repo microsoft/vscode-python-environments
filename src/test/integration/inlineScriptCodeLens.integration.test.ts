@@ -61,7 +61,12 @@ inlineScriptCodeLensSuite('Integration: Live inline script CodeLens', function (
     });
 
     suiteTeardown(async () => {
-        await fs.rm(root, { recursive: true, force: true });
+        await fs.rm(root, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 100,
+        });
     });
 
     async function lenses(): Promise<vscode.CodeLens[]> {
