@@ -15,7 +15,9 @@ import { sleep, waitForCondition } from '../testUtils';
 const SETUP_COMMAND = 'python-envs.test.inlineScriptLensSetup';
 const SCRIPT = '# /// script\n# dependencies = []\n# ///\n\nprint("hello")\n';
 
-suite('Integration: Live inline script CodeLens', function () {
+// TODO: Re-enable on Windows after https://github.com/microsoft/vscode-python-environments/issues/1911.
+const inlineScriptCodeLensSuite = process.platform === 'win32' ? suite.skip : suite;
+inlineScriptCodeLensSuite('Integration: Live inline script CodeLens', function () {
     this.timeout(30_000);
 
     let root: string;
@@ -59,7 +61,12 @@ suite('Integration: Live inline script CodeLens', function () {
     });
 
     suiteTeardown(async () => {
-        await fs.rm(root, { recursive: true, force: true });
+        await fs.rm(root, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 100,
+        });
     });
 
     async function lenses(): Promise<vscode.CodeLens[]> {
