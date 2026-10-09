@@ -254,8 +254,7 @@ export class PipenvManager implements EnvironmentManager, Disposable {
         }
 
         if (scope === 'global') {
-            // Return all environments for global scope
-            return Array.from(this.collection);
+            return [];
         }
 
         if (scope instanceof Uri) {

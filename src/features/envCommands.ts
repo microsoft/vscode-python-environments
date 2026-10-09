@@ -1,12 +1,12 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import {
+    Memento,
     ProgressLocation,
     QuickInputButtons,
     TaskExecution,
     TaskRevealKind,
     Terminal,
-    Memento,
     Uri,
     l10n,
     workspace,
@@ -21,24 +21,23 @@ import {
     PythonProjectCreatorOptions,
     isPackageVersionLookupNotSupportedError,
 } from '../api';
+import {
+    InlineScriptEnvironmentModifiedError,
+    InlineScriptPackagesNotManagedError,
+} from '../common/inlineScript/errors';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
-import { InlineScriptEnvironmentModifiedError, InlineScriptPackagesNotManagedError } from '../common/inlineScript/errors';
 import * as persistentState from '../common/persistentState';
+import type { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
+import { normalizePackageName } from '../managers/common/packageUtils';
 import type { ProjectCreators } from './creators/projectCreators';
 import type { EnvironmentManagers } from './envManagers';
+import { selectPackageManagementEnvironment } from './nonGlobalPackageInstallationEnvironment';
 import type { PythonProjectManager } from './projectManager';
-import type {
-    InternalEnvironmentManager,
-    InternalPackageManager,
-} from '../managers/common/registeredManagers';
-import {
-    removePythonProjectSetting,
-    setEnvironmentManager,
-    setPackageManager,
-} from './settings/settingHelpers';
+import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
 import { valid as pep440Valid } from '@renovatebot/pep440';
 import { executeCommand } from '../common/command.api';
+import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { clipboardWriteText } from '../common/env.apis';
 import { Pickers } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
@@ -62,7 +61,6 @@ import {
     showWarningMessage,
     withProgress,
 } from '../common/window.apis';
-import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import * as shellProviders from './terminal/shells/providers';
@@ -311,11 +309,11 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
     } else if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
         const inlineScript = view.environment.envId.managerId === INLINE_SCRIPT_MANAGER_ID;
-        const manager = managers.getEnvironmentManager(
-            inlineScript ? view.environment : view.parent.project.uri,
-        );
+        const manager = managers.getEnvironmentManager(inlineScript ? view.environment : view.parent.project.uri);
         if (inlineScript && !manager) {
-            throw new Error(l10n.t('The inline-script environment manager is not available to delete this environment.'));
+            throw new Error(
+                l10n.t('The inline-script environment manager is not available to delete this environment.'),
+            );
         }
         await manager?.remove(view.environment);
     } else {
@@ -351,13 +349,35 @@ export async function handlePackageUninstall(context: unknown) {
  * Manages package versions by allowing the user to select from available versions or enter a specific version.
  * If available versions can be fetched, a QuickPick is shown. Otherwise, an InputBox is used for free-text version entry.
  */
-export async function managePackageVersion(context: unknown) {
+export async function managePackageVersion(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const pkg = context.pkg;
-        const environment = context.parent.environment;
-        const packageManager = context.manager;
+        const originalEnvironment = context.parent.environment;
+        const environment = await selectPackageManagementEnvironment(em, originalEnvironment, {
+            install: [pkg.name],
+        });
+        if (!environment) {
+            return;
+        }
+        const isOriginalEnvironment =
+            environment.envId.managerId === originalEnvironment.envId.managerId &&
+            environment.envId.id === originalEnvironment.envId.id;
+        const packageManager = isOriginalEnvironment ? context.manager : em.getPackageManager(environment);
+        if (!packageManager) {
+            throw new Error(l10n.t('No package manager found for the selected environment.'));
+        }
 
-        if (pkg.isTransitive) {
+        let selectedPackage = isOriginalEnvironment ? pkg : undefined;
+        if (!isOriginalEnvironment) {
+            await packageManager.refresh(environment);
+            const packages = await packageManager.getPackages(environment);
+            const normalizedPackageName = normalizePackageName(pkg.name);
+            selectedPackage = packages?.find(
+                (candidate) => normalizePackageName(candidate.name) === normalizedPackageName,
+            );
+        }
+
+        if (selectedPackage?.isTransitive) {
             const confirm = await showInformationMessage(
                 l10n.t(
                     'The package "{0}" is a transitive dependency. Changing its version may cause unexpected behavior in packages that depend on it.',
@@ -380,7 +400,10 @@ export async function managePackageVersion(context: unknown) {
         let availableVersions: Pep440Version[] | undefined;
         try {
             availableVersions = await withProgress(
-                { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
+                {
+                    location: ProgressLocation.Window,
+                    title: l10n.t('Fetching available versions for {0}...', pkg.name),
+                },
                 () => packageManager.getPackageAvailableVersions(environment, pkg.name, { errorMode: 'throw' }),
             );
         } catch (error) {
@@ -392,7 +415,8 @@ export async function managePackageVersion(context: unknown) {
         if (availableVersions && availableVersions.length > 0) {
             const items = availableVersions.map((v) => ({
                 label: v.public,
-                description: v.public === pkg.version ? `$(check) ${l10n.t('Installed')}` : undefined,
+                description:
+                    v.public === selectedPackage?.version ? `$(check) ${l10n.t('Installed')}` : undefined,
             }));
 
             const selected = await showQuickPick(items, {
@@ -405,7 +429,7 @@ export async function managePackageVersion(context: unknown) {
             const inputVersion = await showInputBox({
                 title: l10n.t('Manage Package Version'),
                 prompt: l10n.t('Enter the version for {0}', pkg.name),
-                value: pkg.version,
+                value: selectedPackage?.version,
                 placeHolder: l10n.t('e.g. 1.2.3'),
                 validateInput: (value) => {
                     const trimmedValue = value.trim();
@@ -421,7 +445,7 @@ export async function managePackageVersion(context: unknown) {
             version = inputVersion?.trim();
         }
 
-        if (version === undefined || version === pkg.version) {
+        if (version === undefined || version === selectedPackage?.version) {
             return;
         }
 
@@ -717,13 +741,13 @@ export async function clearEnvironmentCachesCommand(
     await shellProviders.clearShellProfileCache(startupProviders);
 }
 
-export async function clearScriptEnvironmentCacheCommand(
-    em: EnvironmentManagers,
-): Promise<void> {
+export async function clearScriptEnvironmentCacheCommand(em: EnvironmentManagers): Promise<void> {
     const manager = em.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID);
     if (!manager || !manager.supportsClearCache()) {
         throw new Error(
-            l10n.t('Inline-script environment cache is unavailable because the inline-script manager is not registered.'),
+            l10n.t(
+                'Inline-script environment cache is unavailable because the inline-script manager is not registered.',
+            ),
         );
     }
 

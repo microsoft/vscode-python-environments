@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
 import { Memento, Terminal, Uri } from 'vscode';
-import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
+import { Package, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
 import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import * as persistentState from '../../common/persistentState';
@@ -15,12 +15,14 @@ import {
     clearScriptEnvironmentCacheCommand,
     createAnyEnvironmentCommand,
     handlePackageUninstall,
+    managePackageVersion,
     removeEnvironmentCommand,
     removePythonProject,
     revealEnvInManagerView,
     runInDedicatedTerminalCommand,
     runInTerminalCommand,
 } from '../../features/envCommands';
+import * as nonGlobalPackageInstallationEnvironment from '../../features/nonGlobalPackageInstallationEnvironment';
 import * as settingHelpers from '../../features/settings/settingHelpers';
 import * as terminalRunner from '../../features/terminal/runInTerminal';
 import * as shellProviders from '../../features/terminal/shells/providers';
@@ -648,6 +650,10 @@ suite('Run In Terminal Command Tests', () => {
 });
 
 suite('Package command manager ownership', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
     test('uninstalls with the manager attached to the package item', async () => {
         const environment = createMockPythonEnvironment({
             envPath: path.join(process.cwd(), 'package-environment'),
@@ -678,5 +684,71 @@ suite('Package command manager ownership', () => {
         await handlePackageUninstall(packageItem);
 
         assert.ok(manage.calledOnceWithExactly(environment, { uninstall: ['requests'], install: [] }));
+    });
+
+    test('refreshes and uses package metadata from a newly selected environment', async () => {
+        const originalEnvironment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), 'global-package-environment'),
+            managerId: 'test:global-environment-manager',
+        });
+        const selectedEnvironment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), 'selected-package-environment'),
+            managerId: 'test:selected-environment-manager',
+        });
+        const originalPackage: Package = {
+            name: 'My_Package',
+            displayName: 'My Package',
+            version: '1.0',
+            isTransitive: true,
+            pkgId: {
+                id: 'my-package',
+                managerId: 'test:original-package-manager',
+                environmentId: originalEnvironment.envId.id,
+            },
+        };
+        const selectedPackage: Package = {
+            ...originalPackage,
+            name: 'my-package',
+            version: '2.0',
+            isTransitive: false,
+            pkgId: {
+                ...originalPackage.pkgId,
+                managerId: 'test:selected-package-manager',
+                environmentId: selectedEnvironment.envId.id,
+            },
+        };
+        const refresh = sinon.stub().resolves();
+        const getPackages = sinon.stub().resolves([selectedPackage]);
+        const getPackageAvailableVersions = sinon.stub().resolves(undefined);
+        const manage = sinon.stub().resolves();
+        const selectedManager = {
+            refresh,
+            getPackages,
+            getPackageAvailableVersions,
+            formatInstallSpec: sinon.stub().callsFake((name: string, version: string) => `${name}==${version}`),
+            manage,
+        } as unknown as InternalPackageManager;
+        const originalManager = {} as InternalPackageManager;
+        const environmentItem = { environment: originalEnvironment } as PythonEnvTreeItem;
+        const packageItem = new PackageTreeItem(originalPackage, environmentItem, originalManager);
+        const envManagers = {
+            getPackageManager: sinon.stub().withArgs(selectedEnvironment).returns(selectedManager),
+        } as unknown as EnvironmentManagers;
+        sinon
+            .stub(nonGlobalPackageInstallationEnvironment, 'selectPackageManagementEnvironment')
+            .resolves(selectedEnvironment);
+        const showInformationMessage = sinon.stub(windowApis, 'showInformationMessage').resolves(undefined);
+        const showInputBox = sinon.stub(windowApis, 'showInputBox').resolves(undefined);
+
+        await managePackageVersion(packageItem, envManagers);
+
+        sinon.assert.calledOnceWithExactly(refresh, selectedEnvironment);
+        sinon.assert.calledOnceWithExactly(getPackages, selectedEnvironment);
+        sinon.assert.notCalled(showInformationMessage);
+        sinon.assert.calledOnce(showInputBox);
+        const inputOptions = showInputBox.firstCall.args[0];
+        assert.ok(inputOptions);
+        assert.strictEqual(inputOptions.value, '2.0');
+        sinon.assert.notCalled(manage);
     });
 });

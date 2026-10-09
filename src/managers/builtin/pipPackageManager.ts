@@ -92,6 +92,10 @@ export class PipPackageManager implements PackageManager, Disposable {
         scope?: Uri,
     ): Promise<void> {
         throwIfCancelled(toolToken);
+        if (PythonVersion.tryParse(environment.version)?.major === 2) {
+            throw new Error('Python 2.* is not supported (deprecated)');
+        }
+
         let toInstall: string[] = [...(options.install ?? [])];
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
@@ -107,10 +111,6 @@ export class PipPackageManager implements PackageManager, Disposable {
             } else {
                 return;
             }
-        }
-
-        if (PythonVersion.tryParse(environment.version)?.major === 2) {
-            throw new Error('Python 2.* is not supported (deprecated)');
         }
 
         const execute = async (token?: CancellationToken): Promise<void> => {
@@ -293,10 +293,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async getPackageAvailableVersions(
-        environment: PythonEnvironment,
-        packageName: string,
-    ): Promise<Pep440Version[]> {
+    async getPackageAvailableVersions(environment: PythonEnvironment, packageName: string): Promise<Pep440Version[]> {
         const pythonExecutable = environment.execInfo?.run?.executable;
         if (!pythonExecutable) {
             throw new Error(`Python executable is unavailable for environment: ${environment.envId.id}`);
