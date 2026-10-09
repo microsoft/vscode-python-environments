@@ -34,7 +34,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
-import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability, supportedCapability } from '../../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability } from '../../../capabilities';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -313,9 +313,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 ? { supported: true }
                 : { supported: false, reason: l10n.t('The script must contain valid PEP 723 metadata.') };
         },
-        // Inline creation has a quick path even though it has no quickCreateConfig UI hook.
-        'environments.create.quick': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.create', context),
     };
 
     private readonly pendingSetups = new Map<string, Promise<PythonEnvironment | undefined>>();

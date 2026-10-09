@@ -28,7 +28,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentManagerCapability, resolveEnvironmentManagerCapability, supportedCapability } from '../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability } from '../../capabilities';
 import { CondaStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -74,8 +74,6 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         ...requiredEnvironmentCapabilities,
         'environments.create': supportedCapability,
-        'environments.create.quick': async (context) =>
-            resolveEnvironmentManagerCapability(this, 'environments.create', context),
         'environments.remove': supportedCapability,
     };
 

@@ -1922,8 +1922,8 @@ Guidance for authoring checks:
   explains why, instead of omitting the key.
 - Keep checks read-only and noninteractive. Do not invoke the operation to test
   it. Let unexpected probe errors reject.
-- When one check depends on another (for example `create.quick` depending on
-  `create`), call `resolveEnvironmentManagerCapability` or
+- When one check depends on another (for example `packages.manage.install`
+  depending on `packages.manage`), call `resolveEnvironmentManagerCapability` or
   `resolvePackageManagerCapability` explicitly from within that key's check and
   forward the received context unchanged. This delegation is a per-manager
   choice, not an automatic cascade. There is no cycle protection: a manager
