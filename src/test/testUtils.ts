@@ -10,6 +10,25 @@
 
 import type { Disposable, Event } from 'vscode';
 
+const DIALOG_SERVICE_TEST_ERROR = 'DialogService: refused to show dialog in tests';
+
+/**
+ * Runs an interactive test operation, treating VS Code's blocked test dialog as user cancellation.
+ *
+ * @param operation The operation that may attempt to show a dialog.
+ * @returns The operation result, or undefined when the test host blocks a dialog.
+ */
+export async function runWithBlockedDialogsAsCancellation<T>(operation: () => Promise<T>): Promise<T | undefined> {
+    try {
+        return await operation();
+    } catch (error) {
+        if (String(error).includes(DIALOG_SERVICE_TEST_ERROR)) {
+            return undefined;
+        }
+        throw error;
+    }
+}
+
 /**
  * Sleep for a specified number of milliseconds.
  * Use sparingly - prefer waitForCondition() for most cases.
