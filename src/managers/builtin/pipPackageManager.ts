@@ -58,7 +58,14 @@ export class PipPackageManager implements PackageManager, Disposable {
         'packages.manage.install': supportedCapability,
         'packages.manage.uninstall': supportedCapability,
         'packages.manage.upgrade': supportedCapability,
-        'packages.availableVersions': supportedCapability,
+        'packages.availableVersions': async ({ environment }) => {
+            try {
+                await this.getPackageAvailableVersionsCommand(environment!);
+            } catch (error) {
+                return { supported: false, reason: (error as Error).message };
+            }
+            return await supportedCapability({ environment });
+        },
         // Dependency roots are best-effort classification, not exact user install intent.
         'packages.direct': supportedCapability,
     };
