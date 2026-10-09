@@ -5,9 +5,16 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { ConfigurationChangeEvent, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
-import { PythonEnvironment, PythonEnvironmentApi, PythonProject, SetEnvironmentScope } from '../../api';
+import {
+    EnvironmentManager,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonProject,
+    SetEnvironmentScope,
+} from '../../api';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
+import * as frameUtils from '../../common/utils/frameUtils';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
@@ -16,7 +23,7 @@ import {
     resolveGlobalEnvironmentByPriority,
 } from '../../features/interpreterSelection';
 import * as helpers from '../../helpers';
-import type { EnvironmentManagers } from '../../features/envManagers';
+import { EnvironmentManagers, PythonEnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
@@ -551,6 +558,12 @@ suite('Interpreter Selection - Priority Chain', () => {
                 Uri.file(userPyenvPath).fsPath,
                 'environmentPath should use user configured path',
             );
+            assert.strictEqual(
+                result.environment.displayName,
+                homebrewEnv.displayName,
+                'displayName should match the resolved environment',
+            );
+            assert.strictEqual(result.environment.name, homebrewEnv.name, 'name should match the resolved environment');
         });
     });
 
@@ -791,6 +804,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         assert.ok(mockEnvManagers.setEnvironment.called);
         const callArgs = mockEnvManagers.setEnvironment.firstCall.args;
         assert.strictEqual(callArgs[2], false, 'shouldPersistSettings should be false');
+        assert.deepStrictEqual(callArgs[3], { explicit: false }, 'auto-discovery is not an explicit selection');
     });
 
     test('should process all workspace folders', async () => {
@@ -831,6 +845,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         const callArgs = mockEnvManagers.setEnvironments.firstCall.args;
         assert.strictEqual(callArgs[0], 'global', 'First arg should be "global"');
         assert.strictEqual(callArgs[2], false, 'shouldPersistSettings should be false');
+        assert.deepStrictEqual(callArgs[3], { explicit: false }, 'auto-discovery is not an explicit selection');
     });
 
     test('should not show warning when defaultInterpreterPath with ${workspaceFolder} is used in workspace scope (issue #1316)', async () => {
@@ -881,6 +896,11 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
 
         // The workspace folder should be set successfully
         assert.ok(mockEnvManagers.setEnvironment.called, 'setEnvironment should be called for workspace folder');
+        assert.deepStrictEqual(
+            mockEnvManagers.setEnvironment.firstCall.args[3],
+            { explicit: true },
+            'an interpreter from defaultInterpreterPath is an explicit selection',
+        );
 
         // No warning should be shown — the global chain should silently skip ${workspaceFolder}
         assert.ok(
@@ -1021,6 +1041,162 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
 
         // Should show a warning about the unregistered manager
         assert.ok(showWarnStub.called, 'showWarningMessage should be called for unregistered defaultEnvManager');
+    });
+
+    function createEnvironmentManagersForSelectionTest(
+        projectManager: PythonProjectManager,
+        venvEnvironment: PythonEnvironment,
+        systemEnvironment: PythonEnvironment,
+    ): {
+        envManagers: PythonEnvironmentManagers;
+        setSystemEnvironment(environment: PythonEnvironment): void;
+    } {
+        sandbox.stub(frameUtils, 'getCallingExtension').returns('ms-python.python');
+        const envManagers = new PythonEnvironmentManagers(projectManager);
+        let currentSystemEnvironment = systemEnvironment;
+
+        const registerManager = (
+            name: string,
+            get: (scope: Uri | undefined) => Promise<PythonEnvironment | undefined>,
+            set: (scope: Uri | undefined, environment?: PythonEnvironment) => Promise<void>,
+        ) => {
+            envManagers.registerEnvironmentManager(
+                {
+                    name,
+                    displayName: name,
+                    preferredPackageManagerId: 'ms-python.python:pip',
+                    get,
+                    set,
+                    resolve: sandbox.stub().resolves(undefined),
+                    refresh: sandbox.stub().resolves(),
+                    getEnvironments: sandbox.stub().resolves([]),
+                    onDidChangeEnvironments: sandbox.stub().returns({ dispose: () => {} }),
+                    onDidChangeEnvironment: sandbox.stub().returns({ dispose: () => {} }),
+                } as unknown as EnvironmentManager,
+                { extensionId: 'ms-python.python' },
+            );
+        };
+
+        registerManager('venv', async () => venvEnvironment, async () => {});
+        registerManager(
+            'system',
+            async () => currentSystemEnvironment,
+            async (_scope, environment) => {
+                currentSystemEnvironment = environment ?? currentSystemEnvironment;
+            },
+        );
+
+        return {
+            envManagers,
+            setSystemEnvironment: (environment) => {
+                currentSystemEnvironment = environment;
+            },
+        };
+    }
+
+    function makeSystemEnvironment(id: string): PythonEnvironment {
+        return {
+            ...mockVenvEnv,
+            envId: { id, managerId: 'ms-python.python:system' },
+            name: 'System Python',
+            displayName: 'System Python',
+        };
+    }
+
+    test('keeps an environment chosen by defaultEnvManager when routing returns to venv', async () => {
+        const project = { uri: testUri, name: 'test' } as PythonProject;
+        const projectManager = {
+            get: () => project,
+            getProjects: () => [project],
+        } as unknown as PythonProjectManager;
+        const configuredEnvironment = makeSystemEnvironment('configured-system-env');
+        const venvFallback = makeSystemEnvironment('newest-system-env');
+        const selection = createEnvironmentManagersForSelectionTest(
+            projectManager,
+            venvFallback,
+            configuredEnvironment,
+        );
+        let configuredManager: string | undefined = 'ms-python.python:system';
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns({
+            get: (key: string) => {
+                if (key === 'defaultEnvManager') {
+                    return 'ms-python.python:venv';
+                }
+                return key === 'pythonProjects' ? [] : undefined;
+            },
+        } as WorkspaceConfiguration);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+            if (section === 'python-envs' && key === 'defaultEnvManager') {
+                return configuredManager;
+            }
+            return undefined;
+        });
+
+        try {
+            await applyInitialEnvironmentSelection(
+                selection.envManagers,
+                projectManager,
+                mockNativeFinder as unknown as NativePythonFinder,
+                mockApi as unknown as PythonEnvironmentApi,
+            );
+            configuredManager = undefined;
+
+            assert.strictEqual(
+                (await selection.envManagers.getEnvironment(testUri))?.envId.id,
+                configuredEnvironment.envId.id,
+            );
+        } finally {
+            selection.envManagers.dispose();
+        }
+    });
+
+    test("does not retain a configured manager's fallback as an explicit selection", async () => {
+        const project = { uri: testUri, name: 'test' } as PythonProject;
+        const projectManager = {
+            get: () => project,
+            getProjects: () => [project],
+        } as unknown as PythonProjectManager;
+        const initialSystemEnvironment = makeSystemEnvironment('initial-system-env');
+        const venvFallback = makeSystemEnvironment('venv-fallback');
+        const laterSystemEnvironment = makeSystemEnvironment('later-system-env');
+        const selection = createEnvironmentManagersForSelectionTest(
+            projectManager,
+            venvFallback,
+            initialSystemEnvironment,
+        );
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns({
+            get: (key: string) => {
+                if (key === 'defaultEnvManager') {
+                    return 'ms-python.python:venv';
+                }
+                return key === 'pythonProjects' ? [] : undefined;
+            },
+        } as WorkspaceConfiguration);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+            if (section === 'python-envs' && key === 'defaultEnvManager') {
+                return 'ms-python.python:venv';
+            }
+            return undefined;
+        });
+
+        try {
+            await applyInitialEnvironmentSelection(
+                selection.envManagers,
+                projectManager,
+                mockNativeFinder as unknown as NativePythonFinder,
+                mockApi as unknown as PythonEnvironmentApi,
+            );
+            selection.setSystemEnvironment(laterSystemEnvironment);
+
+            assert.strictEqual(
+                (await selection.envManagers.getEnvironment(testUri))?.envId.id,
+                venvFallback.envId.id,
+            );
+        } finally {
+            selection.envManagers.dispose();
+        }
     });
 
     test('should handle global scope errors when deferred to background', async () => {
@@ -1593,6 +1769,56 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
         );
 
         disposable.dispose();
+    });
+
+    suite('global scope', () => {
+        let configChangeCallback: ((e: ConfigurationChangeEvent) => Promise<void>) | undefined;
+        let disposable: { dispose(): void };
+
+        setup(() => {
+            sandbox.stub(workspaceApis, 'onDidChangeConfiguration').callsFake((callback) => {
+                configChangeCallback = callback as (e: ConfigurationChangeEvent) => Promise<void>;
+                return { dispose: () => {} };
+            });
+            // No workspace folders: the global scope is resolved before the listener returns.
+            sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([]);
+            sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+            sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
+            disposable = registerInterpreterSettingsChangeListener(
+                mockEnvManagers as unknown as EnvironmentManagers,
+                mockProjectManager as unknown as PythonProjectManager,
+                mockNativeFinder as unknown as NativePythonFinder,
+                mockApi as unknown as PythonEnvironmentApi,
+            );
+        });
+
+        teardown(() => {
+            disposable.dispose();
+        });
+
+        test('is kept when only python-envs.pythonProjects changes', async () => {
+            await configChangeCallback!({
+                affectsConfiguration: (section: string) => section === 'python-envs.pythonProjects',
+            });
+
+            assert.ok(mockEnvManagers.setEnvironments.notCalled);
+        });
+
+        test('is resolved again when python.defaultInterpreterPath changes', async () => {
+            await configChangeCallback!({
+                affectsConfiguration: (section: string) => section === 'python.defaultInterpreterPath',
+            });
+
+            assert.ok(mockEnvManagers.setEnvironments.calledWith('global'));
+        });
+
+        test('is resolved again when python-envs.defaultEnvManager changes', async () => {
+            await configChangeCallback!({
+                affectsConfiguration: (section: string) => section === 'python-envs.defaultEnvManager',
+            });
+
+            assert.ok(mockEnvManagers.setEnvironments.calledWith('global'));
+        });
     });
 
     test('should re-run priority chain when python-envs.defaultEnvManager changes', async () => {
