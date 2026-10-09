@@ -240,6 +240,7 @@ suite('InlineScriptEnvManager', () => {
                     renameFilesListener = undefined;
                 });
             });
+        sinon.stub(workspaceApis, 'onDidChangeTextDocument').returns(new Disposable(() => undefined));
         openDocumentsStub = sinon.stub(workspaceApis, 'getOpenTextDocuments').returns([]);
         createWithProgressStub = sinon.stub(venvUtils, 'createWithProgress').callsFake(async (...args: unknown[]) => {
             const envDir = args[6] as string;
