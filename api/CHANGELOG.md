@@ -5,6 +5,12 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0]
+
+### Added
+
+- Added optional `EnvironmentManager.getVersion?(): Promise<Pep440Version | undefined>` support for retrieving the version of the underlying environment management tool. Built-in implementations are provided for Conda, Poetry, Pipenv, and Pyenv.
+
 ## [1.5.0]
 
 ### Added
