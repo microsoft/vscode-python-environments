@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import * as fs from 'fs-extra';
 import * as path from 'path';
 import { commands, ConfigurationChangeEvent, Disposable, l10n, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../api';
@@ -11,6 +12,7 @@ import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { resolveVariables } from '../common/utils/internalVariables';
 import { normalizePath } from '../common/utils/pathUtils';
+import { isWindows } from '../common/utils/platformUtils';
 import { showWarningMessage } from '../common/window.apis';
 import {
     getConfiguration,
@@ -26,6 +28,12 @@ import type {
 } from './projectManager';
 import type { InternalEnvironmentManager } from '../managers/common/registeredManagers';
 import { NativeEnvInfo, NativePythonFinder } from '../managers/common/nativePythonFinder';
+
+/**
+ * The default value of `python.defaultInterpreterPath`. Like the Python extension, treat it as "not
+ * configured" so auto-discovery (which prefers a workspace venv) picks the interpreter.
+ */
+const DEFAULT_INTERPRETER_PATH_SETTING = 'python';
 
 /**
  * Result from the priority chain resolution.
@@ -109,7 +117,11 @@ async function resolvePriorityChainCore(
 
     // PRIORITY 3: User-configured python.defaultInterpreterPath
     const userInterpreterPath = getUserConfiguredSetting<string>('python', 'defaultInterpreterPath', scope);
-    if (userInterpreterPath) {
+    if (userInterpreterPath === DEFAULT_INTERPRETER_PATH_SETTING) {
+        traceVerbose(
+            `${logPrefix} defaultInterpreterPath is the default '${userInterpreterPath}', using auto-discovery`,
+        );
+    } else if (userInterpreterPath) {
         const expandedInterpreterPath = resolveVariables(userInterpreterPath, scope);
         if (expandedInterpreterPath.includes('${')) {
             if (scope) {
@@ -135,7 +147,7 @@ async function resolvePriorityChainCore(
             // Resolve relative paths against the workspace folder so the native finder doesn't
             // resolve them against an unrelated current working directory (which can produce a
             // malformed, duplicated path such as <workspace>/<workspace-name>/.venv/...).
-            const absoluteInterpreterPath = toAbsoluteInterpreterPath(expandedInterpreterPath, scope);
+            const absoluteInterpreterPath = await toAbsoluteInterpreterPath(expandedInterpreterPath, scope);
             const resolved = await tryResolveInterpreterPath(nativeFinder, api, absoluteInterpreterPath, envManagers);
             if (resolved) {
                 traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
@@ -534,22 +546,75 @@ function getProjectSpecificEnvManager(projectManager: PythonProjectManager, scop
 /**
  * Resolve a (variable-expanded) interpreter path to an absolute path.
  *
- * `python.defaultInterpreterPath` may be configured as a relative path (e.g. `.venv/bin/python`).
- * The native finder resolves relative paths against its own working directory, which is unrelated
- * to the workspace and can produce malformed paths (including a duplicated workspace segment).
- * To avoid this, relative paths are resolved against the workspace folder identified by the scope.
- * Global relative paths are left unchanged because there is no workspace context to resolve against.
+ * A bare command name such as `python3` refers to the interpreter found on `PATH`, as in a terminal.
+ * Other relative paths (e.g. `.venv/bin/python`) are resolved against the workspace folder
+ * identified by the scope, because the native finder would resolve them against its own,
+ * unrelated working directory and can produce malformed paths (including a duplicated
+ * workspace segment). Global relative paths are left unchanged because there is no workspace
+ * context to resolve against.
  *
  * @param interpreterPath - The interpreter path after variable substitution.
  * @param scope - The workspace folder URI, or undefined for global scope.
  * @returns An absolute interpreter path when possible, otherwise the input unchanged.
  */
-function toAbsoluteInterpreterPath(interpreterPath: string, scope: Uri | undefined): string {
-    if (path.isAbsolute(interpreterPath) || !scope) {
+async function toAbsoluteInterpreterPath(interpreterPath: string, scope: Uri | undefined): Promise<string> {
+    if (path.isAbsolute(interpreterPath)) {
+        return interpreterPath;
+    }
+    if (!/[\\/]/.test(interpreterPath)) {
+        const onPath = await findCommandOnPath(interpreterPath);
+        if (onPath) {
+            return onPath;
+        }
+    }
+    if (!scope) {
         return interpreterPath;
     }
     const workspaceFolder = getWorkspaceFolder(scope);
     return path.resolve(workspaceFolder?.uri.fsPath ?? scope.fsPath, interpreterPath);
+}
+
+/**
+ * Finds an executable on `PATH` and returns its absolute path.
+ *
+ * On Windows only `.com` and `.exe` files are considered, as when a process is started without a
+ * shell; batch-file shims cannot be launched that way. Unlike `which`, this accepts Windows App
+ * Execution Aliases (the `python.exe` that the Microsoft Store and the Python install manager place
+ * in `WindowsApps`), which exist but cannot be `stat`ed. Relative `PATH` entries are skipped because
+ * they would resolve against the extension host's working directory.
+ */
+async function findCommandOnPath(command: string): Promise<string | undefined> {
+    const extensions = isWindows() ? ['.com', '.exe'] : [''];
+    const names =
+        isWindows() && extensions.some((ext) => command.toLowerCase().endsWith(ext))
+            ? [command]
+            : extensions.map((ext) => command + ext);
+    for (const entry of (process.env.PATH ?? '').split(path.delimiter)) {
+        const dir = entry.replace(/^"(.*)"$/, '$1');
+        if (!dir || !path.isAbsolute(dir)) {
+            continue;
+        }
+        for (const name of names) {
+            const candidate = path.join(dir, name);
+            if (await isCommandFile(candidate)) {
+                return candidate;
+            }
+        }
+    }
+    return undefined;
+}
+
+async function isCommandFile(candidate: string): Promise<boolean> {
+    try {
+        if (isWindows()) {
+            await fs.access(candidate, fs.constants.F_OK);
+            return true;
+        }
+        await fs.access(candidate, fs.constants.X_OK);
+        return (await fs.stat(candidate)).isFile();
+    } catch {
+        return false;
+    }
 }
 
 /**
