@@ -4,6 +4,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import * as assert from 'assert';
+import { explain as parsePep440Version } from '@renovatebot/pep440';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
@@ -76,11 +77,16 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     /**
      * Registers a fake environment manager that returns predefined environments.
      */
-    function registerFakeManager(managerId: string, getStub: sinon.SinonStub): void {
+    function registerFakeManager(
+        managerId: string,
+        getStub: sinon.SinonStub,
+        getVersion?: sinon.SinonStub,
+    ): void {
         const fakeManager = {
             name: managerId.split(':')[1],
             displayName: managerId,
             preferredPackageManagerId: 'ms-python.python:pip',
+            getVersion,
             get: getStub,
             set: sandbox.stub().resolves(),
             resolve: sandbox.stub().resolves(undefined),
@@ -143,6 +149,25 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
         const result = await envManagers.getEnvironment(undefined);
         assert.strictEqual(result?.envId.id, 'system-311');
         assert.ok(getStub.calledOnce, 'Should delegate to manager.get()');
+    });
+
+    test('should delegate getVersion to the registered manager', async () => {
+        const version = parsePep440Version('1.2.3');
+        const getVersion = sandbox.stub().resolves(version);
+        registerFakeManager('ms-python.python:system', sandbox.stub().resolves(env311), getVersion);
+
+        const result = await envManagers.getEnvironmentManager('ms-python.python:system')?.getVersion();
+
+        assert.deepStrictEqual(result, version);
+        assert.ok(getVersion.calledOnce, 'Should delegate to manager.getVersion()');
+    });
+
+    test('should return undefined when the registered manager does not provide getVersion', async () => {
+        registerFakeManager('ms-python.python:system', sandbox.stub().resolves(env311));
+
+        const result = await envManagers.getEnvironmentManager('ms-python.python:system')?.getVersion();
+
+        assert.strictEqual(result, undefined);
     });
 
     test('should return undefined when no managers are registered', async () => {
