@@ -11,12 +11,10 @@ import { Capabilities, EnvironmentManagerCapability, PackageManagerCapability, s
 
 export const allSupportedEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
     'environments.list': supportedCapability,
-    'environments.refresh': supportedCapability,
     'environments.resolve': supportedCapability,
     'environments.getSelected': supportedCapability,
     'environments.setSelected': supportedCapability,
     'environments.create': supportedCapability,
-    'environments.create.quick': supportedCapability,
     'environments.remove': supportedCapability,
 };
 

@@ -5,15 +5,16 @@ import { l10n } from 'vscode';
 import { Capabilities, CapabilityCheck, EnvironmentManagerCapability, PackageManagerCapability, supportedCapability } from '../../capabilities';
 
 /**
- * Every environment manager implements these operations; spread into a manager's `capabilities`
- * to advertise them without repeating the same `supportedCapability` checks.
+ * Every environment manager implements `list` (list/refresh), `resolve`, `getSelected`, and
+ * `setSelected`; spread into a manager's `capabilities` to advertise unconditional support without
+ * repeating the same `supportedCapability` checks. Override a key afterward for a manager where
+ * that operation isn't meaningful (e.g. resolving an interpreter/environment URI).
  */
 export const requiredEnvironmentCapabilities: Pick<
     Capabilities<EnvironmentManagerCapability>,
-    'environments.list' | 'environments.refresh' | 'environments.resolve' | 'environments.getSelected' | 'environments.setSelected'
+    'environments.list' | 'environments.resolve' | 'environments.getSelected' | 'environments.setSelected'
 > = {
     'environments.list': supportedCapability,
-    'environments.refresh': supportedCapability,
     'environments.resolve': supportedCapability,
     'environments.getSelected': supportedCapability,
     'environments.setSelected': supportedCapability,
@@ -44,7 +45,6 @@ export function discoveryOnlyEnvironmentCapabilities(managerName: string): Capab
     return {
         ...requiredEnvironmentCapabilities,
         'environments.create': create,
-        'environments.create.quick': create,
         'environments.remove': async () => ({
             supported: false,
             reason: l10n.t('{0} does not support removing environments.', managerName),

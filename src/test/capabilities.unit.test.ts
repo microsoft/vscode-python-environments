@@ -26,12 +26,10 @@ const denied: Support = { supported: false, reason: 'Disabled by provider' };
 /** A complete, fully-supported capability map. Every manager must advertise every key. */
 const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
     'environments.list': async () => supported,
-    'environments.refresh': async () => supported,
     'environments.resolve': async () => supported,
     'environments.getSelected': async () => supported,
     'environments.setSelected': async () => supported,
     'environments.create': async () => supported,
-    'environments.create.quick': async () => supported,
     'environments.remove': async () => supported,
 };
 

@@ -41,10 +41,6 @@ export class SysPythonManager implements EnvironmentManager {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         ...requiredEnvironmentCapabilities,
         'environments.create': supportedCapability,
-        'environments.create.quick': async () => ({
-            supported: false,
-            reason: l10n.t('Installing a global Python requires interactive version selection.'),
-        }),
         'environments.remove': async () => ({
             supported: false,
             reason: l10n.t('Removing a global Python installation is not supported.'),

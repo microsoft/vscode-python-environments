@@ -22,10 +22,8 @@ import type {
 /** Environment capability keys. Every environment manager must advertise a check for each key. */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars -- only used via `typeof` below to derive the union type.
 const environmentCapabilityKeys = [
-    /** List known environments for a scope. Required getEnvironments operation; an empty result is valid. */
+    /** List/rediscover known environments for a scope. Required getEnvironments and refresh operations. */
     'environments.list',
-    /** Rediscover environments for a scope. Required refresh operation. */
-    'environments.refresh',
     /** Resolve an interpreter or environment URI. Required resolve operation; pass the target URI as scope. */
     'environments.resolve',
     /** Read the selected environment for a scope. Required get operation; no selection is valid. */
@@ -34,8 +32,6 @@ const environmentCapabilityKeys = [
     'environments.setSelected',
     /** Create an environment. */
     'environments.create',
-    /** Offer a quick creation path; requests may still prompt. */
-    'environments.create.quick',
     /** Delete an environment. */
     'environments.remove',
 ] as const;
@@ -116,8 +112,8 @@ export const unsupportedCapability: CapabilityCheck = async () => ({
 // a compile error rather than a silent runtime mismatch.
 //
 // Callers include both the API layer and managers themselves, which may call these recursively
-// from within a capability check to delegate to a prerequisite (e.g. `'environments.create.quick'`
-// delegating to `'environments.create'`). There is no cycle protection: a manager that delegates
+// from within a capability check to delegate to a prerequisite (e.g. `'packages.manage.install'`
+// delegating to `'packages.manage'`). There is no cycle protection: a manager that delegates
 // in a loop will recurse until the call stack overflows, so keep delegation chains acyclic.
 // ---------------------------------------------------------------------------
 
