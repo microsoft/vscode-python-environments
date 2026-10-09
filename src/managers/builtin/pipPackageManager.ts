@@ -293,7 +293,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async _getPackageAvailableVersionsCommand(
+    private async getPackageAvailableVersionsCommand(
         environment: PythonEnvironment,
     ): Promise<PipAvailableVersionsCommand | UvAvailableVersionsCommand | PipAvailableVersionsTextCommand> {
         const pythonExecutable = environment.execInfo?.run?.executable;
@@ -334,7 +334,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         if (!baseVersion) {
             throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
         }
-        const command = await this._getPackageAvailableVersionsCommand(environment);
+        const command = await this.getPackageAvailableVersionsCommand(environment);
         const versions = await command.execute({ packageName, pythonVersion: baseVersion });
         return versions.sort((a, b) => compare(b.public, a.public));
     }
