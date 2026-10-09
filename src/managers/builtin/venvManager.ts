@@ -668,6 +668,7 @@ export class VenvManager implements EnvironmentManager {
             if (resolved.envId.managerId === `${PYTHON_EXTENSION_ID}:venv`) {
                 // We should only return the resolved env if it is a venv.
                 // Fall through an return undefined if it is not a venv
+                this.addEnvironment(resolved, true);
                 return resolved;
             }
         }
