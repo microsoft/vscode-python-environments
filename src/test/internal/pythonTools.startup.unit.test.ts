@@ -15,6 +15,7 @@ import {
     WorkspaceConfiguration,
 } from 'vscode';
 import { PackageManager, PythonEnvironment } from '../../api';
+import { allSupportedPackageCapabilities } from '../capabilityFixtures';
 import { PYTHON_EXTENSION_ID, SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import * as persistentState from '../../common/persistentState';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
@@ -87,6 +88,7 @@ suite('Python tools stateless startup selection', () => {
         const venv = new VenvManager(nativeFinder, api, system, createMockLogOutputChannel());
         const pip: PackageManager = {
             name: 'pip',
+            capabilities: allSupportedPackageCapabilities,
             manage: sinon.stub().resolves(),
             refresh: sinon.stub().resolves(),
             getPackages: sinon.stub().resolves([]),
