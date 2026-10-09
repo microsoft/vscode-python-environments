@@ -81,6 +81,15 @@ Thank you for your interest in contributing to the Python Environments extension
 ### Testing
 Run unit tests with the different configurations in the "Run and Debug" panel
 
+### Experimentation and telemetry
+
+See [Experimentation infrastructure](./docs/experimentation.md) for the internal TAS
+service, publisher configuration, lifecycle and consent behavior, deterministic tests,
+and the baseline measurement inventory. The new assignments endpoint is fixed by the
+platform, but live experimentation remains unconfigured until VS Code exposes an approved
+DevDeviceId provider. This infrastructure does not enable a feature or publish an
+experimental setting.
+
 ## Contributor License Agreement (CLA)
 
 This project requires contributors to sign a Contributor License Agreement (CLA). When you submit a pull request, a CLA bot will automatically check if you need to provide a CLA and guide you through the process. You only need to do this once across all Microsoft repositories.
