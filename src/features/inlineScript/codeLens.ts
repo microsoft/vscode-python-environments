@@ -11,11 +11,13 @@ import {
     languages,
     Range,
     TextDocument,
+    TextDocumentChangeEvent,
 } from 'vscode';
 import { findInlineScriptBlock } from '../../common/inlineScript/block';
 import { getInlineScriptSourceHash, sliceHeaderBytes } from '../../common/inlineScript/metadata';
 import { getInlineScriptRoutingKey, InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { InlineScriptStrings } from '../../common/localize';
+import { onDidChangeTextDocument } from '../../common/workspace.apis';
 import { shortenVersionString } from '../../managers/common/utils';
 
 /**
@@ -27,6 +29,7 @@ export class InlineScriptCodeLensProvider implements CodeLensProvider, Disposabl
     private readonly _onDidChangeCodeLenses = new EventEmitter<void>();
     public readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
     private readonly subscriptions: Disposable[] = [];
+    private readonly liveBlockKeys = new Set<string>();
     private disposed = false;
 
     constructor(
@@ -34,6 +37,7 @@ export class InlineScriptCodeLensProvider implements CodeLensProvider, Disposabl
         private readonly setupCommand: string,
     ) {
         this.subscriptions.push(
+            onDidChangeTextDocument((event) => this.handleDocumentChange(event)),
             this.routing.onDidChangeRouteability(() => this._onDidChangeCodeLenses.fire()),
             this.routing.onDidChangeAvailability(() => this._onDidChangeCodeLenses.fire()),
             this.routing.onDidChangeEnvironmentVersion(() => this._onDidChangeCodeLenses.fire()),
@@ -47,14 +51,17 @@ export class InlineScriptCodeLensProvider implements CodeLensProvider, Disposabl
 
     public provideCodeLenses(document: TextDocument, _token: CancellationToken): CodeLens[] {
         const uri = document.uri;
-        if (this.disposed || !getInlineScriptRoutingKey(uri)) {
+        const routingKey = getInlineScriptRoutingKey(uri);
+        if (this.disposed || !routingKey) {
             return [];
         }
         const header = sliceHeaderBytes(document.getText());
         const block = findInlineScriptBlock(header);
         if (!block) {
+            this.liveBlockKeys.delete(routingKey);
             return [];
         }
+        this.liveBlockKeys.add(routingKey);
         const position = document.positionAt(block.start);
         const range = new Range(position, position);
         const savedHash = this.routing.getMetadata(uri)?.sourceHash;
@@ -82,10 +89,45 @@ export class InlineScriptCodeLensProvider implements CodeLensProvider, Disposabl
         ];
     }
 
+    private handleDocumentChange(event: TextDocumentChangeEvent): void {
+        if (this.disposed || event.contentChanges.length === 0) {
+            return;
+        }
+        const uri = event.document.uri;
+        const routingKey = getInlineScriptRoutingKey(uri);
+        if (!routingKey) {
+            return;
+        }
+
+        const header = sliceHeaderBytes(event.document.getText());
+        const block = findInlineScriptBlock(header);
+        const hadLiveBlock = this.liveBlockKeys.has(routingKey);
+        if (block) {
+            this.liveBlockKeys.add(routingKey);
+        } else {
+            this.liveBlockKeys.delete(routingKey);
+        }
+
+        if (hadLiveBlock !== !!block) {
+            this._onDidChangeCodeLenses.fire();
+            return;
+        }
+
+        const savedMetadata = this.routing.getMetadata(uri);
+        const blockEnd = block?.end ?? savedMetadata?.sourceRange?.end ?? savedMetadata?.range.end;
+        if (
+            blockEnd !== undefined &&
+            event.contentChanges.some((change) => change.rangeOffset < blockEnd)
+        ) {
+            this._onDidChangeCodeLenses.fire();
+        }
+    }
+
     public dispose(): void {
         this.disposed = true;
         this.subscriptions.forEach((s) => s.dispose());
         this.subscriptions.length = 0;
+        this.liveBlockKeys.clear();
         this._onDidChangeCodeLenses.dispose();
     }
 }
