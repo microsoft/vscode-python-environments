@@ -15,6 +15,7 @@ import {
     WorkspaceConfiguration,
 } from 'vscode';
 import { EnvironmentManager, Package, PackageManagementOptions, PythonEnvironment, PythonProject } from '../../api';
+import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from '../capabilityFixtures';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -97,6 +98,7 @@ suite('Internal Python tools', () => {
         const selections = new Map<string, PythonEnvironment>();
         const manager: ToolEnvironmentManager = {
             name,
+            capabilities: allSupportedEnvironmentCapabilities,
             preferredPackageManagerId,
             get: sinon
                 .stub()
@@ -131,6 +133,7 @@ suite('Internal Python tools', () => {
         managers.registerEnvironmentManager(system, { extensionId: PYTHON_EXTENSION_ID });
         const pip: ToolPackageManager = {
             name: 'pip',
+            capabilities: allSupportedPackageCapabilities,
             manage: sinon.stub().throws(new Error('Public package route must not be called')),
             getPackages: sinon.stub().throws(new Error('Public package cache must not be called')),
             refresh: sinon.stub().resolves(),
@@ -537,11 +540,13 @@ suite('Internal Python tools', () => {
         const calls: { operation: 'get' | 'manage'; project: string; scope: string }[] = [];
         const poetryPackages: ToolPackageManager = {
             name: 'poetry',
+            capabilities: allSupportedPackageCapabilities,
             manage: sinon.stub().throws(new Error('Unscoped package route must not be called')),
             getPackages: sinon.stub().throws(new Error('Unscoped package cache must not be called')),
             refresh: sinon.stub().resolves(),
             createForProject: (project) => ({
                 name: 'poetry',
+                capabilities: allSupportedPackageCapabilities,
                 manage: sinon.stub().throws(new Error('Public package route must not be called')),
                 getPackages: sinon.stub().throws(new Error('Public package cache must not be called')),
                 refresh: sinon.stub().resolves(),
