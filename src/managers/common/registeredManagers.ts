@@ -81,6 +81,10 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         return this.manager.log;
     }
 
+    public getVersion(): Promise<Pep440Version | undefined> {
+        return this.manager.getVersion ? this.manager.getVersion() : Promise.resolve(undefined);
+    }
+
     public get supportsCreate(): boolean {
         return this.manager.create !== undefined;
     }

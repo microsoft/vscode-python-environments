@@ -1,7 +1,8 @@
 import assert from 'node:assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { getPyenvDir } from '../../../managers/pyenv/pyenvUtils';
+import * as childProcessApis from '../../../common/childProcess.apis';
+import { getPyenvDir, getPyenvVersion } from '../../../managers/pyenv/pyenvUtils';
 
 suite('pyenvUtils - getPyenvDir', () => {
     let originalPyenvRoot: string | undefined;
@@ -40,5 +41,42 @@ suite('pyenvUtils - getPyenvDir', () => {
         const pyenvBin = path.join('C:', 'Users', 'user', '.pyenv', 'pyenv-win', 'bin', 'pyenv.bat');
         const result = getPyenvDir(pyenvBin);
         assert.strictEqual(result, path.join('C:', 'Users', 'user', '.pyenv', 'pyenv-win'));
+    });
+});
+
+suite('pyenvUtils - getPyenvVersion', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('parses the Pyenv version', async () => {
+        const execProcess = sinon
+            .stub(childProcessApis, 'execProcess')
+            .resolves({ stdout: 'pyenv 2.5.3\n', stderr: '' });
+
+        const version = await getPyenvVersion('pyenv');
+
+        assert.strictEqual(version, '2.5.3');
+        assert.ok(execProcess.calledWith('"pyenv" --version'));
+    });
+
+    test('parses the Pyenv for Windows version', async () => {
+        sinon.stub(childProcessApis, 'execProcess').resolves({ stdout: 'pyenv-win 3.1.1\n', stderr: '' });
+
+        assert.strictEqual(await getPyenvVersion('pyenv.bat'), '3.1.1');
+    });
+
+    test('returns the PEP 440 release from a git-describe version', async () => {
+        sinon
+            .stub(childProcessApis, 'execProcess')
+            .resolves({ stdout: 'pyenv 2.3.24-19-gabcdef1\n', stderr: '' });
+
+        assert.strictEqual(await getPyenvVersion('pyenv'), '2.3.24');
+    });
+
+    test('returns undefined when the command fails', async () => {
+        sinon.stub(childProcessApis, 'execProcess').rejects(new Error('Command not found'));
+
+        assert.strictEqual(await getPyenvVersion('pyenv'), undefined);
     });
 });

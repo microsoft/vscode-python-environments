@@ -13,6 +13,7 @@ import {
     PythonEnvironmentApi,
     PythonEnvironmentInfo,
 } from '../../api';
+import { execProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
@@ -102,6 +103,24 @@ export async function getPipenv(): Promise<string | undefined> {
         const err = ex instanceof Error ? ex : new Error(String(ex));
         (err as Error & { failureStage?: string }).failureStage = `getPipenv`;
         throw err;
+    }
+}
+
+/**
+ * Returns the version reported by the Pipenv executable.
+ *
+ * @param pipenv Path to the Pipenv executable.
+ * @returns The version string, or `undefined` when it cannot be determined.
+ */
+export async function getPipenvVersion(pipenv: string): Promise<string | undefined> {
+    try {
+        const { stdout } = await execProcess(`"${pipenv}" --version`);
+        traceInfo(`Pipenv version output: ${stdout.trim()}`);
+        const match = stdout.match(/pipenv,?\s+(?:version\s+)?(\d+(?:\.\d+)+(?:[a-z0-9.-]*)?)/i);
+        return match?.[1];
+    } catch (error) {
+        traceInfo(`Unable to determine Pipenv version: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
     }
 }
 

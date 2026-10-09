@@ -9,6 +9,7 @@ import {
     PythonEnvironmentApi,
     PythonEnvironmentInfo,
 } from '../../api';
+import { execProcess } from '../../common/childProcess.apis';
 import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
@@ -167,6 +168,24 @@ export async function getPyenv(): Promise<string | undefined> {
         const err = ex instanceof Error ? ex : new Error(String(ex));
         (err as Error & { failureStage?: string }).failureStage = `getPyenv`;
         throw err;
+    }
+}
+
+/**
+ * Returns the version reported by the Pyenv executable.
+ *
+ * @param pyenv Path to the Pyenv executable.
+ * @returns The version string, or `undefined` when it cannot be determined.
+ */
+export async function getPyenvVersion(pyenv: string): Promise<string | undefined> {
+    try {
+        const { stdout } = await execProcess(`"${pyenv}" --version`);
+        traceInfo(`Pyenv version output: ${stdout.trim()}`);
+        const match = stdout.match(/pyenv(?:-win)?\s+(\d+(?:\.\d+)+)/i);
+        return match?.[1];
+    } catch (error) {
+        traceInfo(`Unable to determine Pyenv version: ${error instanceof Error ? error.message : String(error)}`);
+        return undefined;
     }
 }
 
