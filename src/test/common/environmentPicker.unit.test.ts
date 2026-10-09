@@ -4,13 +4,15 @@
 import assert from 'node:assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Uri } from 'vscode';
+import { CancellationTokenSource, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { Interpreter } from '../../common/localize';
 import { pickEnvironment } from '../../common/pickers/environments';
 import * as managerPicker from '../../common/pickers/managers';
+import * as pythonPath from '../../common/utils/pythonPath';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
+import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
 suite('Environment Picker Creation Availability', () => {
@@ -39,6 +41,7 @@ suite('Environment Picker Creation Availability', () => {
                     canCreate,
                 );
                 assert.ok(items.some((item) => item.label === Interpreter.browsePath));
+                assert.ok(items.some((item) => item.label === Interpreter.enterInterpreterPath));
                 return undefined;
             });
 
@@ -69,6 +72,95 @@ suite('Environment Picker Creation Availability', () => {
 
         assert.strictEqual(await pickEnvironment([], [], { projects: [] }), undefined);
         sinon.assert.calledOnce(browse);
+    });
+});
+
+suite('Environment Picker Interpreter Path Entry', () => {
+    const interpreter = Uri.file(path.join(process.cwd(), 'project with spaces', '.venv', 'python'));
+    const environment = createMockPythonEnvironment({ envPath: interpreter.fsPath });
+    const managers = [{ getEnvironments: async () => [] }] as unknown as InternalEnvironmentManager[];
+    const projectManagers = [{}] as InternalEnvironmentManager[];
+    let input: sinon.SinonStub;
+    let resolve: sinon.SinonStub;
+    let showError: sinon.SinonStub;
+    let tokenSource: CancellationTokenSource;
+    const reporter = { report: sinon.stub() };
+
+    setup(() => {
+        tokenSource = new CancellationTokenSource();
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(undefined);
+        sinon
+            .stub(windowApis, 'showQuickPickWithButtons')
+            .callsFake(async (items) => items.find((item) => item.label === Interpreter.enterInterpreterPath));
+        input = sinon.stub(windowApis, 'showInputBox');
+        resolve = sinon.stub(pythonPath, 'handlePythonPath').resolves(environment);
+        showError = sinon.stub(windowApis, 'showErrorMessage');
+        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => task(reporter, tokenSource.token));
+    });
+
+    teardown(() => {
+        tokenSource.dispose();
+        sinon.restore();
+    });
+
+    test('resolves a typed path using the project and available managers', async () => {
+        input.resolves(`  ${interpreter.fsPath}  `);
+
+        const selected = await pickEnvironment(managers, projectManagers, { projects: [] });
+
+        assert.strictEqual(selected, environment);
+        sinon.assert.calledOnce(input);
+        sinon.assert.calledOnceWithExactly(
+            resolve,
+            interpreter,
+            managers,
+            projectManagers,
+            reporter,
+            tokenSource.token,
+        );
+        sinon.assert.notCalled(showError);
+    });
+
+    for (const value of [undefined, '', '   ']) {
+        test(`does not resolve or select an interpreter for cancelled or empty input: ${JSON.stringify(value)}`, async () => {
+            input.resolves(value);
+
+            assert.strictEqual(await pickEnvironment(managers, projectManagers, { projects: [] }), undefined);
+
+            sinon.assert.notCalled(resolve);
+            sinon.assert.notCalled(showError);
+        });
+    }
+
+    test('reports an invalid interpreter without selecting an environment', async () => {
+        input.resolves(interpreter.fsPath);
+        resolve.resolves(undefined);
+
+        assert.strictEqual(await pickEnvironment(managers, projectManagers, { projects: [] }), undefined);
+
+        sinon.assert.calledOnce(resolve);
+        sinon.assert.calledOnce(showError);
+        assert.ok(showError.firstCall.args[0].includes(interpreter.fsPath));
+    });
+
+    test('still resolves an interpreter selected through Browse', async () => {
+        (windowApis.showQuickPickWithButtons as sinon.SinonStub).callsFake(async (items) =>
+            items.find((item: { label: string }) => item.label === Interpreter.browsePath),
+        );
+        sinon.stub(windowApis, 'showOpenDialog').resolves([interpreter]);
+
+        assert.strictEqual(await pickEnvironment(managers, projectManagers, { projects: [] }), environment);
+
+        sinon.assert.calledOnceWithExactly(
+            resolve,
+            interpreter,
+            managers,
+            projectManagers,
+            reporter,
+            tokenSource.token,
+        );
+        sinon.assert.notCalled(input);
+        sinon.assert.notCalled(showError);
     });
 });
 

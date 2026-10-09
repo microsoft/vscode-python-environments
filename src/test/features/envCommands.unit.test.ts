@@ -2,14 +2,17 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typeMoq from 'typemoq';
-import { Memento, Terminal, Uri } from 'vscode';
+import { CancellationTokenSource, Memento, Terminal, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
 import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
+import { Interpreter } from '../../common/localize';
 import * as persistentState from '../../common/persistentState';
 import * as managerApi from '../../common/pickers/managers';
 import * as projectApi from '../../common/pickers/projects';
+import * as pythonPath from '../../common/utils/pythonPath';
 import * as windowApis from '../../common/window.apis';
+import * as workspaceApis from '../../common/workspace.apis';
 import {
     clearEnvironmentCachesCommand,
     clearScriptEnvironmentCacheCommand,
@@ -20,6 +23,7 @@ import {
     revealEnvInManagerView,
     runInDedicatedTerminalCommand,
     runInTerminalCommand,
+    setEnvironmentCommand,
 } from '../../features/envCommands';
 import * as settingHelpers from '../../features/settings/settingHelpers';
 import * as terminalRunner from '../../features/terminal/runInTerminal';
@@ -98,6 +102,64 @@ suite('Environment removal command ownership', () => {
         );
         assert.ok(getEnvironmentManager.calledOnceWithExactly(environment));
     });
+});
+
+suite('Project View Interpreter Path Selection', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    for (const outcome of ['resolved', 'cancelled', 'invalid']) {
+        test(`keeps the project scope when interpreter path entry is ${outcome}`, async () => {
+            const project: PythonProject = {
+                uri: Uri.file(path.join(process.cwd(), 'project')),
+                name: 'project',
+            };
+            const interpreter = Uri.file(path.join(project.uri.fsPath, '.venv', 'python'));
+            const environment = createMockPythonEnvironment({ envPath: interpreter.fsPath });
+            const manager = {
+                get: sinon.stub().resolves(undefined),
+                getEnvironments: sinon.stub().resolves([]),
+            };
+            const setEnvironments = sinon.stub().resolves();
+            const em = {
+                managers: [manager],
+                getProjectEnvManagers: sinon.stub().returns([manager]),
+                getEnvironment: sinon.stub().resolves(undefined),
+                setEnvironments,
+            } as unknown as EnvironmentManagers;
+            const pm = {
+                getProjects: sinon.stub().returns([project]),
+            } as unknown as PythonProjectManager;
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([{ ...project, index: 0 }]);
+            sinon
+                .stub(windowApis, 'showQuickPickWithButtons')
+                .callsFake(async (items) => items.find((item) => item.label === Interpreter.enterInterpreterPath));
+            sinon.stub(windowApis, 'showInputBox').resolves(outcome === 'cancelled' ? undefined : interpreter.fsPath);
+            const resolve = sinon
+                .stub(pythonPath, 'handlePythonPath')
+                .resolves(outcome === 'resolved' ? environment : undefined);
+            sinon.stub(windowApis, 'showErrorMessage');
+            const tokenSource = new CancellationTokenSource();
+            sinon
+                .stub(windowApis, 'withProgress')
+                .callsFake(async (_options, task) => task({ report: sinon.stub() }, tokenSource.token));
+
+            try {
+                await setEnvironmentCommand(new ProjectItem(project), em, pm);
+
+                if (outcome === 'resolved') {
+                    sinon.assert.calledOnceWithExactly(setEnvironments, [project.uri], environment);
+                    assert.strictEqual(resolve.firstCall.args[0].fsPath, interpreter.fsPath);
+                    assert.deepStrictEqual(resolve.firstCall.args[2], [manager]);
+                } else {
+                    sinon.assert.notCalled(setEnvironments);
+                }
+            } finally {
+                tokenSource.dispose();
+            }
+        });
+    }
 });
 
 suite('Create Any Environment Command Tests', () => {
