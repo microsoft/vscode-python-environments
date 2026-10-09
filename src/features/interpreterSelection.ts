@@ -381,10 +381,10 @@ export async function applyInitialEnvironmentSelection(
             globalScopeDeferredRef.value = 'deferred';
         }
         resolveGlobalScope()
-            .then(async (globalErrors) => {
+            .then((globalErrors) => {
                 const liveGlobalErrors = filterLiveSettingErrors(globalErrors, envManagers);
                 if (liveGlobalErrors.length > 0) {
-                    await notifyUserOfSettingErrors(liveGlobalErrors);
+                    notifyUserOfSettingErrorsInBackground(liveGlobalErrors);
                 }
             })
             .catch((err) => traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`));
@@ -401,7 +401,7 @@ export async function applyInitialEnvironmentSelection(
     const liveErrors = filterLiveSettingErrors(allErrors, envManagers);
 
     if (liveErrors.length > 0) {
-        await notifyUserOfSettingErrors(liveErrors);
+        notifyUserOfSettingErrorsInBackground(liveErrors);
     }
 
     // Numeric values must go via the measures argument (properties are dropped).
@@ -461,6 +461,12 @@ function filterLiveSettingErrors(
         }
         return true;
     });
+}
+
+function notifyUserOfSettingErrorsInBackground(errors: SettingResolutionError[]): void {
+    notifyUserOfSettingErrors(errors).catch((err) =>
+        traceError(`[interpreterSelection] Failed to show setting error notification: ${err}`),
+    );
 }
 
 async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Promise<void> {
