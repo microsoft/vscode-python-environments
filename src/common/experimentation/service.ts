@@ -45,6 +45,7 @@ export type ExperimentationClientOptions = Omit<ExperimentationConfig, 'targetPo
 export type ExperimentationClientFactory = (
     options: ExperimentationClientOptions,
 ) => ExperimentationClient | Promise<ExperimentationClient>;
+export type DevDeviceIdProvider = () => string | undefined;
 
 export interface ExperimentationContext {
     readonly extension: { readonly packageJSON: unknown };
@@ -106,6 +107,7 @@ export class ExperimentationService implements Disposable {
     constructor(
         private readonly context: ExperimentationContext,
         private readonly createClient: ExperimentationClientFactory = createSdk,
+        private readonly getDevDeviceId: DevDeviceIdProvider = () => undefined,
         disabledForTests = false,
     ) {
         try {
@@ -241,12 +243,12 @@ export class ExperimentationService implements Disposable {
 
     private async initialize(run: SdkRun): Promise<void> {
         const configuration = this.configuration!;
-        const identity = getMachineId();
+        const identity = this.getDevDeviceId();
         if (typeof identity !== 'string' || !identity.trim()) {
-            throw new Error('The configured experimentation identity is unavailable.');
+            throw new Error('The approved DevDeviceId experimentation identity is unavailable.');
         }
         const language = getLanguage();
-        const values = { machineId: identity, extensionVersion: this.version, language };
+        const values = { devDeviceId: identity, extensionVersion: this.version, language };
         const parameters = new Map<string, string>();
         for (const [name, source] of Object.entries(configuration.assignmentParameters)) {
             const value = values[source];
@@ -259,7 +261,7 @@ export class ExperimentationService implements Disposable {
         const sdkTargetingValues = {
             applicationVersion: trimVersionSuffix(getVSCodeVersion()),
             build: getAppName(),
-            clientId: identity,
+            clientId: getMachineId(),
             language,
         };
         const storage = new ExperimentationStorage(
@@ -422,6 +424,7 @@ let activeService: ExperimentationService | undefined;
 /** Register the activation's internal service without awaiting networking. */
 export function initializeExperimentation(
     context: ExperimentationContext & { subscriptions: Disposable[] },
+    getDevDeviceId?: DevDeviceIdProvider,
 ): ExperimentationService {
     if (activeService) {
         return activeService;
@@ -429,7 +432,7 @@ export function initializeExperimentation(
     const testExecution = [
         'VSC_PYTHON_CI_TEST', 'VSC_PYTHON_INTEGRATION_TEST', 'VSC_PYTHON_SMOKE_TEST', 'VSC_PYTHON_E2E_TEST',
     ].some((name) => !!process.env[name]);
-    const service = new ExperimentationService(context, createSdk, testExecution);
+    const service = new ExperimentationService(context, createSdk, getDevDeviceId, testExecution);
     activeService = service;
     context.subscriptions.push({
         dispose: () => {

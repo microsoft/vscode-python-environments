@@ -2,27 +2,39 @@
 
 The extension owns one internal TAS service per activation. This infrastructure
 supports general experimentation and measurement without enabling product features.
-Live TAS configuration remains absent until the platform owners approve the endpoint
-and identity contract.
+The new assignments endpoint and parameter name are platform-owned. Live TAS
+configuration remains absent until VS Code provides an approved DevDeviceId API to
+the extension.
+
+## Settings rollout versus extension attribution
+
+An `onExP` settings rollout does not require this service merely to apply its
+treatment. Declare the setting with a safe package default and the `onExP` tag,
+configure `config.<full-setting-id>` in ExP, and read the effective value through
+`workspace.getConfiguration()`. VS Code core retrieves the assignment and applies
+the treatment as a default; explicit user and workspace values still take
+precedence. Do not add a second TAS treatment gate for the same setting.
+
+Use this service when an extension-owned experiment needs treatment variables, or
+when Python Environments telemetry must carry the matching assignment context for
+an experiment scorecard.
 
 ## Publisher configuration
 
 `initializeExperimentation()` reads an optional top-level `experimentation` object
 from the installed extension's `package.json`. This is publisher-owned metadata,
-**not** a VS Code setting: a workspace must not be able to redirect requests that
-contain an identifier.
+**not** a VS Code setting. The endpoint and identity parameter cannot be overridden
+by publisher or workspace configuration.
 
-The following is a schema illustration, not deployable configuration. Replace the
-placeholders only with reviewed values; do not copy names from legacy `X-*` headers.
+The following is a schema illustration, not deployable configuration. The manifest
+entry must remain absent until the DevDeviceId provider is approved and wired.
+Do not copy names from legacy `X-*` headers.
 
 ```json
 {
     "experimentation": {
-        "assignmentsEndpoint": "https://<approved-host>/api/v1/assignments",
         "targetPopulation": "public",
-        "identityParameter": "<approved-identity-parameter>",
         "assignmentParameters": {
-            "<approved-identity-parameter>": "machineId",
             "<approved-extension-version-parameter>": "extensionVersion",
             "<approved-language-parameter>": "language"
         }
@@ -33,19 +45,30 @@ placeholders only with reviewed values; do not copy names from legacy `X-*` head
 Supported populations are `public`, `insider`, `internal`, and `team`. Select one
 explicitly with the owners; an `internal` value is not authentication or proof of
 employee status. Version and language bindings are optional. The identity binding
-is mandatory and must occur exactly once. Generic SDK parameters cannot be overridden.
+`"devdeviceid": "devDeviceId"` is added by the platform configuration and cannot be
+overridden. Generic SDK parameters cannot be overridden.
 
-The currently implemented identity source is VS Code's public `env.machineId` API.
-It must only be used when that is the approved randomization identity. **MachineId
-is not DevDeviceId.** If onboarding requires DevDeviceId or another identity, add and
-review its provider first; unsupported sources are rejected, not silently substituted.
-Ensure the analysis identity, and any future VS Code core setting experiment's
-identity, agrees with this contract.
+The approved full endpoint is:
+
+```text
+https://exp.individual.githubcopilot.com/api/v1/assignments
+```
+
+The host is currently fixed rather than taken from a Copilot token. Business and
+Enterprise networks may block the Individual endpoint; those failures must remain
+nonfatal and their telemetry unattributed. Validate attribution coverage before
+using extension events in a scorecard.
+
+The public extension API does not currently expose DevDeviceId. The service accepts
+an injected provider so the approved API can be connected without falling back to
+MachineId. Until that provider is available, configured initialization fails closed
+and makes no TAS request. The legacy MachineId read elsewhere in the service only
+namespaces cache data for the SDK's inherited legacy request; it is not the new
+assignments identity.
 
 Absent configuration reports `notConfigured` and makes no TAS requests. Invalid
 configuration reports an error and also makes no requests; it does not silently
-fall back to a legacy-only integration. No endpoint, identity value, or mapping is
-accepted from workspace configuration.
+fall back to a legacy-only integration.
 
 ## Service lifecycle and queries
 
@@ -82,10 +105,11 @@ snapshot queries, not refresh requests.
 
 Cache data lives in `context.globalState`, namespaced by the approved configuration,
 extension version, resolved assignment parameters, and the SDK's built-in targeting
-values: VS Code version, application name, language, and legacy MachineId. The namespace
-is hashed; identifiers and endpoints are not emitted in diagnostics. This prevents a
-snapshot from being reused after its population, endpoint, version, identity, or audience
-context changes. Malformed cache data is ignored with a warning.
+values: VS Code version, application name, language, and legacy MachineId. The new
+assignments identity is DevDeviceId. The namespace is hashed; identifiers and
+endpoints are not emitted in diagnostics. This prevents a snapshot from being reused
+after its population, endpoint, version, identity, or audience context changes.
+Malformed cache data is ignored with a warning.
 
 Revoking telemetry consent disposes the SDK, aborts outstanding requests, clears
 shared attribution, and makes queries use defaults. Re-enabling consent creates a
@@ -98,7 +122,9 @@ New-endpoint variables take precedence when both return the same name. The commo
 HTTPS transport supplies cancellation, a ten-second request deadline, and a two-MiB
 response cap to both endpoints. It uses Node HTTPS like the SDK, retaining the
 extension host's HTTP hooks; proxy behavior must still be verified in the deployment
-environments. There is no insecure TLS or redirect fallback.
+environments. There is no insecure TLS or redirect fallback. New experiments must
+use the shared GitHub/DevDiv workspace and the assignments POST; the inherited
+legacy request is SDK behavior and is not a supported fallback for this extension.
 
 `tas-client` requires Node 22. TypeScript 5.8 or newer is needed to type-check the
 current wrapper's CommonJS-to-ESM declarations without disabling library checking.
@@ -177,13 +203,15 @@ Unit tests use a fake SDK for lifecycle cases. A separate contract test loads th
 installed SDK with a fake transport to verify dual requests, assignment merging,
 bare variable names, and shared attribution without contacting TAS.
 
-Before live use, confirm the endpoint, identity names/source, audience/population,
-ExP workspace, access, and scorecard with the VS Code experimentation owners. Obtain the integration and
-metrics reviews described in the onboarding guidance. An A/A can validate allocation,
-attribution, data quality and baseline stability without exposing a new setting or
-changing product behavior. A real `tas-call` with `callType = assignments` and
-`outcome = Success`, a known new-endpoint assignment, and tagged subsequent telemetry
-must all agree; a cached value alone is not proof that onboarding works.
+Before live use, obtain DevDeviceId access and confirm the audience/population, shared
+GitHub/DevDiv workspace group, access, and scorecard with the experimentation owners.
+The old workspace and old TAS endpoint are not supported for new experiments. Obtain
+the integration and metrics reviews described in the onboarding guidance. An A/A can
+validate allocation, attribution, data quality and baseline stability without exposing
+a new setting or changing product behavior. A real `tas-call` with
+`callType = assignments` and `outcome = Success`, a known new-endpoint assignment,
+and tagged subsequent telemetry must all agree; a cached value alone is not proof
+that onboarding works.
 
 Some older checklists still require `vscode.abexp.features`; the current SDK no
 longer maintains it. Use the current assignment-context guidance instead. The

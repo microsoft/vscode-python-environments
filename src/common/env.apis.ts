@@ -19,7 +19,7 @@ export function onDidChangeTelemetryEnabled(listener: (enabled: boolean) => void
     return env.onDidChangeTelemetryEnabled(listener);
 }
 
-/** Read the machine identifier for an approved identity binding. */
+/** Read the legacy MachineId targeting value that vscode-tas-client adds automatically. */
 export function getMachineId(): string {
     return env.machineId;
 }

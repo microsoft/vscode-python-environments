@@ -85,9 +85,10 @@ Run unit tests with the different configurations in the "Run and Debug" panel
 
 See [Experimentation infrastructure](./docs/experimentation.md) for the internal TAS
 service, publisher configuration, lifecycle and consent behavior, deterministic tests,
-and the baseline measurement inventory. Live experimentation remains unconfigured until
-the endpoint and identity contract have been approved; this infrastructure does not
-enable a feature or publish an experimental setting.
+and the baseline measurement inventory. The new assignments endpoint is fixed by the
+platform, but live experimentation remains unconfigured until VS Code exposes an approved
+DevDeviceId provider. This infrastructure does not enable a feature or publish an
+experimental setting.
 
 ## Contributor License Agreement (CLA)
 

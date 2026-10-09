@@ -7,6 +7,7 @@ import { when } from 'ts-mockito';
 import { Disposable } from 'vscode';
 import type { FetchFn } from 'vscode-tas-client';
 import * as envApis from '../../../common/env.apis';
+import { EXPERIMENTATION_ASSIGNMENTS_ENDPOINT } from '../../../common/experimentation/configuration';
 import { ExperimentationService } from '../../../common/experimentation/service';
 import * as transport from '../../../common/experimentation/transport';
 import { getSharedTelemetryProperties } from '../../../common/telemetry/reporter';
@@ -69,20 +70,21 @@ suite('Experimentation SDK contract with fake transport', () => {
     });
 
     async function start(waitForFetch = true): Promise<ExperimentationService> {
-        service = new ExperimentationService({
-            globalState: state,
-            extension: {
-                packageJSON: {
-                    version: '1.39.0',
-                    experimentation: {
-                        assignmentsEndpoint: 'https://assignments.example.invalid/api/v1/assignments',
-                        targetPopulation: 'public',
-                        identityParameter: 'approved_identity',
-                        assignmentParameters: { approved_identity: 'machineId' },
+        service = new ExperimentationService(
+            {
+                globalState: state,
+                extension: {
+                    packageJSON: {
+                        version: '1.39.0',
+                        experimentation: {
+                            targetPopulation: 'public',
+                        },
                     },
                 },
             },
-        });
+            undefined,
+            () => 'sdk-test-dev-device',
+        );
         await service.initializePromise;
         if (waitForFetch) {
             await service.initialFetch;
@@ -99,7 +101,8 @@ suite('Experimentation SDK contract with fake transport', () => {
         const post = calls.find((call) => call[1].method === 'POST');
         assert.ok(post?.[1].body);
         const body = JSON.parse(post[1].body);
-        assert.strictEqual(body.userParams.approved_identity, 'sdk-test-machine');
+        assert.strictEqual(post[0], EXPERIMENTATION_ASSIGNMENTS_ENDPOINT);
+        assert.strictEqual(body.userParams.devdeviceid, 'sdk-test-dev-device');
         assert.strictEqual(body.userParams.vscode_core_extensionname, 'ms-python.vscode-python-envs');
         assert.strictEqual(initialized.getTreatmentVariable('genericFlag', false), true);
         assert.strictEqual(initialized.getTreatmentVariable('legacyValue', 0), 3);

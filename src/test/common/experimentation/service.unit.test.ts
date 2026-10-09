@@ -6,7 +6,11 @@ import * as sinon from 'sinon';
 import { EventEmitter } from 'vscode';
 import { ENVS_EXTENSION_ID } from '../../../common/constants';
 import * as envApis from '../../../common/env.apis';
-import type { ExperimentationConfiguration } from '../../../common/experimentation/configuration';
+import {
+    EXPERIMENTATION_ASSIGNMENTS_ENDPOINT,
+    EXPERIMENTATION_IDENTITY_PARAMETER,
+    type ExperimentationConfiguration,
+} from '../../../common/experimentation/configuration';
 import {
     EXPERIMENTATION_INITIALIZATION_TIMEOUT_MS,
     ExperimentationClient,
@@ -29,23 +33,34 @@ import { createDeferred } from '../../../common/utils/deferred';
 import { MockMemento } from '../../mocks/mementos';
 
 const CONFIGURATION: ExperimentationConfiguration = {
-    assignmentsEndpoint: 'https://assignments.example.invalid/api/v1/assignments',
+    assignmentsEndpoint: EXPERIMENTATION_ASSIGNMENTS_ENDPOINT,
     targetPopulation: 'public',
-    identityParameter: 'approved_identity',
+    identityParameter: EXPERIMENTATION_IDENTITY_PARAMETER,
     assignmentParameters: {
-        approved_identity: 'machineId',
+        devdeviceid: 'devDeviceId',
+        approved_version: 'extensionVersion',
+        approved_language: 'language',
+    },
+};
+const MANIFEST_CONFIGURATION = {
+    targetPopulation: CONFIGURATION.targetPopulation,
+    assignmentParameters: {
         approved_version: 'extensionVersion',
         approved_language: 'language',
     },
 };
 const VERSION = '1.39.0';
-const IDENTITY = 'test-machine';
+const DEV_DEVICE_ID = 'test-dev-device';
+const LEGACY_MACHINE_ID = 'test-machine';
 const VSCODE_VERSION = '1.110.0';
 const APP_NAME = 'Visual Studio Code';
 const LANGUAGE = 'en';
 const IDENTITY_ONLY_CONFIGURATION: ExperimentationConfiguration = {
     ...CONFIGURATION,
-    assignmentParameters: { approved_identity: 'machineId' },
+    assignmentParameters: { devdeviceid: 'devDeviceId' },
+};
+const IDENTITY_ONLY_MANIFEST = {
+    targetPopulation: IDENTITY_ONLY_CONFIGURATION.targetPopulation,
 };
 
 class FakeSdk implements ExperimentationClient {
@@ -106,6 +121,7 @@ suite('Experimentation service', () => {
     let events: sinon.SinonStub;
     let warn: sinon.SinonStub;
     let logError: sinon.SinonStub;
+    let getDevDeviceId: sinon.SinonStub<[], string | undefined>;
 
     setup(() => {
         clock = sinon.useFakeTimers();
@@ -114,7 +130,7 @@ suite('Experimentation service', () => {
         state = new MockMemento();
         context = {
             globalState: state,
-            extension: { packageJSON: { version: VERSION, experimentation: CONFIGURATION } },
+            extension: { packageJSON: { version: VERSION, experimentation: MANIFEST_CONFIGURATION } },
         };
         clients = [];
         services = [];
@@ -125,10 +141,11 @@ suite('Experimentation service', () => {
         });
         sinon.stub(envApis, 'isTelemetryEnabled').callsFake(() => consent);
         sinon.stub(envApis, 'onDidChangeTelemetryEnabled').callsFake((listener) => changed.event(listener));
-        sinon.stub(envApis, 'getMachineId').returns(IDENTITY);
+        sinon.stub(envApis, 'getMachineId').returns(LEGACY_MACHINE_ID);
         sinon.stub(envApis, 'getLanguage').returns(LANGUAGE);
         sinon.stub(envApis, 'getVSCodeVersion').returns(VSCODE_VERSION);
         sinon.stub(envApis, 'getAppName').returns(APP_NAME);
+        getDevDeviceId = sinon.stub<[], string | undefined>().returns(DEV_DEVICE_ID);
         events = sinon.stub(sender, 'sendTelemetryEvent');
         warn = sinon.stub(logging, 'traceWarn');
         logError = sinon.stub(logging, 'traceError');
@@ -142,7 +159,7 @@ suite('Experimentation service', () => {
     });
 
     function start(createClient: ExperimentationClientFactory = factory): ExperimentationService {
-        const service = new ExperimentationService(context, createClient);
+        const service = new ExperimentationService(context, createClient, getDevDeviceId);
         services.push(service);
         return service;
     }
@@ -155,12 +172,12 @@ suite('Experimentation service', () => {
         const sdkTargetingValues: SdkTargetingValues = {
             applicationVersion: VSCODE_VERSION,
             build: APP_NAME,
-            clientId: IDENTITY,
+            clientId: LEGACY_MACHINE_ID,
             language: LANGUAGE,
             ...targetingOverrides,
         };
         const sources = {
-            machineId: IDENTITY,
+            devDeviceId: DEV_DEVICE_ID,
             extensionVersion: VERSION,
             language: sdkTargetingValues.language,
         };
@@ -190,17 +207,35 @@ suite('Experimentation service', () => {
         assert.strictEqual(service.diagnostics.state, 'notConfigured');
         assert.strictEqual(service.getTreatmentVariable('example', false), false);
         sinon.assert.notCalled(factory);
-        sinon.assert.notCalled(envApis.getMachineId as sinon.SinonStub);
+        sinon.assert.notCalled(getDevDeviceId);
     });
 
     test('invalid configuration is reported and does not fall back to a legacy-only client', async () => {
         context = {
             ...context,
-            extension: { packageJSON: { experimentation: { ...CONFIGURATION, identityParameter: undefined } } },
+            extension: {
+                packageJSON: {
+                    version: VERSION,
+                    experimentation: {
+                        targetPopulation: CONFIGURATION.targetPopulation,
+                        assignmentParameters: { devdeviceid: 'devDeviceId' },
+                    },
+                },
+            },
         };
         const service = start();
         await service.initializePromise;
         assert.strictEqual(service.diagnostics.state, 'failed');
+        sinon.assert.notCalled(factory);
+        sinon.assert.calledOnce(logError);
+    });
+
+    test('a configured build fails closed while the DevDeviceId provider is unavailable', async () => {
+        getDevDeviceId.returns(undefined);
+        const service = start();
+        await service.initializePromise;
+        assert.strictEqual(service.diagnostics.state, 'failed');
+        assert.strictEqual(service.getTreatmentVariable('example', false), false);
         sinon.assert.notCalled(factory);
         sinon.assert.calledOnce(logError);
     });
@@ -212,9 +247,9 @@ suite('Experimentation service', () => {
         assert.strictEqual(options.extensionName, ENVS_EXTENSION_ID);
         assert.strictEqual(options.extensionVersion, VERSION);
         assert.strictEqual(options.targetPopulation, 'public');
-        assert.strictEqual(options.assignmentsEndpoint, CONFIGURATION.assignmentsEndpoint);
+        assert.strictEqual(options.assignmentsEndpoint, EXPERIMENTATION_ASSIGNMENTS_ENDPOINT);
         assert.deepStrictEqual(options.assignmentsFilterProviders?.[0].getFilters(), new Map([
-            ['approved_identity', IDENTITY], ['approved_version', VERSION], ['approved_language', 'en'],
+            ['devdeviceid', DEV_DEVICE_ID], ['approved_version', VERSION], ['approved_language', 'en'],
         ]));
         assert.ok(options.fetch, 'both endpoints use the lifetime-bound transport');
         assert.strictEqual(options.filterProviders, undefined, 'new parameters must not become legacy headers');
@@ -277,7 +312,7 @@ suite('Experimentation service', () => {
             context = {
                 ...context,
                 extension: {
-                    packageJSON: { version: VERSION, experimentation: IDENTITY_ONLY_CONFIGURATION },
+                    packageJSON: { version: VERSION, experimentation: IDENTITY_ONLY_MANIFEST },
                 },
             };
             await cache({ example: true }, IDENTITY_ONLY_CONFIGURATION);
@@ -453,6 +488,7 @@ suite('Experimentation service', () => {
         await service.initializePromise;
         assert.strictEqual(service.diagnostics.state, 'disabled');
         sinon.assert.notCalled(factory);
+        sinon.assert.notCalled(getDevDeviceId);
         sinon.assert.notCalled(envApis.getMachineId as sinon.SinonStub);
     });
 
@@ -508,7 +544,7 @@ suite('Experimentation service', () => {
     });
 
     test('automated extension hosts cannot construct a live SDK even with publisher configuration', () => {
-        const service = new ExperimentationService(context, factory, true);
+        const service = new ExperimentationService(context, factory, getDevDeviceId, true);
         services.push(service);
         assert.strictEqual(service.diagnostics.state, 'disabled');
         sinon.assert.notCalled(factory);

@@ -2,7 +2,11 @@
 // Licensed under the MIT License.
 
 export type ExperimentationPopulation = 'public' | 'insider' | 'internal' | 'team';
-export type AssignmentParameterSource = 'machineId' | 'extensionVersion' | 'language';
+export type AssignmentParameterSource = 'devDeviceId' | 'extensionVersion' | 'language';
+
+export const EXPERIMENTATION_ASSIGNMENTS_ENDPOINT =
+    'https://exp.individual.githubcopilot.com/api/v1/assignments';
+export const EXPERIMENTATION_IDENTITY_PARAMETER = 'devdeviceid';
 
 export interface ExperimentationConfiguration {
     readonly assignmentsEndpoint: string;
@@ -12,6 +16,7 @@ export interface ExperimentationConfiguration {
 }
 
 const GENERIC_PARAMETERS = new Set([
+    EXPERIMENTATION_IDENTITY_PARAMETER,
     'vscode_core_appversion',
     'vscode_core_build',
     'vscode_core_extensionname',
@@ -32,61 +37,43 @@ export function readExperimentationConfiguration(manifest: unknown): Experimenta
     if (!isRecord(config)) {
         throw new Error('The experimentation manifest entry must be an object.');
     }
-    const endpoint = config.assignmentsEndpoint;
-    if (typeof endpoint !== 'string') {
-        throw new Error('Experimentation requires an approved assignmentsEndpoint.');
-    }
-    const url = new URL(endpoint);
-    if (
-        url.protocol !== 'https:' ||
-        url.username ||
-        url.password ||
-        url.search ||
-        url.hash ||
-        !url.pathname.endsWith('/api/v1/assignments')
-    ) {
+    if (config.assignmentsEndpoint !== undefined || config.identityParameter !== undefined) {
         throw new Error(
-            'assignmentsEndpoint must be an HTTPS assignments API URL without credentials or query parameters.',
+            'The experimentation endpoint and identity parameter are platform-owned and cannot be overridden.',
         );
     }
     const population = config.targetPopulation;
     if (population !== 'public' && population !== 'insider' && population !== 'internal' && population !== 'team') {
         throw new Error('Experimentation requires an explicitly approved targetPopulation.');
     }
-    if (!isRecord(config.assignmentParameters)) {
+    if (config.assignmentParameters !== undefined && !isRecord(config.assignmentParameters)) {
         throw new Error('Experimentation requires approved assignment parameter bindings.');
     }
 
-    const parameters: Record<string, AssignmentParameterSource> = {};
-    for (const [name, source] of Object.entries(config.assignmentParameters)) {
+    const parameters: Record<string, AssignmentParameterSource> = {
+        [EXPERIMENTATION_IDENTITY_PARAMETER]: 'devDeviceId',
+    };
+    for (const [name, source] of Object.entries(config.assignmentParameters ?? {})) {
         if (!/^[A-Za-z][A-Za-z0-9_.-]*$/.test(name) || /^x-/i.test(name) || GENERIC_PARAMETERS.has(name)) {
             throw new Error(
                 'Assignment parameters must use new API names and must not replace generic SDK parameters.',
             );
         }
-        if (source !== 'machineId' && source !== 'extensionVersion' && source !== 'language') {
+        if (source !== 'extensionVersion' && source !== 'language') {
             throw new Error(
-                'Unsupported assignment parameter source. Add an approved identity provider before enabling TAS.',
+                'Unsupported assignment parameter source. The DevDeviceId binding is platform-owned.',
             );
         }
         parameters[name] = source;
     }
-    const identityParameter = config.identityParameter;
-    if (
-        typeof identityParameter !== 'string' ||
-        parameters[identityParameter] !== 'machineId' ||
-        Object.values(parameters).filter((source) => source === 'machineId').length !== 1 ||
-        Object.keys(parameters).length > 45
-    ) {
-        throw new Error(
-            'Experimentation requires one explicitly approved machineId identity binding and at most 45 parameters.',
-        );
+    if (Object.keys(parameters).length > 45) {
+        throw new Error('Experimentation supports at most 45 assignment parameters.');
     }
 
     return {
-        assignmentsEndpoint: url.toString(),
+        assignmentsEndpoint: EXPERIMENTATION_ASSIGNMENTS_ENDPOINT,
         targetPopulation: population,
-        identityParameter,
+        identityParameter: EXPERIMENTATION_IDENTITY_PARAMETER,
         assignmentParameters: Object.freeze(parameters),
     };
 }

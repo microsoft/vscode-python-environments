@@ -3,7 +3,11 @@
 
 import assert from 'node:assert';
 import * as sinon from 'sinon';
-import { ExperimentationConfiguration } from '../../../common/experimentation/configuration';
+import {
+    EXPERIMENTATION_ASSIGNMENTS_ENDPOINT,
+    EXPERIMENTATION_IDENTITY_PARAMETER,
+    type ExperimentationConfiguration,
+} from '../../../common/experimentation/configuration';
 import {
     ExperimentationStorage,
     type SdkTargetingValues,
@@ -13,11 +17,11 @@ import * as logging from '../../../common/logging';
 import { MockMemento } from '../../mocks/mementos';
 
 const configuration: ExperimentationConfiguration = {
-    assignmentsEndpoint: 'https://assignments.example.invalid/api/v1/assignments',
+    assignmentsEndpoint: EXPERIMENTATION_ASSIGNMENTS_ENDPOINT,
     targetPopulation: 'public',
-    identityParameter: 'approved_identity',
+    identityParameter: EXPERIMENTATION_IDENTITY_PARAMETER,
     assignmentParameters: {
-        approved_identity: 'machineId',
+        devdeviceid: 'devDeviceId',
         approved_language: 'language',
     },
 };
@@ -29,7 +33,7 @@ const assignments = {
 
 function resolvedParameters(identity: string, language = 'en'): ReadonlyMap<string, string> {
     return new Map([
-        ['approved_identity', identity],
+        ['devdeviceid', identity],
         ['approved_language', language],
     ]);
 }
@@ -52,7 +56,7 @@ suite('Experimentation storage', () => {
         const first = new ExperimentationStorage(
             globalState,
             configuration,
-            resolvedParameters('machine-a'),
+            resolvedParameters('device-a'),
             sdkTargetingValues(),
             '1.0.0',
             () => true,
@@ -61,61 +65,66 @@ suite('Experimentation storage', () => {
         await first.update(TAS_CACHE_KEY, assignments);
         const restarted = new ExperimentationStorage(globalState, configuration, new Map([
             ['approved_language', 'en'],
-            ['approved_identity', 'machine-a'],
+            ['devdeviceid', 'device-a'],
         ]), sdkTargetingValues(), '1.0.0', () => true);
         assert.deepStrictEqual(restarted.get(TAS_CACHE_KEY), assignments);
         assert.strictEqual(restarted.hasCachedAssignments(), true);
         assert.deepStrictEqual(restarted.keys(), [TAS_CACHE_KEY]);
         assert.strictEqual(globalState.get('unrelated'), 1);
-        assert.ok(globalState.keys().every((key) => !key.includes('machine-a')));
+        assert.ok(globalState.keys().every((key) => !key.includes('device-a') && !key.includes('machine-a')));
     });
 
-    test('does not reuse another targeting value, audience, endpoint or extension version', async () => {
+    test('does not reuse another identity, targeting value, audience, endpoint or extension version', async () => {
         const globalState = new MockMemento();
         const original = new ExperimentationStorage(
             globalState,
             configuration,
-            resolvedParameters('a'),
-            sdkTargetingValues({ clientId: 'a' }),
+            resolvedParameters('device-a'),
+            sdkTargetingValues({ clientId: 'machine-a' }),
             '1',
             () => true,
         );
         await original.update(TAS_CACHE_KEY, assignments);
         const others = [
             new ExperimentationStorage(
-                globalState, configuration, resolvedParameters('b'), sdkTargetingValues({ clientId: 'b' }), '1',
+                globalState, configuration, resolvedParameters('device-b'),
+                sdkTargetingValues({ clientId: 'machine-a' }), '1', () => true,
+            ),
+            new ExperimentationStorage(
+                globalState, configuration, resolvedParameters('device-a', 'fr'),
+                sdkTargetingValues({ clientId: 'machine-a' }), '1', () => true,
+            ),
+            new ExperimentationStorage(
+                globalState, configuration, resolvedParameters('device-a'),
+                sdkTargetingValues({ clientId: 'machine-a', language: 'fr' }), '1', () => true,
+            ),
+            new ExperimentationStorage(
+                globalState, configuration, resolvedParameters('device-a'),
+                sdkTargetingValues({ applicationVersion: '1.111.0', clientId: 'machine-a' }), '1', () => true,
+            ),
+            new ExperimentationStorage(
+                globalState, configuration, resolvedParameters('device-a'),
+                sdkTargetingValues({ build: 'Visual Studio Code - Insiders', clientId: 'machine-a' }), '1',
                 () => true,
             ),
             new ExperimentationStorage(
-                globalState, configuration, resolvedParameters('a', 'fr'),
-                sdkTargetingValues({ clientId: 'a' }), '1', () => true,
-            ),
-            new ExperimentationStorage(
-                globalState, configuration, resolvedParameters('a'),
-                sdkTargetingValues({ clientId: 'a', language: 'fr' }), '1', () => true,
-            ),
-            new ExperimentationStorage(
-                globalState, configuration, resolvedParameters('a'),
-                sdkTargetingValues({ applicationVersion: '1.111.0', clientId: 'a' }), '1', () => true,
-            ),
-            new ExperimentationStorage(
-                globalState, configuration, resolvedParameters('a'),
-                sdkTargetingValues({ build: 'Visual Studio Code - Insiders', clientId: 'a' }), '1', () => true,
+                globalState, configuration, resolvedParameters('device-a'),
+                sdkTargetingValues({ clientId: 'machine-b' }), '1', () => true,
             ),
             new ExperimentationStorage(
                 globalState,
                 { ...configuration, targetPopulation: 'insider' },
-                resolvedParameters('a'),
-                sdkTargetingValues({ clientId: 'a' }),
+                resolvedParameters('device-a'),
+                sdkTargetingValues({ clientId: 'machine-a' }),
                 '1',
                 () => true,
             ),
             new ExperimentationStorage(globalState, {
                 ...configuration, assignmentsEndpoint: 'https://other.example.invalid/api/v1/assignments',
-            }, resolvedParameters('a'), sdkTargetingValues({ clientId: 'a' }), '1', () => true),
+            }, resolvedParameters('device-a'), sdkTargetingValues({ clientId: 'machine-a' }), '1', () => true),
             new ExperimentationStorage(
-                globalState, configuration, resolvedParameters('a'), sdkTargetingValues({ clientId: 'a' }), '2',
-                () => true,
+                globalState, configuration, resolvedParameters('device-a'),
+                sdkTargetingValues({ clientId: 'machine-a' }), '2', () => true,
             ),
         ];
         assert.ok(others.every((storage) => !storage.hasCachedAssignments()));

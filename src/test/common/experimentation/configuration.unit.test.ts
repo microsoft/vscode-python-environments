@@ -3,16 +3,15 @@
 
 import assert from 'node:assert';
 import {
+    EXPERIMENTATION_ASSIGNMENTS_ENDPOINT,
+    EXPERIMENTATION_IDENTITY_PARAMETER,
     getExperimentationExtensionVersion,
     readExperimentationConfiguration,
 } from '../../../common/experimentation/configuration';
 
 const configuration = {
-    assignmentsEndpoint: 'https://assignments.example.invalid/api/v1/assignments',
     targetPopulation: 'public',
-    identityParameter: 'approved_identity',
     assignmentParameters: {
-        approved_identity: 'machineId',
         approved_version: 'extensionVersion',
         approved_language: 'language',
     },
@@ -26,26 +25,29 @@ suite('Experimentation configuration', () => {
 
     test('reads only the publisher manifest entry and copies approved bindings', () => {
         const result = readExperimentationConfiguration({ experimentation: configuration });
-        assert.deepStrictEqual(result, configuration);
+        assert.deepStrictEqual(result, {
+            ...configuration,
+            assignmentsEndpoint: EXPERIMENTATION_ASSIGNMENTS_ENDPOINT,
+            identityParameter: EXPERIMENTATION_IDENTITY_PARAMETER,
+            assignmentParameters: {
+                devdeviceid: 'devDeviceId',
+                ...configuration.assignmentParameters,
+            },
+        });
         assert.notStrictEqual(result?.assignmentParameters, configuration.assignmentParameters);
         assert.ok(Object.isFrozen(result?.assignmentParameters));
     });
 
-    for (const endpoint of [
-        'http://assignments.example.invalid/api/v1/assignments',
-        'https://user:password@assignments.example.invalid/api/v1/assignments',
-        'https://assignments.example.invalid/api/v1/assignments?token=secret',
-        'https://assignments.example.invalid/api/v1/assignments#fragment',
-        'https://assignments.example.invalid/',
-        'not a URL',
-        undefined,
-    ]) {
-        test(`rejects an unsafe or incomplete endpoint (${String(endpoint)})`, () => {
+    test('rejects publisher overrides of the platform-owned endpoint or identity parameter', () => {
+        for (const override of [
+            { assignmentsEndpoint: 'https://other.example.invalid/api/v1/assignments' },
+            { identityParameter: 'other_identity' },
+        ]) {
             assert.throws(() => readExperimentationConfiguration({
-                experimentation: { ...configuration, assignmentsEndpoint: endpoint },
+                experimentation: { ...configuration, ...override },
             }));
-        });
-    }
+        }
+    });
 
     test('requires an explicit supported population', () => {
         for (const targetPopulation of [undefined, 'insiders', 'unknown', true]) {
@@ -60,20 +62,23 @@ suite('Experimentation configuration', () => {
             assert.throws(() => readExperimentationConfiguration({
                 experimentation: {
                     ...configuration,
-                    identityParameter: name,
-                    assignmentParameters: { [name]: 'machineId' },
+                    assignmentParameters: { [name]: 'devDeviceId' },
                 },
             }));
         }
     });
 
-    test('requires an unambiguous identity source rather than guessing DevDeviceId', () => {
+    test('adds the approved DevDeviceId identity and rejects publisher identity overrides', () => {
+        const identityOnly = readExperimentationConfiguration({
+            experimentation: { targetPopulation: 'public' },
+        });
+        assert.deepStrictEqual(identityOnly?.assignmentParameters, { devdeviceid: 'devDeviceId' });
+
         for (const assignmentParameters of [
-            {},
             { approved_identity: 'DevDeviceId' },
-            { approved_identity: 'language' },
-            { approved_identity: 'machineId', second_identity: 'machineId' },
-            { approved_identity: 'machineId', unapproved: 'some literal value' },
+            { devdeviceid: 'machineId' },
+            { devdeviceid: 'devDeviceId', second_identity: 'devDeviceId' },
+            { devdeviceid: 'devDeviceId', unapproved: 'some literal value' },
         ]) {
             assert.throws(() => readExperimentationConfiguration({
                 experimentation: { ...configuration, assignmentParameters },
