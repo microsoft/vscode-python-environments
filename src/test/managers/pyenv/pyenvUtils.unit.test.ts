@@ -66,6 +66,14 @@ suite('pyenvUtils - getPyenvVersion', () => {
         assert.strictEqual(await getPyenvVersion('pyenv.bat'), '3.1.1');
     });
 
+    test('returns the PEP 440 release from a git-describe version', async () => {
+        sinon
+            .stub(childProcessApis, 'execProcess')
+            .resolves({ stdout: 'pyenv 2.3.24-19-gabcdef1\n', stderr: '' });
+
+        assert.strictEqual(await getPyenvVersion('pyenv'), '2.3.24');
+    });
+
     test('returns undefined when the command fails', async () => {
         sinon.stub(childProcessApis, 'execProcess').rejects(new Error('Command not found'));
 

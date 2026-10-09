@@ -181,7 +181,7 @@ export async function getPyenvVersion(pyenv: string): Promise<string | undefined
     try {
         const { stdout } = await execProcess(`"${pyenv}" --version`);
         traceInfo(`Pyenv version output: ${stdout.trim()}`);
-        const match = stdout.match(/pyenv(?:-win)?\s+(\d+(?:\.\d+)+(?:[a-z0-9.-]*)?)/i);
+        const match = stdout.match(/pyenv(?:-win)?\s+(\d+(?:\.\d+)+)/i);
         return match?.[1];
     } catch (error) {
         traceInfo(`Unable to determine Pyenv version: ${error instanceof Error ? error.message : String(error)}`);
