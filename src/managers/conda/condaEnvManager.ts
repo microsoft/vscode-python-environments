@@ -28,6 +28,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability } from '../../capabilities';
 import { CondaStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -44,6 +45,7 @@ import {
 } from '../../internal/pythonToolSupport';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { requiredEnvironmentCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { notifyMissingManagerIfDefault } from '../common/utils';
@@ -69,6 +71,12 @@ import {
 } from './condaUtils';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        ...requiredEnvironmentCapabilities,
+        'environments.create': supportedCapability,
+        'environments.remove': supportedCapability,
+    };
+
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

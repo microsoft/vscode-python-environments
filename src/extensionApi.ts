@@ -1,4 +1,5 @@
-import { Disposable, Event, EventEmitter, TaskExecution, Terminal, Uri } from 'vscode';
+import { Disposable, Event, EventEmitter, l10n, TaskExecution, Terminal, Uri } from 'vscode';
+import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCapability, Support } from './capabilities';
 import type {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -142,6 +143,49 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             );
         }
         return new Disposable(() => disposables.forEach((d) => d.dispose()));
+    }
+
+    /**
+     * Queries one registered environment provider without activation, waiting, or prompting.
+     * @param managerId Exact registered environment manager ID.
+     * @param capability Feature to query.
+     * @param context Optional scope, environment, and project forwarded to the provider.
+     */
+    async getEnvironmentManagerCapability(
+        managerId: string,
+        capability: EnvironmentManagerCapability,
+        context?: CapabilityContext,
+    ): Promise<Support> {
+        if (context?.environment && context.environment.envId.managerId !== managerId) {
+            throw new Error(l10n.t('The environment does not belong to environment manager {0}.', managerId));
+        }
+        const manager = this.envManagers.getEnvironmentManager(managerId);
+        if (manager) {
+            return manager.getCapability(capability, context);
+        }
+        return { supported: false, reason: l10n.t('Environment manager {0} is unavailable.', managerId) };
+    }
+
+    /**
+     * Queries the registered package provider routed for an environment or explicit project without activation or waiting.
+     * @param environment Environment whose packages would be managed.
+     * @param capability Feature to query.
+     * @param project Optional project selecting its configured, project-bound provider.
+     */
+    async getPackageManagerCapability(
+        environment: PythonEnvironment,
+        capability: PackageManagerCapability,
+        project?: PythonProject,
+    ): Promise<Support> {
+        const manager = this.envManagers.getPackageManager(project?.uri ?? environment);
+        // A project-aware root is not a usable substitute for a missing scoped instance.
+        if (!manager || (manager.createForProject && !manager.project)) {
+            return {
+                supported: false,
+                reason: l10n.t('No package manager is available for the environment and project context.'),
+            };
+        }
+        return manager.getCapability(capability, { environment, project });
     }
 
     createPythonEnvironmentItem(info: PythonEnvironmentInfo, manager: EnvironmentManager): PythonEnvironment {

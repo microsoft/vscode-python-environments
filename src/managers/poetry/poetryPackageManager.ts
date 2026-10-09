@@ -27,6 +27,7 @@ import {
     PythonEnvironmentApi,
     PythonProject,
 } from '../../api';
+import { Capabilities, PackageManagerCapability, resolvePackageManagerCapability, Support } from '../../capabilities';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
 import { PackageManagerRequiresProjectError } from '../common/errors';
@@ -46,6 +47,32 @@ import { runPoetry } from './commands/runPoetry';
 import { PackageToolSupport, PythonToolError, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
+        'packages.list': async () => this.checkProjectSupport(),
+        'packages.direct': async () => this.checkProjectSupport(),
+        'packages.manage': async () => this.checkProjectSupport(),
+        'packages.manage.install': async (context) =>
+            resolvePackageManagerCapability(this, 'packages.manage', context),
+        'packages.manage.uninstall': async (context) =>
+            resolvePackageManagerCapability(this, 'packages.manage', context),
+        'packages.refresh': async () => this.checkProjectSupport(),
+        'packages.availableVersions': async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package version lookup is not supported by this extension.'),
+        }),
+        'packages.manage.upgrade': async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package management does not support the upgrade option.'),
+        }),
+    };
+
+    private checkProjectSupport(): Support {
+        if (!this.project) {
+            return { supported: false, reason: l10n.t('Poetry package management requires a project-bound manager.') };
+        }
+        return { supported: true };
+    }
+
     private readonly packagesChangedEmitter = new EventEmitter<DidChangePackagesEventArgs>();
     readonly onDidChangePackages: Event<DidChangePackagesEventArgs> = this.packagesChangedEmitter.event;
 

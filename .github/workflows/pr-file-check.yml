@@ -49,6 +49,7 @@ jobs:
             src/api.ts
             src/types.ts
             src/publicErrors.ts
+            src/capabilities.ts
           file-pattern: 'api/package.json'
           skip-label: 'skip api version'
           failure-message: 'The public API (${prereq-pattern}) was changed without bumping the package version in ${file-pattern} (the ${skip-label} label can be used to pass this check)'
@@ -60,6 +61,7 @@ jobs:
             src/api.ts
             src/types.ts
             src/publicErrors.ts
+            src/capabilities.ts
           file-pattern: 'api/CHANGELOG.md'
           skip-label: 'skip api changelog'
           failure-message: 'The public API (${prereq-pattern}) was changed without a changelog entry in ${file-pattern} (the ${skip-label} label can be used to pass this check)'
@@ -71,6 +73,7 @@ jobs:
             src/api.ts
             src/types.ts
             src/publicErrors.ts
+            src/capabilities.ts
           file-pattern: 'docs/README.md'
           skip-label: 'skip api docs'
           failure-message: 'The public API (${prereq-pattern}) was changed without updating ${file-pattern} (the ${skip-label} label can be used to pass this check)'

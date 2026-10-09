@@ -20,6 +20,7 @@ import { PythonEnvironmentManagers } from '../../features/envManagers';
 import { PythonEnvironmentApiImpl } from '../../extensionApi';
 import type { InternalDidChangePackagesEventArgs } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { allSupportedPackageCapabilities } from '../capabilityFixtures';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
 for (const inlineEnabled of [false, true]) {
@@ -75,6 +76,7 @@ for (const inlineEnabled of [false, true]) {
                 refresh: async () => undefined,
                 getPackages: async () => [],
                 onDidChangePackages: emitter.event,
+                capabilities: allSupportedPackageCapabilities,
                 createForProject: () => {
                     scopedProvider = {
                         name: 'custom',
@@ -82,6 +84,7 @@ for (const inlineEnabled of [false, true]) {
                         refresh: async () => undefined,
                         getPackages: async () => [],
                         onDidChangePackages: scopedEvent,
+                        capabilities: allSupportedPackageCapabilities,
                     };
                     return scopedProvider;
                 },

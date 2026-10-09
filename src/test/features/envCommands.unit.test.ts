@@ -36,6 +36,7 @@ import {
 import type { EnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import { InternalEnvironmentManager, InternalPackageManager } from '../../managers/common/registeredManagers';
+import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from '../capabilityFixtures';
 import { setupNonThenable } from '../mocks/helper';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
@@ -60,6 +61,7 @@ suite('Environment removal command ownership', () => {
                 refresh: async () => undefined,
                 resolve: async () => environment,
                 remove,
+                capabilities: allSupportedEnvironmentCapabilities,
             });
             const expectedContext = managerId === INLINE_SCRIPT_MANAGER_ID ? environment : project.uri;
             const getEnvironmentManager = sinon.stub().callsFake((context) =>
@@ -659,6 +661,7 @@ suite('Package command manager ownership', () => {
             manage,
             refresh: async () => undefined,
             getPackages: async () => undefined,
+            capabilities: allSupportedPackageCapabilities,
         });
         const environmentItem = { environment } as PythonEnvTreeItem;
         const packageItem = new PackageTreeItem(

@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { EventEmitter, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
+import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -17,11 +17,13 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability } from '../../capabilities';
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { EnvironmentToolSupport, pythonToolSupport } from '../../internal/pythonToolSupport';
 import { withProgress } from '../../common/window.apis';
+import { requiredEnvironmentCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import {
@@ -36,6 +38,15 @@ import { getDefaultGlobalPython, refreshPythons, resolveSystemPythonEnvironmentP
 import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToInstall } from './uvPythonInstaller';
 
 export class SysPythonManager implements EnvironmentManager {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        ...requiredEnvironmentCapabilities,
+        'environments.create': supportedCapability,
+        'environments.remove': async () => ({
+            supported: false,
+            reason: l10n.t('Removing a global Python installation is not supported.'),
+        }),
+    };
+
     private collection: PythonEnvironment[] = [];
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

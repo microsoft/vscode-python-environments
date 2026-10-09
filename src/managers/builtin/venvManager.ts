@@ -29,6 +29,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability } from '../../capabilities';
 import { executeCommand } from '../../common/command.api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
@@ -46,6 +47,7 @@ import {
 } from '../../internal/pythonToolSupport';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
+import { requiredEnvironmentCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
@@ -69,6 +71,12 @@ import {
 } from './venvUtils';
 
 export class VenvManager implements EnvironmentManager {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        ...requiredEnvironmentCapabilities,
+        'environments.create': supportedCapability,
+        'environments.remove': supportedCapability,
+    };
+
     private collection: PythonEnvironment[] = [];
     private environmentFolders: { collection: PythonEnvironment[]; length: number; folders: Set<string> } | undefined;
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();

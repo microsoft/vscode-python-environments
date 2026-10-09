@@ -35,6 +35,42 @@ export async function activate() {
 }
 ```
 
+## Manager capabilities
+
+Capabilities report general manager support without invoking an operation:
+
+```typescript
+const api = await PythonEnvironments.api();
+const environment = await api.getEnvironment(undefined);
+if (environment && typeof api.getPackageManagerCapability === 'function') {
+    const support = await api.getPackageManagerCapability(environment, 'packages.direct');
+    if (support.supported) {
+        // Best-effort direct/transitive package classification is available.
+    }
+}
+```
+
+Managers advertise every capability key explicitly: there are no defaults, and
+`capabilities` is a required property on both `EnvironmentManager` and
+`PackageManager`. A key a manager omits at runtime resolves
+`{ supported: false, reason: 'Capability not implemented' }`.
+
+To change a manager's advertised support, update the check for that key in its
+map; return `{ supported: false, reason }` to disable support. Checks must be
+read-only and noninteractive.
+
+Capability keys come from the `EnvironmentManagerCapability` and
+`PackageManagerCapability` type unions. Adding a public key requires updating
+every built-in manager's `capabilities` map, plus tests and documentation.
+Removing a key from the type union is a breaking API change.
+
+Feature-detect query methods when supporting older extension runtimes. Queries
+use currently registered managers and describe support, not request validity or
+guaranteed success.
+
+See the [capability guide](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#manager-capabilities)
+for the full catalog and provider maintenance.
+
 ## Full API reference
 
 📘 **[Python Environments API reference](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md)**
@@ -51,4 +87,3 @@ extensibility - with field tables, parameter tables, return types, and examples.
 - [Extensibility](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#extensibility) - register your own environment manager, package manager, or project creator
 
 See [`CHANGELOG.md`](https://github.com/microsoft/vscode-python-environments/blob/main/api/CHANGELOG.md) for API changes between versions.
-

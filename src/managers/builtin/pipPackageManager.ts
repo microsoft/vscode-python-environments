@@ -24,11 +24,13 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { Capabilities, PackageManagerCapability, supportedCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 import { CommandConstructorOptions } from '../base/commands/index';
+import { requiredPackageCapabilities } from '../common/capabilityDeclarations';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import { createPipOrUvCommand, createPipOrUvCommandWithKind } from './commands/factory';
@@ -51,6 +53,23 @@ import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
+        ...requiredPackageCapabilities,
+        'packages.manage.install': supportedCapability,
+        'packages.manage.uninstall': supportedCapability,
+        'packages.manage.upgrade': supportedCapability,
+        'packages.availableVersions': async ({ environment }) => {
+            try {
+                await this.getPackageAvailableVersionsCommand(environment!);
+            } catch (error) {
+                return { supported: false, reason: (error as Error).message };
+            }
+            return await supportedCapability({ environment });
+        },
+        // Dependency roots are best-effort classification, not exact user install intent.
+        'packages.direct': supportedCapability,
+    };
+
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 
