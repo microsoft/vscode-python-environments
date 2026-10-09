@@ -220,16 +220,23 @@ export function notifyInlineScriptSetupOutcome(uri: Uri, routing: InlineScriptRo
         return;
     }
     if (outcome?.kind === 'cancelled') {
-        showInformationMessage(l10n.t('Environment setup was canceled.'));
+        showInformationMessage(outcome.message ?? l10n.t('Environment setup was canceled.'));
         return;
     }
     if (outcome?.kind === 'failed') {
+        if (outcome.alreadyReported) {
+            return;
+        }
         if (outcome.category === 'compatible-python-declined') {
             // User declined the install prompt; don't nag.
             return;
         }
         if (outcome.category === 'no-compatible-python') {
             showWarningMessage(buildNoCompatiblePythonMessage(outcome.requiresPython));
+            return;
+        }
+        if (outcome.message) {
+            showErrorMessage(outcome.message);
             return;
         }
     }

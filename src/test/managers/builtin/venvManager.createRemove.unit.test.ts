@@ -20,6 +20,8 @@ import * as windowApis from '../../../common/window.apis';
 import * as envCommands from '../../../features/envCommands';
 import { VenvManager } from '../../../managers/builtin/venvManager';
 import * as venvUtils from '../../../managers/builtin/venvUtils';
+import * as pythonInstaller from '../../../managers/builtin/pythonInstaller';
+import * as builtinUtils from '../../../managers/builtin/utils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 
@@ -62,6 +64,8 @@ suite('VenvManager.create - orchestration', () => {
     let executeCommandStub: sinon.SinonStub;
     let quickCreateVenvStub: sinon.SinonStub;
     let showErrorStub: sinon.SinonStub;
+    let installPythonStub: sinon.SinonStub;
+    let resolveInstalledStub: sinon.SinonStub;
     let envDir: string;
     let pythonPath: string;
     let tmpRoot: string;
@@ -71,6 +75,8 @@ suite('VenvManager.create - orchestration', () => {
         quickCreateVenvStub = sinon.stub(venvUtils, 'quickCreateVenv');
         sinon.stub(envCommands, 'findParentIfFile').callsFake(async (value: string) => value);
         showErrorStub = sinon.stub(windowApis, 'showErrorMessage');
+        installPythonStub = sinon.stub(pythonInstaller, 'promptInstallPython').resolves(undefined);
+        resolveInstalledStub = sinon.stub(builtinUtils, 'resolveSystemPythonEnvironmentPath').resolves(undefined);
         executeCommandStub = sinon.stub(commandApis, 'executeCommand').resolves();
 
         tmpRoot = await fse.mkdtemp(path.join(os.tmpdir(), 'venvmgr-'));
@@ -177,6 +183,73 @@ suite('VenvManager.create - orchestration', () => {
         await assert.rejects(manager.create(Uri.file(path.join(tmpRoot, 'project')), undefined), /creation failed/);
 
         assert.strictEqual((manager as any).skipWatcherRefresh, false);
+    });
+
+    test('stops without an extra error or environment creation when Python installation is declined', async () => {
+        const manager = createManager();
+
+        assert.strictEqual(await manager.create(Uri.file(path.join(tmpRoot, 'project')), { quickCreate: true }), undefined);
+
+        sinon.assert.calledOnce(installPythonStub);
+        sinon.assert.notCalled(createPythonVenvStub);
+        sinon.assert.notCalled(quickCreateVenvStub);
+        sinon.assert.notCalled(showErrorStub);
+    });
+
+    test('uses the exact returned base when discovery refresh fails', async () => {
+        const basePath = path.join(tmpRoot, 'base', 'python.exe');
+        const base: PythonEnvironment = {
+            ...createMockPythonEnvironment({
+                envPath: basePath,
+                sysPrefix: path.dirname(basePath),
+                version: '3.14.6',
+                managerId: 'ms-python.python:system',
+            }),
+            execInfo: { run: { executable: basePath } },
+        };
+        const manager = createManager({ refreshEnvironments: sinon.stub().rejects(new Error('refresh unavailable')) });
+        installPythonStub.resolves(basePath);
+        resolveInstalledStub.resolves(base);
+        quickCreateVenvStub.resolves({ environment: createdEnvironment() });
+
+        await manager.create(Uri.file(path.join(tmpRoot, 'project')), { quickCreate: true });
+
+        assert.strictEqual(quickCreateVenvStub.firstCall.args[4], base);
+        sinon.assert.notCalled(showErrorStub);
+    });
+
+    test('prefers refreshed metadata for an in-place update over a stale resolver result', async () => {
+        const basePath = path.join(tmpRoot, 'base', 'python.exe');
+        const base: PythonEnvironment = {
+            ...createMockPythonEnvironment({
+                envPath: basePath,
+                sysPrefix: path.dirname(basePath),
+                version: '3.14.7',
+                managerId: 'ms-python.python:system',
+            }),
+            execInfo: { run: { executable: basePath } },
+        };
+        const globals = sinon.stub().onFirstCall().resolves([]).onSecondCall().resolves([base]);
+        const manager = createManager({ getEnvironments: globals });
+        installPythonStub.resolves(basePath);
+        resolveInstalledStub.resolves({ ...base, version: '3.14.6' });
+        quickCreateVenvStub.resolves({ environment: createdEnvironment() });
+
+        await manager.create(Uri.file(path.join(tmpRoot, 'project')), { quickCreate: true });
+
+        assert.strictEqual(quickCreateVenvStub.firstCall.args[4], base);
+        sinon.assert.notCalled(resolveInstalledStub);
+    });
+
+    test('does not create a venv when the installed base cannot be resolved', async () => {
+        const manager = createManager();
+        installPythonStub.resolves(path.join(tmpRoot, 'missing', 'python.exe'));
+
+        assert.strictEqual(await manager.create(Uri.file(path.join(tmpRoot, 'project')), { quickCreate: true }), undefined);
+
+        sinon.assert.calledOnce(showErrorStub);
+        sinon.assert.notCalled(quickCreateVenvStub);
+        sinon.assert.notCalled(createPythonVenvStub);
     });
 });
 
