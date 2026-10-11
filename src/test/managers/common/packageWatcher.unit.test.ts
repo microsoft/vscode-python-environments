@@ -12,6 +12,7 @@ import {
     PythonProject,
 } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
+import * as workspaceFsApis from '../../../common/workspace.fs.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import type { EnvironmentManagers } from '../../../features/envManagers';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
@@ -41,6 +42,7 @@ suite('Package Watcher', () => {
             debug: sandbox.stub(),
         };
         createFileSystemWatcherStub = sandbox.stub(workspaceApis, 'createFileSystemWatcher');
+        sandbox.stub(workspaceFsApis, 'pathExists').resolves(true);
         sandbox.stub(workspaceApis, 'getConfiguration').returns({
             get: (_key: string, defaultValue?: unknown) => defaultValue ?? true,
         } as ReturnType<typeof workspaceApis.getConfiguration>);
@@ -300,6 +302,60 @@ suite('Package Watcher', () => {
             clock.restore();
         });
 
+        test('should not refresh packages when the environment executable was deleted', async () => {
+            const clock = sandbox.useFakeTimers();
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+            (workspaceFsApis.pathExists as sinon.SinonStub).resolves(false);
+
+            const env = createMockEnvironment();
+            const packageManager = createMockPackageManager();
+
+            watchPackageChangesForEnvironment(
+                env,
+                packageManager as PackageManager,
+                mockLogOutputChannel as LogOutputChannel,
+            );
+
+            mockWatcher._deleteEmitter.fire(Uri.file('/path/to/pkg.dist-info/METADATA'));
+            await clock.tickAsync(600);
+
+            assert.strictEqual(
+                (packageManager.refresh as sinon.SinonStub).callCount,
+                0,
+                'Should not refresh packages for a deleted environment',
+            );
+
+            clock.restore();
+        });
+
+        test('should refresh packages when a deleted environment executable reappears', async () => {
+            const clock = sandbox.useFakeTimers();
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+            (workspaceFsApis.pathExists as sinon.SinonStub).onFirstCall().resolves(false).resolves(true);
+
+            const env = createMockEnvironment();
+            const packageManager = createMockPackageManager();
+
+            watchPackageChangesForEnvironment(
+                env,
+                packageManager as PackageManager,
+                mockLogOutputChannel as LogOutputChannel,
+            );
+
+            mockWatcher._deleteEmitter.fire(Uri.file('/path/to/pkg.dist-info/METADATA'));
+            await clock.tickAsync(1_200);
+
+            assert.strictEqual(
+                (packageManager.refresh as sinon.SinonStub).callCount,
+                1,
+                'Should refresh packages after the environment is recreated',
+            );
+
+            clock.restore();
+        });
+
         test('should debounce multiple rapid file events', () => {
             const mockWatcher = createMockWatcher();
             createFileSystemWatcherStub.returns(mockWatcher);
@@ -528,7 +584,9 @@ suite('Package Watcher', () => {
             const terminal = { name: 'terminal' } as Terminal;
             const envManagers = {
                 onDidChangeActiveEnvironment: environmentChanges.event,
-                getPackageManager: sandbox.stub().callsFake((context) => (context === env ? packageManager : undefined)),
+                getPackageManager: sandbox
+                    .stub()
+                    .callsFake((context) => (context === env ? packageManager : undefined)),
             } as unknown as EnvironmentManagers;
 
             registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);

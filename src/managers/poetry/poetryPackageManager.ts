@@ -1,4 +1,5 @@
 import type { Pep440Version } from '@renovatebot/pep440';
+import * as fsapi from 'fs-extra';
 import * as path from 'path';
 import {
     CancellationError,
@@ -11,6 +12,7 @@ import {
     MarkdownString,
     ProgressLocation,
     ThemeIcon,
+    Uri,
 } from 'vscode';
 import { Disposable } from 'vscode-jsonrpc';
 import {
@@ -28,6 +30,7 @@ import {
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
 import { PackageManagerRequiresProjectError } from '../common/errors';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import {
@@ -39,6 +42,8 @@ import {
 } from './commands/index';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
+import { runPoetry } from './commands/runPoetry';
+import { PackageToolSupport, PythonToolError, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
     private readonly packagesChangedEmitter = new EventEmitter<DidChangePackagesEventArgs>();
@@ -79,8 +84,90 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         );
     }
 
-    async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
-        const cwd = await this.getProjectCwd();
+    readonly [pythonToolSupport]: PackageToolSupport = {
+        manage: async (environment, options, token, scope) => {
+            await this.verifyToolEnvironment(environment, scope, token);
+            await this.manage(environment, { ...options, runHeadless: true }, token, scope);
+        },
+        getPackages: async (environment, token, scope) => {
+            await this.verifyToolEnvironment(environment, scope, token);
+            return this.fetchInstalledPackagesForTools(environment, token, scope);
+        },
+    };
+
+    private async verifyToolEnvironment(
+        environment: PythonEnvironment,
+        scope: Uri,
+        token: CancellationToken,
+    ): Promise<void> {
+        throwIfCancelled(token);
+        const target = (await runPoetry(['env', 'info', '--path'], scope.fsPath, this.log, token, true)).trim();
+        throwIfCancelled(token);
+        const actual = path.isAbsolute(target) ? await fsapi.realpath(target) : undefined;
+        const selected = environment.sysPrefix ? await fsapi.realpath(environment.sysPrefix) : undefined;
+        if (!actual || !selected || normalizePath(actual) !== normalizePath(selected)) {
+            throw new PythonToolError(
+                'ENVIRONMENT_MISMATCH',
+                l10n.t(
+                    'Poetry for {0} targets {1}, not the selected environment {2}. Select this project\'s Poetry environment before querying or installing packages.',
+                    scope.fsPath,
+                    target || l10n.t('no environment'),
+                    environment.sysPrefix,
+                ),
+                environment,
+            );
+        }
+        throwIfCancelled(token);
+    }
+
+    private async fetchInstalledPackagesForTools(
+        environment: PythonEnvironment,
+        token: CancellationToken,
+        scope: Uri,
+    ): Promise<Package[]> {
+        // poetry show describes the lockfile, not the installed distributions.
+        const output = await runPoetry(
+            ['run', 'pip', 'list', '--format=json', '--disable-pip-version-check'],
+            scope.fsPath,
+            this.log,
+            token,
+            true,
+        );
+        throwIfCancelled(token);
+        const data: unknown = JSON.parse(output);
+        if (
+            !Array.isArray(data) ||
+            data.some(
+                (item) =>
+                    !item ||
+                    typeof item.name !== 'string' ||
+                    !item.name ||
+                    typeof item.version !== 'string' ||
+                    !item.version,
+            )
+        ) {
+            throw new PythonToolError(
+                'PACKAGE_QUERY_FAILED',
+                l10n.t('Poetry returned invalid installed-package information.'),
+                environment,
+            );
+        }
+        return data.map(({ name, version }: { name: string; version: string }) =>
+            this.api.createPackageItem({ name, displayName: name, version, description: version }, environment, this),
+        );
+    }
+
+    async manage(
+        environment: PythonEnvironment,
+        options: PackageManagementOptions,
+        toolToken?: CancellationToken,
+        scope?: Uri,
+    ): Promise<void> {
+        throwIfCancelled(toolToken);
+        if (toolToken && !scope) {
+            throw new PythonToolError('INVALID_REQUEST', l10n.t('A project scope is required for Poetry tools.'));
+        }
+        const cwd = toolToken && scope ? scope.fsPath : await this.getProjectCwd();
         let toInstall: string[] = [...(options.install ?? [])];
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
@@ -109,7 +196,12 @@ export class PoetryPackageManager implements PackageManager, Disposable {
 
         const execute = async (token?: CancellationToken): Promise<void> => {
             try {
-                await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, cwd, token);
+                await this.runPoetryManage(
+                    { install: toInstall, uninstall: toUninstall },
+                    cwd,
+                    token,
+                    !!toolToken,
+                );
                 await updatePackagesAndNotify(
                     this,
                     environment,
@@ -117,6 +209,10 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                     (changes) => {
                         this.packagesChangedEmitter.fire({ environment, manager: this, changes });
                     },
+                    toolToken && scope
+                        ? () => this.fetchInstalledPackagesForTools(environment, toolToken, scope)
+                        : undefined,
+                    !!toolToken,
                 );
             } catch (e) {
                 if (e instanceof CancellationError) {
@@ -136,7 +232,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         };
 
         if (options.runHeadless) {
-            await execute();
+            await execute(toolToken);
             return;
         }
 
@@ -231,7 +327,11 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         options: { install?: string[]; uninstall?: string[] },
         cwd: string,
         token?: CancellationToken,
+        toolExecution = false,
     ): Promise<void> {
+        if (toolExecution) {
+            throwIfCancelled(token);
+        }
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(
@@ -248,7 +348,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.uninstall);
-            await removeCmd.execute({ packages, cancellationToken: token });
+            await removeCmd.execute({ packages, cancellationToken: token, toolExecution });
         }
 
         // Handle installs
@@ -259,7 +359,11 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.install);
-            await addCmd.execute({ packages, cancellationToken: token });
+            await addCmd.execute({ packages, cancellationToken: token, toolExecution });
+            if (toolExecution) {
+                // poetry add skips already-declared dependencies, even when they are not installed.
+                await runPoetry(['install', '--no-root'], cwd, this.log, token, true);
+            }
         }
     }
 

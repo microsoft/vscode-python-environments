@@ -53,6 +53,8 @@ import { runAsTask } from './features/execution/runAsTask';
 import { runInBackground } from './features/execution/runInBackground';
 import { runInTerminal } from './features/terminal/runInTerminal';
 import { TerminalManager } from './features/terminal/terminalManager';
+import { PythonToolsApiImpl } from './internal/pythonTools';
+import type { PythonToolsApi } from './internal/pythonToolsApi';
 
 // Maximum time getEnvironment will block before serving the last-known environment while a
 // slow initial resolution/refresh continues in the background. Keeps consumers (e.g. Pylance's
@@ -61,6 +63,7 @@ const GET_ENVIRONMENT_TIMEOUT_MS = 1000;
 const GET_ENVIRONMENT_TIMED_OUT = Symbol('getEnvironmentTimedOut');
 
 export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
+    readonly __pythonTools: PythonToolsApi;
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
     private readonly _onDidChangePythonProjects = new EventEmitter<DidChangePythonProjectsEventArgs>();
@@ -78,6 +81,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         private readonly envVarManager: EnvVarManager,
         private readonly disposables: Disposable[] = [],
     ) {
+        this.__pythonTools = new PythonToolsApiImpl(envManagers, projectManager);
         this.previousProjects = this.projectManager.getProjects();
 
         this.disposables.push(

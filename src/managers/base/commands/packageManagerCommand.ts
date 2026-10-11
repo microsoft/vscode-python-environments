@@ -7,6 +7,8 @@ import { getConfiguration } from '../../../common/workspace.apis';
  */
 export interface BaseExecuteArgs {
     cancellationToken?: CancellationToken;
+    strict?: boolean;
+    toolExecution?: boolean;
 }
 
 /**
@@ -17,6 +19,8 @@ export interface CommandConstructorOptions {
     uvExecutable?: string;
     cwd?: string;
     log?: LogOutputChannel;
+    cancellationToken?: CancellationToken;
+    toolExecution?: boolean;
 }
 
 /**

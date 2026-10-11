@@ -1,5 +1,7 @@
 import { CancellationError, CancellationToken, LogOutputChannel } from 'vscode';
 import { spawnProcess } from '../../../common/childProcess.apis';
+import { runLoggedProcess } from '../../../common/utils/processRunner';
+import { throwIfCancelled } from '../../../internal/pythonToolSupport';
 import { getPoetry } from '../poetryUtils';
 
 export async function runPoetry(
@@ -7,12 +9,19 @@ export async function runPoetry(
     cwd?: string,
     log?: LogOutputChannel,
     token?: CancellationToken,
+    toolExecution = false,
 ): Promise<string> {
+    if (toolExecution) {
+        throwIfCancelled(token);
+    }
     const poetry = await getPoetry();
     if (!poetry) {
         throw new Error('Poetry executable not found');
     }
 
+    if (toolExecution) {
+        return runLoggedProcess(poetry, ['--no-interaction', ...args], { cwd }, log, token, 300_000, true);
+    }
     log?.info(`Running: ${poetry} ${args.join(' ')}`);
 
     return new Promise<string>((resolve, reject) => {

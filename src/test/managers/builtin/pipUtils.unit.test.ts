@@ -1,7 +1,7 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { CancellationToken, LogOutputChannel, Progress, ProgressLocation, ProgressOptions, Uri } from 'vscode';
+import { CancellationError, CancellationToken, CancellationTokenSource, LogOutputChannel, Progress, ProgressLocation, ProgressOptions, Uri } from 'vscode';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
@@ -52,6 +52,28 @@ suite('Pip Utils - getProjectInstallable', () => {
     suite('Pip Utils - getWorkspacePackagesToInstall', () => {
         teardown(() => {
             sinon.restore();
+        });
+
+        test('ordinary search retains its cancellation behavior while tool search rejects cancellation', async () => {
+            const source = new CancellationTokenSource();
+            source.cancel();
+            findFilesStub.resolves([]);
+            withProgressStub.callsFake(async (_options, task) => task({ report: () => {} }, source.token));
+            const projects = [{ name: 'workspace', uri: Uri.file(process.cwd()) }];
+            try {
+                const ordinary = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
+                assert.deepStrictEqual(ordinary.installables, []);
+                await assert.rejects(
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, projects, {
+                        runHeadless: true,
+                        token: source.token,
+                    }),
+                    CancellationError,
+                );
+                assert.ok(withProgressStub.calledOnce);
+            } finally {
+                source.dispose();
+            }
         });
 
         test('opens the package picker when listing installed packages fails', async () => {
@@ -242,6 +264,36 @@ suite('Pip Utils - getProjectInstallable', () => {
         // Assert: Should return empty array
         assert.strictEqual(result.length, 0, 'Should return empty array');
         assert.ok(!findFilesStub.called, 'Should not call findFiles when no projects');
+    });
+
+    test('private nested creation excludes parent and sibling dependencies before parsing or validating them', async () => {
+        const temp = await fse.mkdtemp(path.join(os.tmpdir(), 'private-dependency-scope-'));
+        const source = new CancellationTokenSource();
+        try {
+            const project = { name: 'root', uri: Uri.file(temp) };
+            const nested = Uri.file(path.join(temp, 'new service'));
+            const ownRequirement = Uri.file(path.join(nested.fsPath, 'requirements.txt'));
+            const rootRequirement = Uri.file(path.join(temp, 'requirements.txt'));
+            const siblingRequirement = Uri.file(path.join(temp, 'sibling', 'requirements.txt'));
+            const siblingToml = Uri.file(path.join(temp, 'sibling', 'pyproject.toml'));
+            const invalidSiblingSyntax = Uri.file(path.join(temp, 'sibling-two', 'pyproject.toml'));
+            await fse.outputFile(siblingToml.fsPath, '[project]\nname = "sibling"\n[build-system]\nbuild-backend = "missing"\n');
+            await fse.outputFile(invalidSiblingSyntax.fsPath, '[invalid syntax');
+            mockApi.getPythonProject = () => project;
+            findFilesStub.resolves([rootRequirement, ownRequirement, siblingRequirement, siblingToml, invalidSiblingSyntax]);
+            const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [project], {
+                runHeadless: true,
+                token: source.token,
+                preferredRoot: nested,
+                deduplicateProjectPackages: true,
+            });
+            assert.deepStrictEqual(result.installables.map((item) => item.uri?.fsPath), [ownRequirement.fsPath]);
+            assert.strictEqual(result.validationError, undefined);
+            assert.ok(withProgressStub.notCalled);
+        } finally {
+            source.dispose();
+            await fse.remove(temp);
+        }
     });
 
     test('should filter out files not in project directories', async () => {

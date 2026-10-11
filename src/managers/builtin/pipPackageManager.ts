@@ -11,6 +11,7 @@ import {
     MarkdownString,
     ProgressLocation,
     ThemeIcon,
+    Uri,
 } from 'vscode';
 import {
     DidChangePackagesEventArgs,
@@ -26,6 +27,7 @@ import {
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
@@ -71,7 +73,25 @@ export class PipPackageManager implements PackageManager, Disposable {
     readonly tooltip?: string | MarkdownString;
     readonly iconPath?: IconPath;
 
-    async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+    readonly [pythonToolSupport]: PackageToolSupport = {
+        manage: (environment, options, token, scope) =>
+            this.manage(environment, { ...options, runHeadless: true }, token, scope),
+        getPackages: async (environment, token) => {
+            const packages = await this.fetchPackages(environment, false, token);
+            if (!packages) {
+                throw new Error('Package listing returned no result.');
+            }
+            return packages;
+        },
+    };
+
+    async manage(
+        environment: PythonEnvironment,
+        options: PackageManagementOptions,
+        toolToken?: CancellationToken,
+        scope?: Uri,
+    ): Promise<void> {
+        throwIfCancelled(toolToken);
         let toInstall: string[] = [...(options.install ?? [])];
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
@@ -102,6 +122,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                 const manageCommandOptions: CommandConstructorOptions = {
                     pythonExecutable,
                     log: this.log,
+                    cwd: scope?.fsPath,
+                    cancellationToken: token,
+                    toolExecution: !!toolToken,
                 };
 
                 if (toUninstall.length > 0) {
@@ -114,6 +137,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                     await command.execute({
                         packages: parsePackageSpecs(toUninstall),
                         cancellationToken: token,
+                        toolExecution: !!toolToken,
                     });
                 }
 
@@ -128,6 +152,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                         packages: parsePackageSpecs(toInstall),
                         upgrade: options.upgrade,
                         cancellationToken: token,
+                        toolExecution: !!toolToken,
                     });
                 }
 
@@ -138,7 +163,8 @@ export class PipPackageManager implements PackageManager, Disposable {
                     (changes) => {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
-                    () => this.fetchPackages(environment, !options.runHeadless),
+                    () => this.fetchPackages(environment, !options.runHeadless, toolToken),
+                    !!toolToken,
                 );
             } catch (e) {
                 if (e instanceof CancellationError) {
@@ -159,7 +185,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         };
 
         if (options.runHeadless) {
-            await execute();
+            await execute(toolToken);
             return;
         }
 
@@ -206,8 +232,13 @@ export class PipPackageManager implements PackageManager, Disposable {
         return this.packages.get(environment.envId.id);
     }
 
-    private async fetchPackages(environment: PythonEnvironment, showErrors = true): Promise<Package[] | undefined> {
+    private async fetchPackages(
+        environment: PythonEnvironment,
+        showErrors = true,
+        token?: CancellationToken,
+    ): Promise<Package[] | undefined> {
         try {
+            throwIfCancelled(token);
             const pythonExecutable = environment.execInfo?.run?.executable;
             if (!pythonExecutable) {
                 throw new Error('Unable to determine Python executable path');
@@ -216,17 +247,25 @@ export class PipPackageManager implements PackageManager, Disposable {
                 {
                     pythonExecutable,
                     log: this.log,
+                    cancellationToken: token,
+                    toolExecution: !!token,
                 },
                 environment.environmentPath.fsPath,
                 PipListCommand,
                 UvListCommand,
             );
-            const data = await listCmd.execute();
+            const data = await listCmd.execute(
+                token ? { cancellationToken: token, strict: true, toolExecution: true } : undefined,
+            );
+            throwIfCancelled(token);
             const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;
         } catch (error) {
             this.log.error('Error refreshing packages', error);
+            if (token) {
+                throw error;
+            }
             if (showErrors) {
                 setImmediate(async () => {
                     await showErrorMessageWithLogs(l10n.t('Error refreshing packages'), this.log);
@@ -254,20 +293,13 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async getPackageAvailableVersions(
+    private async getPackageAvailableVersionsCommand(
         environment: PythonEnvironment,
-        packageName: string,
-    ): Promise<Pep440Version[]> {
+    ): Promise<PipAvailableVersionsCommand | UvAvailableVersionsCommand | PipAvailableVersionsTextCommand> {
         const pythonExecutable = environment.execInfo?.run?.executable;
         if (!pythonExecutable) {
             throw new Error(`Python executable is unavailable for environment: ${environment.envId.id}`);
         }
-
-        const pythonVersion = PythonVersion.tryParse(environment.version);
-        if (!pythonVersion) {
-            throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
-        }
-        const baseVersion = pythonVersion.toReleaseString();
 
         const availableVersions = await createPipOrUvCommandWithKind(
             { pythonExecutable, log: this.log },
@@ -275,35 +307,35 @@ export class PipPackageManager implements PackageManager, Disposable {
             PipAvailableVersionsCommand,
             UvAvailableVersionsCommand,
         );
-
-        // For pip < 21.2.0, check version first.
-        if (availableVersions.kind === 'pip') {
-            const pipVersion = await new PipVersionCommand({ pythonExecutable, log: this.log }).execute();
-            if (!pipVersion) {
-                throw new Error(`Unable to determine pip version for environment: ${environment.envId.id}`);
-            }
-            if (compare(pipVersion.public, '21.2.0') < 0) {
-                throw new PackageVersionLookupNotSupportedError(
-                    `Package version lookup requires pip 21.2 or newer; the environment has pip ${pipVersion.public}.`,
-                );
-            }
-            if (compare(pipVersion.public, '25.1') >= 0) {
-                const versions = await availableVersions.command.execute({
-                    packageName,
-                    pythonVersion: baseVersion,
-                });
-                return versions.sort((a, b) => compare(b.public, a.public));
-            }
-
-            const textCommand = new PipAvailableVersionsTextCommand({ pythonExecutable, log: this.log });
-            const textVersions = await textCommand.execute({ packageName, pythonVersion: baseVersion });
-            return textVersions.sort((a, b) => compare(b.public, a.public));
+        if (availableVersions.kind === 'uv') {
+            return availableVersions.command;
         }
 
-        const versions = await availableVersions.command.execute({
-            packageName,
-            pythonVersion: baseVersion,
-        });
+        const version = await new PipVersionCommand({ pythonExecutable, log: this.log }).execute();
+        if (!version) {
+            throw new Error(`Unable to determine pip version for environment: ${environment.envId.id}`);
+        }
+        if (compare(version.public, '21.2.0') < 0) {
+            throw new PackageVersionLookupNotSupportedError(
+                `Package version lookup requires pip 21.2 or newer; the environment has pip ${version.public}.`,
+            );
+        }
+        if (compare(version.public, '25.1') >= 0) {
+            return availableVersions.command;
+        }
+
+        return new PipAvailableVersionsTextCommand({ pythonExecutable, log: this.log });
+    }
+
+    async getPackageAvailableVersions(environment: PythonEnvironment, packageName: string): Promise<Pep440Version[]> {
+        const baseVersion = environment.version
+            ? PythonVersion.tryParse(environment.version)?.toReleaseString()
+            : undefined;
+        if (!baseVersion) {
+            throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
+        }
+        const command = await this.getPackageAvailableVersionsCommand(environment);
+        const versions = await command.execute({ packageName, pythonVersion: baseVersion });
         return versions.sort((a, b) => compare(b.public, a.public));
     }
 

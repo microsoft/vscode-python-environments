@@ -194,14 +194,28 @@ suite('PipPackageManager', () => {
     test('uses UV version lookup without querying the Pip version', async () => {
         const manager = createManager();
         const environment = createEnvironment();
-        sinon.stub(helpers, 'shouldUseUv').resolves(true);
-        sinon.stub(helpers, 'getUvExecutable').resolves('uv');
+        const shouldUseUv = sinon.stub(helpers, 'shouldUseUv').resolves(true);
+        const getUvExecutable = sinon.stub(helpers, 'getUvExecutable').resolves('workspace-uv');
         const runPython = sinon.stub(helpers, 'runPython');
-        sinon.stub(helpers, 'runUV').resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
+        const runUV = sinon
+            .stub(helpers, 'runUV')
+            .resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
 
         const versions = await manager.getPackageAvailableVersions(environment, 'requests');
 
         assert.ok(runPython.notCalled);
+        assert.ok(
+            shouldUseUv.calledOnceWithExactly(
+                manager.log,
+                environment.environmentPath.fsPath,
+                environment.environmentPath.fsPath,
+                undefined,
+            ),
+        );
+        assert.ok(
+            getUvExecutable.calledOnceWithExactly(manager.log, environment.environmentPath.fsPath, undefined),
+        );
+        assert.strictEqual(runUV.firstCall.args[5], 'workspace-uv');
         assert.deepStrictEqual(
             versions.map((version) => version.public),
             ['2.32.5', '2.31.0'],

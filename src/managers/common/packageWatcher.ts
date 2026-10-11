@@ -3,6 +3,7 @@ import { Disposable, Event, LogOutputChannel, RelativePattern, Terminal, Uri } f
 import { PackageManager, PythonEnvironment } from '../../api';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { onDidCloseTerminal } from '../../common/window.apis';
+import { pathExists } from '../../common/workspace.fs.apis';
 import { createFileSystemWatcher, getConfiguration, onDidChangeConfiguration } from '../../common/workspace.apis';
 import type { EnvironmentManagers } from '../../features/envManagers';
 
@@ -13,6 +14,8 @@ export interface PackageWatcherTerminalActivation {
         activated: boolean;
     }>;
 }
+
+const MAX_MISSING_EXECUTABLE_REFRESH_RETRIES = 60;
 
 /**
  * Derives the file system watch targets for a given Python environment.
@@ -63,18 +66,43 @@ export function watchPackageChangesForEnvironment(
         return new Disposable(() => undefined);
     }
 
+    let missingExecutableRefreshRetries = 0;
     const debouncedRefresh = createSimpleDebounce(500, () => {
-        log.debug(`Package change detected for environment ${env.envId.id}, refreshing packages.`);
-        const currentPackageManager = resolvePackageManager();
-        if (!currentPackageManager) {
-            log.debug(`No current package manager found for environment ${env.envId.id}`);
-            return;
-        }
-        void currentPackageManager.refresh(env).catch((ex) => {
-            log.error(
-                `Failed to refresh packages for environment ${env.envId.id}: ${ex instanceof Error ? ex.message : String(ex)}`,
-            );
-        });
+        void (async () => {
+            try {
+                if (!(await pathExists(Uri.file(env.execInfo.run.executable)))) {
+                    if (missingExecutableRefreshRetries < MAX_MISSING_EXECUTABLE_REFRESH_RETRIES) {
+                        missingExecutableRefreshRetries += 1;
+                        debouncedRefresh.trigger();
+                    } else {
+                        log.debug(
+                            `Package change detected for environment ${env.envId.id}, but its executable did not reappear. Skipping package refresh.`,
+                        );
+                    }
+                    return;
+                }
+            } catch (ex) {
+                log.error(
+                    `Failed to check the executable for environment ${env.envId.id}: ${ex instanceof Error ? ex.message : String(ex)}`,
+                );
+                return;
+            }
+
+            missingExecutableRefreshRetries = 0;
+            log.debug(`Package change detected for environment ${env.envId.id}, refreshing packages.`);
+            const currentPackageManager = resolvePackageManager();
+            if (!currentPackageManager) {
+                log.debug(`No current package manager found for environment ${env.envId.id}`);
+                return;
+            }
+            try {
+                await currentPackageManager.refresh(env);
+            } catch (ex) {
+                log.error(
+                    `Failed to refresh packages for environment ${env.envId.id}: ${ex instanceof Error ? ex.message : String(ex)}`,
+                );
+            }
+        })();
     });
     const disposables: Disposable[] = [debouncedRefresh];
     const trigger = debouncedRefresh.trigger.bind(debouncedRefresh);

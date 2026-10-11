@@ -14,6 +14,7 @@ import {
     showQuickPickWithButtons,
     withProgress,
 } from '../window.apis';
+import { getWorkspaceFolders } from '../workspace.apis';
 import { pickEnvironmentManager } from './managers';
 
 type QuickPickIcon =
@@ -157,15 +158,20 @@ export async function pickEnvironment(
             label: Interpreter.browsePath,
             iconPath: new ThemeIcon('folder'),
         },
-        {
-            label: '',
-            kind: QuickPickItemKind.Separator,
-        },
-        {
-            label: Interpreter.createVirtualEnvironment,
-            iconPath: new ThemeIcon('add'),
-        },
     ];
+
+    if (getWorkspaceFolders()?.length) {
+        items.push(
+            {
+                label: '',
+                kind: QuickPickItemKind.Separator,
+            },
+            {
+                label: Interpreter.createVirtualEnvironment,
+                iconPath: new ThemeIcon('add'),
+            },
+        );
+    }
 
     if (options?.recommended) {
         const pathDescription = options.recommended.displayPath;

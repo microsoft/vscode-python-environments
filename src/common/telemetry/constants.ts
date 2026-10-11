@@ -49,6 +49,11 @@ export enum EventNames {
      * - errorType: string (error class name, on failure only)
      */
     ENVIRONMENT_DISCOVERY = 'ENVIRONMENT_DISCOVERY',
+    /**
+     * One event per terminal activation/deactivation command attempt.
+     * Legacy sendText cannot confirm command completion and is reported as unverified.
+     */
+    TERMINAL_ACTIVATION_OUTCOME = 'TERMINAL.ACTIVATION_OUTCOME',
     MANAGER_READY_TIMEOUT = 'MANAGER_READY.TIMEOUT',
     /**
      * Telemetry event for individual manager registration failure.
@@ -267,6 +272,23 @@ export type InlineScriptEnvErrorCategory =
 
 // Map all events to their properties
 export interface IEventNamePropertyMapping {
+    /* __GDPR__
+        "terminal.activation_outcome": {
+            "operation": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "method": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "shell": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "trigger": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.TERMINAL_ACTIVATION_OUTCOME]: {
+        operation: 'activate' | 'deactivate';
+        outcome: 'succeeded' | 'failed' | 'timedOut' | 'unknown' | 'unverified' | 'noCommand';
+        method: 'shellIntegration' | 'sendText';
+        shell: string;
+        trigger: 'terminalOpen' | 'preExisting' | 'explicit' | 'environmentSwitch' | 'unknown';
+    };
     /* __GDPR__
        "extension.activation_duration": {
            "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }

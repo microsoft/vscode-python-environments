@@ -62,8 +62,8 @@ export function isUnresolvedImportDiagnostic(diagnostic: Diagnostic): boolean {
  * Offers "Set up this script's Python environment" as a quick fix on an unresolved import in a `.py`
  * file that declares a PEP 723 `# /// script` block and has no inline-script environment yet.
  *
- * Complements the CodeLens, which is hidden while the document is dirty — the moment a user has just
- * typed the import that does not resolve. This provider parses the in-memory buffer instead.
+ * Complements the inline-block CodeLens with an action at the unresolved import. Both use the live
+ * document, so the action remains available while the user is editing valid metadata.
  *
  * `diagnostics` and `isPreferred` are both left unset: setup installs the block's declared
  * dependencies verbatim and may not resolve the import at all, so the action must not claim to fix

@@ -20,19 +20,32 @@ export class PipListCommand extends ListCommand {
             this.log,
             executeArgs?.cancellationToken,
             this.timeout,
+            executeArgs?.toolExecution,
         );
         let json: unknown;
         try {
             json = JSON.parse(output);
         } catch (e) {
             this.log?.error(`Failed to parse pip list output: ${e}`);
+            if (executeArgs?.strict) {
+                throw e;
+            }
             return [];
         }
         if (!Array.isArray(json)) {
             this.log?.error('Invalid output from pip list command');
+            if (executeArgs?.strict) {
+                throw new Error('Invalid output from pip list command');
+            }
             return [];
         }
 
+        if (
+            executeArgs?.strict &&
+            json.some((item) => !item || typeof item.name !== 'string' || typeof item.version !== 'string')
+        ) {
+            throw new Error('Invalid package in pip list output');
+        }
         return json
             .filter(({ name, version }) => !!name && !!version)
             .map(({ name, version }) => ({
@@ -62,19 +75,32 @@ export class UvListCommand extends ListCommand {
             executeArgs?.cancellationToken,
             this.timeout,
             this.uvExecutable,
+            executeArgs?.toolExecution,
         );
         let json: unknown;
         try {
             json = JSON.parse(output);
         } catch (e) {
             this.log?.error(`Failed to parse uv pip list output: ${e}`);
+            if (executeArgs?.strict) {
+                throw e;
+            }
             return [];
         }
         if (!Array.isArray(json)) {
             this.log?.error('Invalid output from uv pip list command');
+            if (executeArgs?.strict) {
+                throw new Error('Invalid output from uv pip list command');
+            }
             return [];
         }
 
+        if (
+            executeArgs?.strict &&
+            json.some((item) => !item || typeof item.name !== 'string' || typeof item.version !== 'string')
+        ) {
+            throw new Error('Invalid package in uv pip list output');
+        }
         return json
             .filter(({ name, version }) => !!name && !!version)
             .map(({ name, version }) => ({
