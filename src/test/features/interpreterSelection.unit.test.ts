@@ -480,14 +480,16 @@ suite('Interpreter Selection - Priority Chain', () => {
                 });
             }
 
-            test('should resolve a command name that is not on PATH against the workspace folder', async () => {
+            test('should pass a command name that is not on PATH to the native finder unchanged', async () => {
                 const workspaceUri = Uri.file(path.resolve('test', 'workspace'));
                 const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
-                const expected = path.resolve(workspaceUri.fsPath, 'pyenvs-test-missing-python');
+                const command = 'pyenvs-test-missing-python';
+                originalPath = process.env.PATH;
+                process.env.PATH = '';
                 sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
                 sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
                 sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
-                useDefaultInterpreterPath('pyenvs-test-missing-python');
+                useDefaultInterpreterPath(command);
                 mockNativeFinder.resolve.rejects(new Error('not found'));
                 mockVenvManager.get.resolves(undefined);
 
@@ -499,7 +501,7 @@ suite('Interpreter Selection - Priority Chain', () => {
                     mockApi as unknown as PythonEnvironmentApi,
                 );
 
-                assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(expected));
+                assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(command));
             });
 
             test('should treat the default value "python" as not configured', async () => {
