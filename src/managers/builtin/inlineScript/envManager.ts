@@ -34,7 +34,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
-import { Capabilities, EnvironmentManagerCapability, supportedCapability } from '../../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../../capabilities';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -295,12 +295,12 @@ interface SavedMetadataSnapshot {
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         ...requiredEnvironmentCapabilities,
-        'environments.resolve': async () => ({
+        [EnvironmentCapability.Resolve]: async () => ({
             supported: false,
             reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),
         }),
-        'environments.remove': supportedCapability,
-        'environments.create': async ({ scope }) => {
+        [EnvironmentCapability.Remove]: supportedCapability,
+        [EnvironmentCapability.Create]: async ({ scope }) => {
             const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
             if (!scriptUri) {
                 return {

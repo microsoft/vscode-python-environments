@@ -24,7 +24,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { Capabilities, PackageManagerCapability, supportedCapability } from '../../capabilities';
+import { Capabilities, PackageManagerCapability, supportedCapability, PackageCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -55,10 +55,10 @@ import { VenvManager } from './venvManager';
 export class PipPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         ...requiredPackageCapabilities,
-        'packages.install': supportedCapability,
-        'packages.uninstall': supportedCapability,
-        'packages.upgrade': supportedCapability,
-        'packages.listAvailableVersions': async ({ environment }) => {
+        [PackageCapability.Install]: supportedCapability,
+        [PackageCapability.Uninstall]: supportedCapability,
+        [PackageCapability.Upgrade]: supportedCapability,
+        [PackageCapability.ListAvailableVersions]: async ({ environment }) => {
             try {
                 await this.getPackageAvailableVersionsCommand(environment!);
             } catch (error) {
@@ -67,7 +67,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             return await supportedCapability({ environment });
         },
         // Dependency roots are best-effort classification, not exact user install intent.
-        'packages.listDirect': supportedCapability,
+        [PackageCapability.ListDirect]: supportedCapability,
     };
 
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();

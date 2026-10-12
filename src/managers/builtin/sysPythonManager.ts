@@ -17,7 +17,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentManagerCapability, supportedCapability } from '../../capabilities';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -40,8 +40,8 @@ import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToIns
 export class SysPythonManager implements EnvironmentManager {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         ...requiredEnvironmentCapabilities,
-        'environments.create': supportedCapability,
-        'environments.remove': async () => ({
+        [EnvironmentCapability.Create]: supportedCapability,
+        [EnvironmentCapability.Remove]: async () => ({
             supported: false,
             reason: l10n.t('Removing a global Python installation is not supported.'),
         }),

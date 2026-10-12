@@ -1876,6 +1876,12 @@ management capability. `packages.listDirect` retains the best-effort
 classification contract, not exact user installation intent. Environment
 selection describes the selected environment for a scope, not shell activation.
 
+`EnvironmentCapability` and `PackageCapability` are exported `as const` objects
+with named members such as `EnvironmentCapability.Create` and
+`PackageCapability.Install`. Their values define the capability type unions;
+both named constants and literal strings are accepted. The string values remain
+the identifiers used in telemetry and can be serialized directly for JSON-RPC.
+
 ### Querying support
 
 ```typescript
@@ -1915,8 +1921,10 @@ failures at those stages reject without emitting a capability-query event.
 Feature-detect the query methods when supporting older extension runtimes:
 
 ```typescript
+import { PackageCapability } from '@vscode/python-environments';
+
 if (typeof api.getPackageManagerCapability === 'function') {
-    const support = await api.getPackageManagerCapability(environment, 'packages.listDirect');
+    const support = await api.getPackageManagerCapability(environment, PackageCapability.ListDirect);
     if (!support.supported) {
         // support.reason explains why this feature is unavailable.
     }
@@ -1933,11 +1941,11 @@ implemented' }`. Checks receive `CapabilityContext` and return `Promise<Support>
 // Members of a PackageManager implementation:
 readonly capabilities: Capabilities<PackageManagerCapability> = {
     ...requiredPackageCapabilities, // shared, universally-true operations
-    'packages.listDirect': supportedCapability,
-    'packages.listAvailableVersions': async (context) => this.checkVersionLookupSupport(context),
-    'packages.install': supportedCapability,
-    'packages.uninstall': supportedCapability,
-    'packages.upgrade': async (_context) => ({
+    [PackageCapability.ListDirect]: supportedCapability,
+    [PackageCapability.ListAvailableVersions]: async (context) => this.checkVersionLookupSupport(context),
+    [PackageCapability.Install]: supportedCapability,
+    [PackageCapability.Uninstall]: supportedCapability,
+    [PackageCapability.Upgrade]: async (_context) => ({
         supported: false,
         reason: l10n.t('This manager does not support upgrading packages.'),
     }),
@@ -1977,10 +1985,10 @@ rather than throwing.
 
 ### Adding or removing catalog capabilities
 
-Capability key types are derived from the private key lists in
+Capability key types are derived from the exported `as const` objects in
 `src/capabilities.ts`. To add a public capability:
 
-1. Add a documented key to the appropriate key list in `src/capabilities.ts`.
+1. Add a documented member to `EnvironmentCapability` or `PackageCapability` in `src/capabilities.ts`.
 2. Update every built-in manager to advertise the new key explicitly (true,
    false with a reason, or a delegating check).
 3. Update capability tests and this summary.

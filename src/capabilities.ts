@@ -20,44 +20,46 @@ import type {
 // ---------------------------------------------------------------------------
 
 /** Environment capability keys. Every environment manager must advertise a check for each key. */
-const environmentCapabilityKeys = [
+export const EnvironmentCapability = {
     /** List/rediscover known environments for a scope. Required getEnvironments and refresh operations. */
-    'environments.list',
+    List: 'environments.list',
     /** Resolve an interpreter or environment URI. Required resolve operation; pass the target URI as scope. */
-    'environments.resolve',
+    Resolve: 'environments.resolve',
     /** Read the selected environment for a scope. Required get operation; no selection is valid. */
-    'environments.getSelected',
+    GetSelected: 'environments.getSelected',
     /** Set or clear the selected environment for a scope. Required set operation. */
-    'environments.setSelected',
+    SetSelected: 'environments.setSelected',
     /** Create an environment. */
-    'environments.create',
+    Create: 'environments.create',
     /** Delete an environment. */
-    'environments.remove',
-] as const;
+    Remove: 'environments.remove',
+} as const;
 
 /** Package capability keys. Every package manager must advertise a check for each key. */
-const packageCapabilityKeys = [
+export const PackageCapability = {
     /** List/refresh installed packages in an environment. Required getPackages and refresh operations; an empty result is valid. */
-    'packages.list',
+    List: 'packages.list',
     /** Install the requested packages by honoring the install array. */
-    'packages.install',
+    Install: 'packages.install',
     /** Uninstall the requested packages by honoring the uninstall array. */
-    'packages.uninstall',
+    Uninstall: 'packages.uninstall',
     /** Honor upgrade for installation, without guaranteeing identical solver behavior. */
-    'packages.upgrade',
+    Upgrade: 'packages.upgrade',
     /** List direct package names on a best-effort basis, not exact user installation intent. */
-    'packages.listDirect',
+    ListDirect: 'packages.listDirect',
     /** Look up available package versions. */
-    'packages.listAvailableVersions',
-] as const;
+    ListAvailableVersions: 'packages.listAvailableVersions',
+} as const;
 
 /** Environment capability keys that every environment manager must advertise a check for. */
-export type EnvironmentManagerCapability = (typeof environmentCapabilityKeys)[number];
+export type EnvironmentManagerCapability = (typeof EnvironmentCapability)[keyof typeof EnvironmentCapability];
 
 /** Package capability keys that every package manager must advertise a check for. */
-export type PackageManagerCapability = (typeof packageCapabilityKeys)[number];
+export type PackageManagerCapability = (typeof PackageCapability)[keyof typeof PackageCapability];
 
 type ManagerCapability = EnvironmentManagerCapability | PackageManagerCapability;
+const environmentCapabilityKeys = Object.values(EnvironmentCapability);
+const packageCapabilityKeys = Object.values(PackageCapability);
 
 /**
  * Identifies catalog keys so telemetry does not record arbitrary runtime input.

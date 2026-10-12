@@ -7,22 +7,22 @@
  * constants into their fake managers instead of repeating the full key list.
  */
 
-import { Capabilities, EnvironmentManagerCapability, PackageManagerCapability, supportedCapability } from '../capabilities';
+import { Capabilities, EnvironmentManagerCapability, PackageManagerCapability, supportedCapability, EnvironmentCapability, PackageCapability } from '../capabilities';
 
 export const allSupportedEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
-    'environments.list': supportedCapability,
-    'environments.resolve': supportedCapability,
-    'environments.getSelected': supportedCapability,
-    'environments.setSelected': supportedCapability,
-    'environments.create': supportedCapability,
-    'environments.remove': supportedCapability,
+    [EnvironmentCapability.List]: supportedCapability,
+    [EnvironmentCapability.Resolve]: supportedCapability,
+    [EnvironmentCapability.GetSelected]: supportedCapability,
+    [EnvironmentCapability.SetSelected]: supportedCapability,
+    [EnvironmentCapability.Create]: supportedCapability,
+    [EnvironmentCapability.Remove]: supportedCapability,
 };
 
 export const allSupportedPackageCapabilities: Capabilities<PackageManagerCapability> = {
-    'packages.list': supportedCapability,
-    'packages.install': supportedCapability,
-    'packages.uninstall': supportedCapability,
-    'packages.upgrade': supportedCapability,
-    'packages.listDirect': supportedCapability,
-    'packages.listAvailableVersions': supportedCapability,
+    [PackageCapability.List]: supportedCapability,
+    [PackageCapability.Install]: supportedCapability,
+    [PackageCapability.Uninstall]: supportedCapability,
+    [PackageCapability.Upgrade]: supportedCapability,
+    [PackageCapability.ListDirect]: supportedCapability,
+    [PackageCapability.ListAvailableVersions]: supportedCapability,
 };

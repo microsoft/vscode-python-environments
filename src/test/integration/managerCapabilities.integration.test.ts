@@ -12,6 +12,8 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
     resolvePackageManagerCapability,
+    EnvironmentCapability,
+    PackageCapability,
 } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
 
@@ -86,19 +88,19 @@ suite('Manager capabilities integration', function () {
 
     test('environment queries resolve unsupported when not advertised, and honor provider overrides', async () => {
         assert.deepStrictEqual(
-            await api.getEnvironmentManagerCapability(environment.envId.managerId, 'environments.list'),
+            await api.getEnvironmentManagerCapability(environment.envId.managerId, EnvironmentCapability.List),
             { supported: false, reason: 'Capability not implemented' },
         );
         const unsupported = { supported: false, reason: 'Disabled in this scope' } as const;
         environmentCapabilities = {
             ...noEnvironmentCapabilities,
-            'environments.list': async (context) => {
+            [EnvironmentCapability.List]: async (context) => {
                 assert.strictEqual(context.scope, 'global');
                 return unsupported;
             },
         };
         assert.deepStrictEqual(
-            await api.getEnvironmentManagerCapability(environment.envId.managerId, 'environments.list', { scope: 'global' }),
+            await api.getEnvironmentManagerCapability(environment.envId.managerId, EnvironmentCapability.List, { scope: 'global' }),
             unsupported,
         );
     });
@@ -114,14 +116,14 @@ suite('Manager capabilities integration', function () {
             name: 'capability-test-scoped',
             capabilities: {
                 ...noPackageCapabilities,
-                'packages.list': async () => assert.fail('The unbound root must not be queried'),
+                [PackageCapability.List]: async () => assert.fail('The unbound root must not be queried'),
             },
             createForProject: (boundProject) => ({
                 ...packages,
                 name: 'capability-test-scoped',
                 capabilities: {
                     ...noPackageCapabilities,
-                    'packages.list': async (context) => {
+                    [PackageCapability.List]: async (context) => {
                         assert.strictEqual(boundProject.uri.toString(), project.uri.toString());
                         assert.strictEqual(context.project, boundProject);
                         assert.strictEqual(context.environment, environment);
@@ -141,7 +143,7 @@ suite('Manager capabilities integration', function () {
                 ...config.get<unknown[]>('pythonProjects', []),
             ], target);
             assert.deepStrictEqual(
-                await api.getPackageManagerCapability(environment, 'packages.list', project),
+                await api.getPackageManagerCapability(environment, PackageCapability.List, project),
                 scopedSupport,
             );
         } finally {
@@ -153,13 +155,13 @@ suite('Manager capabilities integration', function () {
         const denied = { supported: false, reason: 'Disabled by provider' } as const;
         packageCapabilities = {
             ...noPackageCapabilities,
-            'packages.install': async (context) => {
+            [PackageCapability.Install]: async (context) => {
                 assert.strictEqual(context.environment, environment);
                 return denied;
             },
-            'packages.upgrade': (context) =>
-                resolvePackageManagerCapability(packages, 'packages.install', context),
+            [PackageCapability.Upgrade]: (context) =>
+                resolvePackageManagerCapability(packages, PackageCapability.Install, context),
         };
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.upgrade'), denied);
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, PackageCapability.Upgrade), denied);
     });
 });

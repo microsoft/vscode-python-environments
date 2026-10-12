@@ -11,6 +11,8 @@ import {
     resolveEnvironmentManagerCapability as environmentCapability,
     resolvePackageManagerCapability as packageCapability,
     Support,
+    EnvironmentCapability,
+    PackageCapability,
 } from '../../capabilities';
 import * as metadata from '../../common/inlineScript/metadata';
 import * as workspaceApis from '../../common/workspace.apis';
@@ -78,7 +80,7 @@ suite('Built-in manager capabilities', () => {
             const create = sinon.stub(manager, 'create').throws(new Error('Unexpected creation'));
             assert.strictEqual((manager as EnvironmentManager).quickCreateConfig, undefined);
             for (const scope of [script, [script]]) {
-                assert.deepStrictEqual(await environmentCapability(manager, 'environments.create', { scope }), {
+                assert.deepStrictEqual(await environmentCapability(manager, EnvironmentCapability.Create, { scope }), {
                     supported: true,
                 });
             }
@@ -91,21 +93,21 @@ suite('Built-in manager capabilities', () => {
                 undefined, 'global', 'all', [], [script, script], Uri.parse('untitled:script.py'),
             ];
             for (const scope of scopes) {
-                assertUnsupported(await environmentCapability(manager, 'environments.create', { scope }));
+                assertUnsupported(await environmentCapability(manager, EnvironmentCapability.Create, { scope }));
             }
             assert.ok(readMetadata.notCalled);
         });
 
         test('missing metadata disables creation', async () => {
             readMetadata.resolves(undefined);
-            assertUnsupported(await environmentCapability(manager, 'environments.create', { scope: script }));
+            assertUnsupported(await environmentCapability(manager, EnvironmentCapability.Create, { scope: script }));
         });
 
         test('unexpected metadata probe failures reject', async () => {
             const failure = new Error('Metadata probe failed');
             readMetadata.rejects(failure);
             await assert.rejects(
-                environmentCapability(manager, 'environments.create', { scope: script }),
+                environmentCapability(manager, EnvironmentCapability.Create, { scope: script }),
                 (error) => error === failure,
             );
         });
@@ -113,7 +115,7 @@ suite('Built-in manager capabilities', () => {
 
     suite('Poetry project context', () => {
         let manager: PoetryPackageManager;
-        const projectCapabilities = ['packages.list', 'packages.listDirect', 'packages.install', 'packages.uninstall'] as const;
+        const projectCapabilities = [PackageCapability.List, PackageCapability.ListDirect, PackageCapability.Install, PackageCapability.Uninstall] as const;
 
         setup(() => {
             manager = new PoetryPackageManager(api, log, {} as PoetryManager);

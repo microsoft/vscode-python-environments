@@ -11,6 +11,8 @@ import {
     resolveEnvironmentManagerCapability as environmentCapability,
     resolvePackageManagerCapability as packageCapability,
     Support,
+    EnvironmentCapability,
+    PackageCapability,
 } from '../capabilities';
 import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import type { EnvironmentManager, PackageManager } from '../types';
@@ -25,21 +27,21 @@ const denied: Support = { supported: false, reason: 'Disabled by provider' };
 
 /** A complete, fully-supported capability map. Every manager must advertise every key. */
 const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
-    'environments.list': async () => supported,
-    'environments.resolve': async () => supported,
-    'environments.getSelected': async () => supported,
-    'environments.setSelected': async () => supported,
-    'environments.create': async () => supported,
-    'environments.remove': async () => supported,
+    [EnvironmentCapability.List]: async () => supported,
+    [EnvironmentCapability.Resolve]: async () => supported,
+    [EnvironmentCapability.GetSelected]: async () => supported,
+    [EnvironmentCapability.SetSelected]: async () => supported,
+    [EnvironmentCapability.Create]: async () => supported,
+    [EnvironmentCapability.Remove]: async () => supported,
 };
 
 const fullPackageCapabilities: Capabilities<PackageManagerCapability> = {
-    'packages.list': async () => supported,
-    'packages.install': async () => supported,
-    'packages.uninstall': async () => supported,
-    'packages.upgrade': async () => supported,
-    'packages.listDirect': async () => supported,
-    'packages.listAvailableVersions': async () => supported,
+    [PackageCapability.List]: async () => supported,
+    [PackageCapability.Install]: async () => supported,
+    [PackageCapability.Uninstall]: async () => supported,
+    [PackageCapability.Upgrade]: async () => supported,
+    [PackageCapability.ListDirect]: async () => supported,
+    [PackageCapability.ListAvailableVersions]: async () => supported,
 };
 
 function environmentManager(capabilities: Partial<Capabilities<EnvironmentManagerCapability>> = {}): EnvironmentManager {
@@ -68,13 +70,13 @@ function packageManager(capabilities: Partial<Capabilities<PackageManagerCapabil
 suite('Manager capabilities', () => {
     suite('Required advertisements, no defaults', () => {
         test('advertised checks are honored in either direction', async () => {
-            const env = environmentManager({ 'environments.list': async () => denied, 'environments.create': async () => supported });
-            assert.strictEqual(await environmentCapability(env, 'environments.list'), denied);
-            assert.strictEqual(await environmentCapability(env, 'environments.create'), supported);
+            const env = environmentManager({ [EnvironmentCapability.List]: async () => denied, [EnvironmentCapability.Create]: async () => supported });
+            assert.strictEqual(await environmentCapability(env, EnvironmentCapability.List), denied);
+            assert.strictEqual(await environmentCapability(env, EnvironmentCapability.Create), supported);
 
-            const pkg = packageManager({ 'packages.install': async () => denied, 'packages.listDirect': async () => supported });
-            assert.strictEqual(await packageCapability(pkg, 'packages.install'), denied);
-            assert.strictEqual(await packageCapability(pkg, 'packages.listDirect'), supported);
+            const pkg = packageManager({ [PackageCapability.Install]: async () => denied, [PackageCapability.ListDirect]: async () => supported });
+            assert.strictEqual(await packageCapability(pkg, PackageCapability.Install), denied);
+            assert.strictEqual(await packageCapability(pkg, PackageCapability.ListDirect), supported);
         });
 
         test('a key missing from the capability map resolves unsupported, not a crash', async () => {
@@ -83,8 +85,8 @@ suite('Manager capabilities', () => {
             Reflect.set(env, 'capabilities', {});
             const pkg = packageManager();
             Reflect.set(pkg, 'capabilities', {});
-            assert.deepStrictEqual(await environmentCapability(env, 'environments.list'), notImplemented);
-            assert.deepStrictEqual(await packageCapability(pkg, 'packages.list'), notImplemented);
+            assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), notImplemented);
+            assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), notImplemented);
         });
 
         test('unknown runtime keys cannot resolve inherited object properties', async () => {
@@ -96,10 +98,10 @@ suite('Manager capabilities', () => {
 
         test('a capability value that is not a function resolves unsupported, not a crash', async () => {
             for (const value of [null, false, { supported: true }]) {
-                const env = environmentManager({ 'environments.list': value as never });
-                const pkg = packageManager({ 'packages.list': value as never });
-                assert.deepStrictEqual(await environmentCapability(env, 'environments.list'), notImplemented);
-                assert.deepStrictEqual(await packageCapability(pkg, 'packages.list'), notImplemented);
+                const env = environmentManager({ [EnvironmentCapability.List]: value as never });
+                const pkg = packageManager({ [PackageCapability.List]: value as never });
+                assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), notImplemented);
+                assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), notImplemented);
             }
         });
 
@@ -109,44 +111,44 @@ suite('Manager capabilities', () => {
                 const pkg = packageManager();
                 Reflect.set(env, 'capabilities', value);
                 Reflect.set(pkg, 'capabilities', value);
-                assert.deepStrictEqual(await environmentCapability(env, 'environments.list'), notImplemented);
-                assert.deepStrictEqual(await packageCapability(pkg, 'packages.list'), notImplemented);
+                assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), notImplemented);
+                assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), notImplemented);
             }
         });
 
         test('capability maps with a null prototype are supported', async () => {
             const capabilities = Object.create(null);
-            capabilities['packages.list'] = async () => denied;
+            capabilities[PackageCapability.List] = async () => denied;
             const manager = packageManager();
             Reflect.set(manager, 'capabilities', capabilities);
-            assert.strictEqual(await packageCapability(manager, 'packages.list'), denied);
+            assert.strictEqual(await packageCapability(manager, PackageCapability.List), denied);
         });
 
         test('dynamic checks receive context through prerequisites without mutating or caching it', async () => {
             const context: CapabilityContext = Object.freeze({ scope: 'global', project: { name: 'project', uri: Uri.file('.') } });
             let result: Support = denied;
             const manager = packageManager({
-                'packages.install': async (received) => {
+                [PackageCapability.Install]: async (received) => {
                     assert.strictEqual(received.scope, context.scope);
                     assert.strictEqual(received.project, context.project);
                     return result;
                 },
             });
-            assert.strictEqual(await packageCapability(manager, 'packages.install', context), denied);
+            assert.strictEqual(await packageCapability(manager, PackageCapability.Install, context), denied);
             result = supported;
-            assert.strictEqual(await packageCapability(manager, 'packages.install', context), supported);
+            assert.strictEqual(await packageCapability(manager, PackageCapability.Install, context), supported);
         });
 
         test('sync and async checker failures propagate instead of resolving unsupported', async () => {
             const failure = new Error('Probe failed');
             const env = environmentManager({
-                'environments.list': () => {
+                [EnvironmentCapability.List]: () => {
                     throw failure;
                 },
             });
-            const pkg = packageManager({ 'packages.install': async () => Promise.reject(failure) });
-            await assert.rejects(environmentCapability(env, 'environments.list'), (error) => error === failure);
-            await assert.rejects(packageCapability(pkg, 'packages.install'), (error) => error === failure);
+            const pkg = packageManager({ [PackageCapability.Install]: async () => Promise.reject(failure) });
+            await assert.rejects(environmentCapability(env, EnvironmentCapability.List), (error) => error === failure);
+            await assert.rejects(packageCapability(pkg, PackageCapability.Install), (error) => error === failure);
         });
     });
 
@@ -154,17 +156,17 @@ suite('Manager capabilities', () => {
         test('InternalEnvironmentManager resolves through the raw manager without defaults', async () => {
             const manager = new InternalEnvironmentManager(
                 'test:environment',
-                environmentManager({ 'environments.create': async () => denied }),
+                environmentManager({ [EnvironmentCapability.Create]: async () => denied }),
             );
-            assert.strictEqual(await manager.getCapability('environments.create'), denied);
-            assert.deepStrictEqual(await manager.getCapability('environments.list'), supported);
+            assert.strictEqual(await manager.getCapability(EnvironmentCapability.Create), denied);
+            assert.deepStrictEqual(await manager.getCapability(EnvironmentCapability.List), supported);
         });
 
         test('InternalPackageManager resolves through the raw manager without defaults', async () => {
-            const manager = new InternalPackageManager('test:packages', packageManager({ 'packages.listDirect': async () => denied }));
+            const manager = new InternalPackageManager('test:packages', packageManager({ [PackageCapability.ListDirect]: async () => denied }));
             try {
-                assert.strictEqual(await manager.getCapability('packages.listDirect'), denied);
-                assert.deepStrictEqual(await manager.getCapability('packages.list'), supported);
+                assert.strictEqual(await manager.getCapability(PackageCapability.ListDirect), denied);
+                assert.deepStrictEqual(await manager.getCapability(PackageCapability.List), supported);
             } finally {
                 manager.dispose();
             }
@@ -173,7 +175,7 @@ suite('Manager capabilities', () => {
         test('disposed package wrappers reject capability queries', () => {
             const manager = new InternalPackageManager('test:packages', packageManager());
             manager.dispose();
-            assert.throws(() => manager.getCapability('packages.list'), /disposed/);
+            assert.throws(() => manager.getCapability(PackageCapability.List), /disposed/);
         });
     });
 });

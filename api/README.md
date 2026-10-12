@@ -40,10 +40,12 @@ export async function activate() {
 Capabilities report general manager support without invoking an operation:
 
 ```typescript
+import { PackageCapability, PythonEnvironments } from '@vscode/python-environments';
+
 const api = await PythonEnvironments.api();
 const environment = await api.getEnvironment(undefined);
 if (environment && typeof api.getPackageManagerCapability === 'function') {
-    const support = await api.getPackageManagerCapability(environment, 'packages.listDirect');
+    const support = await api.getPackageManagerCapability(environment, PackageCapability.ListDirect);
     if (support.supported) {
         // Best-effort direct/transitive package classification is available.
     }
@@ -59,8 +61,10 @@ To change a manager's advertised support, update the check for that key in its
 map; return `{ supported: false, reason }` to disable support. Checks must be
 read-only and noninteractive.
 
-Capability keys come from the `EnvironmentManagerCapability` and
-`PackageManagerCapability` type unions. Package keys are `packages.list`,
+`EnvironmentCapability` and `PackageCapability` are exported `as const` objects.
+The `EnvironmentManagerCapability` and `PackageManagerCapability` type unions
+are derived from their values; both named constants and literal strings are
+accepted. Package keys are `packages.list`,
 `packages.install`, `packages.uninstall`, `packages.upgrade`,
 `packages.listDirect`, and `packages.listAvailableVersions`. Listing includes
 refreshing results; the existing `manage()` method implements installation,

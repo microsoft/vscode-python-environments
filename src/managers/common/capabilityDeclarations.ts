@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { l10n } from 'vscode';
-import { Capabilities, CapabilityCheck, EnvironmentManagerCapability, PackageManagerCapability, supportedCapability } from '../../capabilities';
+import { Capabilities, CapabilityCheck, EnvironmentManagerCapability, PackageManagerCapability, supportedCapability, EnvironmentCapability, PackageCapability } from '../../capabilities';
 
 /**
  * Every environment manager implements `list` (list/refresh), `resolve`, `getSelected`, and
@@ -12,12 +12,12 @@ import { Capabilities, CapabilityCheck, EnvironmentManagerCapability, PackageMan
  */
 export const requiredEnvironmentCapabilities: Pick<
     Capabilities<EnvironmentManagerCapability>,
-    'environments.list' | 'environments.resolve' | 'environments.getSelected' | 'environments.setSelected'
+    typeof EnvironmentCapability.List | typeof EnvironmentCapability.Resolve | typeof EnvironmentCapability.GetSelected | typeof EnvironmentCapability.SetSelected
 > = {
-    'environments.list': supportedCapability,
-    'environments.resolve': supportedCapability,
-    'environments.getSelected': supportedCapability,
-    'environments.setSelected': supportedCapability,
+    [EnvironmentCapability.List]: supportedCapability,
+    [EnvironmentCapability.Resolve]: supportedCapability,
+    [EnvironmentCapability.GetSelected]: supportedCapability,
+    [EnvironmentCapability.SetSelected]: supportedCapability,
 };
 
 /**
@@ -26,9 +26,9 @@ export const requiredEnvironmentCapabilities: Pick<
  */
 export const requiredPackageCapabilities: Pick<
     Capabilities<PackageManagerCapability>,
-    'packages.list'
+    typeof PackageCapability.List
 > = {
-    'packages.list': supportedCapability,
+    [PackageCapability.List]: supportedCapability,
 };
 
 /**
@@ -42,8 +42,8 @@ export function discoveryOnlyEnvironmentCapabilities(managerName: string): Capab
     });
     return {
         ...requiredEnvironmentCapabilities,
-        'environments.create': create,
-        'environments.remove': async () => ({
+        [EnvironmentCapability.Create]: create,
+        [EnvironmentCapability.Remove]: async () => ({
             supported: false,
             reason: l10n.t('{0} does not support removing environments.', managerName),
         }),
