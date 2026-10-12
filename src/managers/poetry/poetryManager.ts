@@ -8,6 +8,7 @@ import {
     GetEnvironmentScope,
     GetEnvironmentsScope,
     IconPath,
+    Pep440Version,
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
@@ -45,6 +46,7 @@ import {
     setPoetryForWorkspace,
     setPoetryForWorkspaces,
 } from './poetryUtils';
+import { PoetryVersionCommand } from './commands/version';
 
 export class PoetryManager implements EnvironmentManager, Disposable {
     private collection: PythonEnvironment[] = [];
@@ -78,6 +80,14 @@ export class PoetryManager implements EnvironmentManager, Disposable {
     public dispose() {
         this.collection = [];
         this.fsPathToEnv.clear();
+    }
+
+    public async getVersion(): Promise<Pep440Version | undefined> {
+        const poetry = await getPoetry();
+        if (!poetry) {
+            return undefined;
+        }
+        return await new PoetryVersionCommand({ pythonExecutable: poetry }).execute();
     }
 
     private _initialized: Deferred<void> | undefined;

@@ -1,9 +1,15 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
+import * as childProcessApis from '../../../common/childProcess.apis';
 import * as logging from '../../../common/logging';
 import * as persistentState from '../../../common/persistentState';
 import * as settingHelpers from '../../../features/settings/settingHelpers';
-import { clearPipenvCache, getPipenv, PIPENV_PATH_KEY } from '../../../managers/pipenv/pipenvUtils';
+import {
+    clearPipenvCache,
+    getPipenv,
+    getPipenvVersion,
+    PIPENV_PATH_KEY,
+} from '../../../managers/pipenv/pipenvUtils';
 
 /**
  * Tests for getPipenv prioritization.
@@ -108,5 +114,28 @@ suite('Pipenv Utils - getPipenv prioritization', () => {
 
         // Clean up
         return promise;
+    });
+});
+
+suite('Pipenv Utils - getPipenvVersion', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('parses the Pipenv version', async () => {
+        const execProcess = sinon
+            .stub(childProcessApis, 'execProcess')
+            .resolves({ stdout: 'pipenv, version 2024.4.1\n', stderr: '' });
+
+        const version = await getPipenvVersion('pipenv');
+
+        assert.strictEqual(version, '2024.4.1');
+        assert.ok(execProcess.calledWith('"pipenv" --version'));
+    });
+
+    test('returns undefined when the command fails', async () => {
+        sinon.stub(childProcessApis, 'execProcess').rejects(new Error('Command not found'));
+
+        assert.strictEqual(await getPipenvVersion('pipenv'), undefined);
     });
 });

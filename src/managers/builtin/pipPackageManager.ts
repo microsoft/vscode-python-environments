@@ -27,6 +27,7 @@ import {
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
+import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 import { CommandConstructorOptions } from '../base/commands/index';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
@@ -48,7 +49,6 @@ import {
 } from './commands/index';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
-import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 
 export class PipPackageManager implements PackageManager, Disposable {
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
@@ -293,20 +293,13 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async getPackageAvailableVersions(
+    private async getPackageAvailableVersionsCommand(
         environment: PythonEnvironment,
-        packageName: string,
-    ): Promise<Pep440Version[]> {
+    ): Promise<PipAvailableVersionsCommand | UvAvailableVersionsCommand | PipAvailableVersionsTextCommand> {
         const pythonExecutable = environment.execInfo?.run?.executable;
         if (!pythonExecutable) {
             throw new Error(`Python executable is unavailable for environment: ${environment.envId.id}`);
         }
-
-        const pythonVersion = PythonVersion.tryParse(environment.version);
-        if (!pythonVersion) {
-            throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
-        }
-        const baseVersion = pythonVersion.toReleaseString();
 
         const availableVersions = await createPipOrUvCommandWithKind(
             { pythonExecutable, log: this.log },
@@ -314,35 +307,35 @@ export class PipPackageManager implements PackageManager, Disposable {
             PipAvailableVersionsCommand,
             UvAvailableVersionsCommand,
         );
-
-        // For pip < 21.2.0, check version first.
-        if (availableVersions.kind === 'pip') {
-            const pipVersion = await new PipVersionCommand({ pythonExecutable, log: this.log }).execute();
-            if (!pipVersion) {
-                throw new Error(`Unable to determine pip version for environment: ${environment.envId.id}`);
-            }
-            if (compare(pipVersion.public, '21.2.0') < 0) {
-                throw new PackageVersionLookupNotSupportedError(
-                    `Package version lookup requires pip 21.2 or newer; the environment has pip ${pipVersion.public}.`,
-                );
-            }
-            if (compare(pipVersion.public, '25.1') >= 0) {
-                const versions = await availableVersions.command.execute({
-                    packageName,
-                    pythonVersion: baseVersion,
-                });
-                return versions.sort((a, b) => compare(b.public, a.public));
-            }
-
-            const textCommand = new PipAvailableVersionsTextCommand({ pythonExecutable, log: this.log });
-            const textVersions = await textCommand.execute({ packageName, pythonVersion: baseVersion });
-            return textVersions.sort((a, b) => compare(b.public, a.public));
+        if (availableVersions.kind === 'uv') {
+            return availableVersions.command;
         }
 
-        const versions = await availableVersions.command.execute({
-            packageName,
-            pythonVersion: baseVersion,
-        });
+        const version = await new PipVersionCommand({ pythonExecutable, log: this.log }).execute();
+        if (!version) {
+            throw new Error(`Unable to determine pip version for environment: ${environment.envId.id}`);
+        }
+        if (compare(version.public, '21.2.0') < 0) {
+            throw new PackageVersionLookupNotSupportedError(
+                `Package version lookup requires pip 21.2 or newer; the environment has pip ${version.public}.`,
+            );
+        }
+        if (compare(version.public, '25.1') >= 0) {
+            return availableVersions.command;
+        }
+
+        return new PipAvailableVersionsTextCommand({ pythonExecutable, log: this.log });
+    }
+
+    async getPackageAvailableVersions(environment: PythonEnvironment, packageName: string): Promise<Pep440Version[]> {
+        const baseVersion = environment.version
+            ? PythonVersion.tryParse(environment.version)?.toReleaseString()
+            : undefined;
+        if (!baseVersion) {
+            throw new Error(`Python version is unavailable for environment: ${environment.envId.id}`);
+        }
+        const command = await this.getPackageAvailableVersionsCommand(environment);
+        const versions = await command.execute({ packageName, pythonVersion: baseVersion });
         return versions.sort((a, b) => compare(b.public, a.public));
     }
 

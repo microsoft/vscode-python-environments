@@ -155,9 +155,10 @@ jobs:
 
       - name: Run Smoke Tests (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@b706e4e27b14669b486812790492dc50ca16b465 # v1.7
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run smoke-test
+          script: smoke-test
+          artifact-name: smoke-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run Smoke Tests (non-Linux)
         if: runner.os != 'Linux'
@@ -243,9 +244,10 @@ jobs:
 
       - name: Run E2E Tests (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@b706e4e27b14669b486812790492dc50ca16b465 # v1.7
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run e2e-test
+          script: e2e-test
+          artifact-name: e2e-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run E2E Tests (non-Linux)
         if: runner.os != 'Linux'
@@ -340,9 +342,10 @@ jobs:
 
       - name: Run Integration Tests (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@b706e4e27b14669b486812790492dc50ca16b465 # v1.7
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run integration-test
+          script: integration-test
+          artifact-name: integration-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run Integration Tests (non-Linux)
         if: runner.os != 'Linux'

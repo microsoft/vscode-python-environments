@@ -40,7 +40,7 @@ export const SETUP_INLINE_SCRIPT_ENV_COMMAND = 'python-envs.setupInlineScriptEnv
  */
 export const SETUP_INLINE_SCRIPT_ENVS_COMMAND = 'python-envs.setupInlineScriptEnvs';
 
-/** Upper bound on the number of `.py` files the bulk command scans. */
+/** Upper bound on the number of Python files the bulk command scans. */
 const MAX_INLINE_SCRIPT_FILES = 1000;
 
 /** How many candidate files' PEP 723 headers are read concurrently during the bulk scan. */
@@ -277,7 +277,11 @@ export async function setUpInlineScriptEnvironmentsInWorkspace(
         showErrorMessage(l10n.t('The inline script environment manager is not available yet. Try again shortly.'));
         return;
     }
-    const files = await findFiles('**/*.py', '{**/.venv/**,**/node_modules/**}', MAX_INLINE_SCRIPT_FILES);
+    const files = await findFiles(
+        '**/*.{py,Py,pY,PY}',
+        '{**/.venv/**,**/node_modules/**}',
+        MAX_INLINE_SCRIPT_FILES,
+    );
     if (!files || files.length === 0) {
         showInformationMessage(l10n.t('No Python files were found in the workspace.'));
         return;

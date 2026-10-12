@@ -49,6 +49,7 @@ import { findParentIfFile } from '../../features/envCommands';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
+import { getDefaultGlobalPython } from './utils';
 import { promptInstallPythonViaUv } from './uvPythonInstaller';
 import {
     clearVenvCache,
@@ -667,6 +668,7 @@ export class VenvManager implements EnvironmentManager {
             if (resolved.envId.managerId === `${PYTHON_EXTENSION_ID}:venv`) {
                 // We should only return the resolved env if it is a venv.
                 // Fall through an return undefined if it is not a venv
+                this.addEnvironment(resolved, true);
                 return resolved;
             }
         }
@@ -738,7 +740,7 @@ export class VenvManager implements EnvironmentManager {
 
         // If a global environment is still not set, use latest from globals
         if (!this.globalEnv) {
-            this.globalEnv = getLatest(globals);
+            this.globalEnv = getDefaultGlobalPython(globals);
         }
     }
 

@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { readInlineScriptMetadata } from '../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
-import { registerInlineScriptCodeLens } from '../../features/inlineScript/codeLens';
+import { InlineScriptCodeLensProvider, registerInlineScriptCodeLens } from '../../features/inlineScript/codeLens';
 import { registerInlineScriptDiagnostics } from '../../features/inlineScript/diagnostics';
 import { InlineScriptLazyDetector } from '../../features/inlineScript/lazyDetector';
 import { sleep, waitForCondition } from '../testUtils';
@@ -15,14 +15,13 @@ import { sleep, waitForCondition } from '../testUtils';
 const SETUP_COMMAND = 'python-envs.test.inlineScriptLensSetup';
 const SCRIPT = '# /// script\n# dependencies = []\n# ///\n\nprint("hello")\n';
 
-// TODO: Re-enable on Windows after https://github.com/microsoft/vscode-python-environments/issues/1911.
-const inlineScriptCodeLensSuite = process.platform === 'win32' ? suite.skip : suite;
-inlineScriptCodeLensSuite('Integration: Live inline script CodeLens', function () {
+suite('Integration: Live inline script CodeLens', function () {
     this.timeout(30_000);
 
     let root: string;
     let document: vscode.TextDocument;
     let routing: InlineScriptRoutingRegistry;
+    let provider: InlineScriptCodeLensProvider;
     let registration: vscode.Disposable;
     let diagnostics: vscode.Disposable;
     let detector: InlineScriptLazyDetector;
@@ -36,7 +35,9 @@ inlineScriptCodeLensSuite('Integration: Live inline script CodeLens', function (
 
     setup(async () => {
         routing = new InlineScriptRoutingRegistry();
-        registration = registerInlineScriptCodeLens(routing, SETUP_COMMAND).disposable;
+        const codeLens = registerInlineScriptCodeLens(routing, SETUP_COMMAND);
+        provider = codeLens.provider;
+        registration = codeLens.disposable;
         diagnostics = registerInlineScriptDiagnostics();
         detector = new InlineScriptLazyDetector(routing);
         detector.activate();
@@ -90,6 +91,19 @@ inlineScriptCodeLensSuite('Integration: Live inline script CodeLens', function (
         assert.strictEqual(await vscode.workspace.applyEdit(edit), true);
     }
 
+    async function replaceAndWaitForLensRefresh(text: string): Promise<void> {
+        let refreshed = false;
+        const subscription = provider.onDidChangeCodeLenses(() => {
+            refreshed = true;
+        });
+        try {
+            await replace(text);
+            await waitForCondition(() => refreshed, 5_000, 'The CodeLens provider should refresh after the edit');
+        } finally {
+            subscription.dispose();
+        }
+    }
+
     function validateSavedEnvironment(version = '3.12.4'): void {
         const metadata = readInlineScriptMetadata(document.getText());
         assert.ok(metadata);
@@ -137,12 +151,22 @@ inlineScriptCodeLensSuite('Integration: Live inline script CodeLens', function (
         await replace(SCRIPT.replace('hello', 'dirty body'));
         assert.strictEqual(document.isDirty, true);
         assert.strictEqual((await lenses())[0]?.command?.command, '');
-        await replace(SCRIPT.replace('[]', '["requests"]'));
+        await replaceAndWaitForLensRefresh(SCRIPT.replace('[]', '["requests"]'));
         assert.strictEqual((await lenses())[0]?.command?.command, SETUP_COMMAND);
         assert.strictEqual(routing.shouldRoute(document.uri), false, 'the detector must still invalidate changed headers');
         await replace(SCRIPT);
         assert.strictEqual((await lenses())[0]?.command?.command, '');
         assert.strictEqual(routing.shouldRoute(document.uri), true, 'Undo must restore the validated route');
+    });
+
+    test('a dirty ordinary file gains its setup lens without being saved', async () => {
+        await replace('print("ordinary Python")\n');
+        assert.deepStrictEqual(await lenses(), []);
+
+        await replaceAndWaitForLensRefresh(SCRIPT);
+
+        assert.strictEqual(document.isDirty, true);
+        assert.strictEqual((await lenses())[0]?.command?.command, SETUP_COMMAND);
     });
 
     test('restored associations show the version and availability changes switch the label', async () => {

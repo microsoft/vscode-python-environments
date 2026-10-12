@@ -24,7 +24,6 @@ import { EnvironmentToolSupport, pythonToolSupport } from '../../internal/python
 import { withProgress } from '../../common/window.apis';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
-import { getLatest } from '../common/utils';
 import {
     clearSystemEnvCache,
     getSystemEnvForGlobal,
@@ -33,7 +32,7 @@ import {
     setSystemEnvForWorkspace,
     setSystemEnvForWorkspaces,
 } from './cache';
-import { refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
+import { getDefaultGlobalPython, refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
 import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToInstall } from './uvPythonInstaller';
 
 export class SysPythonManager implements EnvironmentManager {
@@ -204,7 +203,7 @@ export class SysPythonManager implements EnvironmentManager {
 
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
         if (scope === undefined) {
-            this.globalEnv = environment ?? getLatest(this.collection);
+            this.globalEnv = environment ?? getDefaultGlobalPython(this.collection);
             if (environment) {
                 await setSystemEnvForGlobal(environment.environmentPath.fsPath);
             }
@@ -323,12 +322,14 @@ export class SysPythonManager implements EnvironmentManager {
             // Resolve the installed Python using NativePythonFinder instead of full refresh
             const resolved = await resolveSystemPythonEnvironmentPath(pythonPath, this.nativeFinder, this.api, this);
             if (resolved) {
-                // Add to collection, update global env, and fire change event
-                this.collection.push(resolved);
-                this.globalEnv = resolved;
-                await setSystemEnvForGlobal(resolved.environmentPath.fsPath);
-                this._onDidChangeEnvironments.fire([{ environment: resolved, kind: EnvironmentChangeKind.add }]);
-                return resolved;
+                // Reinstalling an already-installed version resolves to an interpreter that is already listed.
+                const environment = this.trackResolvedEnvironment(resolved);
+                this.globalEnv = environment;
+                await setSystemEnvForGlobal(environment.environmentPath.fsPath);
+                if (environment === resolved) {
+                    this._onDidChangeEnvironments.fire([{ environment, kind: EnvironmentChangeKind.add }]);
+                }
+                return environment;
             }
         }
 
@@ -391,18 +392,14 @@ export class SysPythonManager implements EnvironmentManager {
 
             // If the environment is not found, resolve the fsPath.
             if (!this.globalEnv) {
-                this.globalEnv = await resolveSystemPythonEnvironmentPath(fsPath, this.nativeFinder, this.api, this);
-
-                // If the environment is resolved, add it to the collection
-                if (this.globalEnv) {
-                    this.collection.push(this.globalEnv);
-                }
+                const resolved = await resolveSystemPythonEnvironmentPath(fsPath, this.nativeFinder, this.api, this);
+                this.globalEnv = resolved ? this.trackResolvedEnvironment(resolved) : undefined;
             }
         }
 
         // If a global environment is still not set, try using the latest environment
         if (!this.globalEnv) {
-            this.globalEnv = getLatest(this.collection);
+            this.globalEnv = getDefaultGlobalPython(this.collection);
         }
 
         // Try to find workspace environments
@@ -424,14 +421,28 @@ export class SysPythonManager implements EnvironmentManager {
                     const resolved = await resolveSystemPythonEnvironmentPath(env, this.nativeFinder, this.api, this);
 
                     if (resolved) {
-                        // If resolved add it to the collection.
-                        this.fsPathToEnv.set(normalizedPath, resolved);
-                        this.collection.push(resolved);
+                        this.fsPathToEnv.set(normalizedPath, this.trackResolvedEnvironment(resolved));
                     } else {
                         this.log.error(`Failed to resolve python environment: ${env}`);
                     }
                 }
             }
         }
+    }
+
+    /**
+     * Returns the collection entry for a resolved environment, adding it only when its interpreter is not
+     * already listed. A saved path can be an alias of a discovered interpreter (for example a symlink or
+     * uv's `~/.local/bin` launchers), which resolves to an environment the collection already contains.
+     * The result is `resolved` itself only when it was added.
+     */
+    private trackResolvedEnvironment(resolved: PythonEnvironment): PythonEnvironment {
+        const key = normalizePath(resolved.environmentPath.fsPath);
+        const existing = this.collection.find((e) => normalizePath(e.environmentPath.fsPath) === key);
+        if (existing) {
+            return existing;
+        }
+        this.collection.push(resolved);
+        return resolved;
     }
 }
