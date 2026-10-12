@@ -1,7 +1,8 @@
 import type { IEventNamePropertyMapping } from './constants';
+import { traceError } from '../logging';
 import { StopWatch } from '../stopWatch';
 import { isTestExecution } from '../utils/testing';
-import { getTelemetryReporter } from './reporter';
+import { getSharedTelemetryProperties, getTelemetryReporter } from './reporter';
 import { isPromise } from 'util/types';
 
 type FailedEventType = { failed: true };
@@ -25,7 +26,6 @@ export function sendTelemetryEvent<P extends IEventNamePropertyMapping, E extend
     if (isTestExecution() || !isTelemetrySupported()) {
         return;
     }
-    const reporter = getTelemetryReporter();
     const measures =
         typeof measuresOrDurationMs === 'number' ? { duration: measuresOrDurationMs } : measuresOrDurationMs;
 
@@ -42,20 +42,30 @@ export function sendTelemetryEvent<P extends IEventNamePropertyMapping, E extend
             try {
                 customProperties[prop] = typeof value === 'object' ? 'object' : String(value);
             } catch (exception) {
-                console.error(`Failed to serialize ${prop} for ${String(eventName)}`, exception);
+                traceError(`Failed to serialize ${prop} for ${String(eventName)}`, exception);
             }
         });
     }
 
-    if (ex) {
-        const errorProps = {
-            errorName: ex.name,
-            errorStack: ex.stack ?? '',
-        };
-        Object.assign(customProperties, errorProps);
-        reporter.sendTelemetryErrorEvent(eventNameSent, customProperties, measures);
-    } else {
-        reporter.sendTelemetryEvent(eventNameSent, customProperties, measures);
+    Object.assign(customProperties, getSharedTelemetryProperties());
+
+    try {
+        const reporter = getTelemetryReporter();
+        if (!reporter) {
+            return;
+        }
+        if (ex) {
+            const errorProps = {
+                errorName: ex.name,
+                errorStack: ex.stack ?? '',
+            };
+            Object.assign(customProperties, errorProps);
+            reporter.sendTelemetryErrorEvent(eventNameSent, customProperties, measures);
+        } else {
+            reporter.sendTelemetryEvent(eventNameSent, customProperties, measures);
+        }
+    } catch (error) {
+        traceError('Failed to send telemetry event:', eventNameSent, error);
     }
 }
 

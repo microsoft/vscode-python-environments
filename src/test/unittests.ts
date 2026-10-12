@@ -7,7 +7,7 @@ const Module = require('module');
 
 type VSCode = typeof vscode;
 
-const mockedVSCode: Partial<VSCode> = {};
+const mockedVSCode: Partial<VSCode> = { version: '1.110.0' };
 export const mockedVSCodeNamespaces: { [P in keyof VSCode]?: VSCode[P] } = {};
 const originalLoad = Module._load;
 
@@ -42,6 +42,16 @@ export function initialize() {
     const clipboard = new MockClipboard();
     when(mockedVSCodeNamespaces.env!.clipboard).thenReturn(clipboard);
     when(mockedVSCodeNamespaces.env!.appName).thenReturn('Insider');
+    when(mockedVSCodeNamespaces.env!.createTelemetryLogger(anything(), anything())).thenCall(
+        (): vscode.TelemetryLogger => ({
+            isUsageEnabled: true,
+            isErrorsEnabled: true,
+            logUsage: () => undefined,
+            logError: () => undefined,
+            onDidChangeEnableStates: () => new vscodeMocks.Disposable(() => undefined),
+            dispose: () => undefined,
+        }),
+    );
 
     // This API is used in src/client/telemetry/telemetry.ts
     const extension = mock<vscode.Extension<any>>();
@@ -59,7 +69,7 @@ export function initialize() {
             return mockedVSCode;
         }
         if (request === '@vscode/extension-telemetry') {
-            return { default: vscMockTelemetryReporter as any };
+            return { TelemetryReporter: vscMockTelemetryReporter };
         }
         // less files need to be in import statements to be converted to css
         // But we don't want to try to load them in the mock vscode
