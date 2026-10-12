@@ -103,23 +103,34 @@ suite('Environment Picker Interpreter Path Entry', () => {
         sinon.restore();
     });
 
-    test('resolves a typed path using the project and available managers', async () => {
-        input.resolves(`  ${interpreter.fsPath}  `);
+    for (const [name, typedInterpreter] of [
+        ['native path', interpreter],
+        [
+            'uppercase Windows drive letter',
+            Uri.from({
+                scheme: 'file',
+                path: path.posix.join('/', 'D:', 'project with spaces', '.venv', 'python.exe'),
+            }),
+        ],
+    ] as const) {
+        test(`resolves a typed path using the project and available managers: ${name}`, async () => {
+            input.resolves(`  ${typedInterpreter.fsPath}  `);
 
-        const selected = await pickEnvironment(managers, projectManagers, { projects: [] });
+            const selected = await pickEnvironment(managers, projectManagers, { projects: [] });
 
-        assert.strictEqual(selected, environment);
-        sinon.assert.calledOnce(input);
-        sinon.assert.calledOnceWithExactly(
-            resolve,
-            interpreter,
-            managers,
-            projectManagers,
-            reporter,
-            tokenSource.token,
-        );
-        sinon.assert.notCalled(showError);
-    });
+            assert.strictEqual(selected, environment);
+            sinon.assert.calledOnce(input);
+            sinon.assert.calledOnceWithExactly(
+                resolve,
+                sinon.match.instanceOf(Uri).and(sinon.match.has('fsPath', typedInterpreter.fsPath)),
+                managers,
+                projectManagers,
+                reporter,
+                tokenSource.token,
+            );
+            sinon.assert.notCalled(showError);
+        });
+    }
 
     for (const value of [undefined, '', '   ']) {
         test(`does not resolve or select an interpreter for cancelled or empty input: ${JSON.stringify(value)}`, async () => {
