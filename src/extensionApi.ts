@@ -45,7 +45,7 @@ import { traceError, traceInfo } from './common/logging';
 import { pickEnvironmentManager } from './common/pickers/managers';
 import { timeout } from './common/utils/asyncUtils';
 import { createDeferred } from './common/utils/deferred';
-import { checkUri } from './common/utils/pathUtils';
+import { checkUri, normalizePath } from './common/utils/pathUtils';
 import { handlePythonPath } from './common/utils/pythonPath';
 import type { EnvironmentManagers } from './features/envManagers';
 import type { ProjectCreators } from './features/creators/projectCreators';
@@ -200,11 +200,15 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         capability: PackageManagerCapability,
         project?: PythonProject,
     ): Promise<Support> {
-        const projectIsRegistered = !project || this.projectManager.getProjects().some(
-            (candidate) => candidate.uri.toString() === project.uri.toString(),
+        const registeredProject = project && this.projectManager.getProjects().find(
+            ({ uri }) => uri.scheme === project.uri.scheme && (
+                uri.scheme === 'file'
+                    ? normalizePath(uri.fsPath) === normalizePath(project.uri.fsPath)
+                    : uri.toString() === project.uri.toString()
+            ),
         );
-        let manager = projectIsRegistered
-            ? this.envManagers.getPackageManager(project?.uri ?? environment)
+        let manager = !project || registeredProject
+            ? this.envManagers.getPackageManager(registeredProject?.uri ?? environment)
             : undefined;
         // A project-aware root is not a usable substitute for a missing scoped instance.
         if (manager?.createForProject && !manager.project) {
@@ -214,7 +218,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             kind: 'package',
             manager,
             capability,
-            context: { environment, project },
+            context: { environment, project: registeredProject ?? project },
         });
     }
 

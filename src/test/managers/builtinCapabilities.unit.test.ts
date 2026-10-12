@@ -4,7 +4,7 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Disposable, Memento, Uri } from 'vscode';
+import { Disposable, l10n, Memento, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironmentApi, PythonProject } from '../../api';
 import {
     CapabilityContext,
@@ -17,10 +17,12 @@ import {
 import * as metadata from '../../common/inlineScript/metadata';
 import * as workspaceApis from '../../common/workspace.apis';
 import { InlineScriptEnvManager } from '../../managers/builtin/inlineScript/envManager';
+import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 import { PoetryManager } from '../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../managers/poetry/poetryPackageManager';
 import { createMockLogOutputChannel } from '../mocks/helper';
+import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
 suite('Built-in manager capabilities', () => {
     const root = path.join(__dirname, 'capability-fixtures');
@@ -50,6 +52,14 @@ suite('Built-in manager capabilities', () => {
         } finally {
             sinon.restore();
         }
+    });
+
+    test('system-owned local environments report manager-level removal support without classifying the installation', async () => {
+        const manager = new SysPythonManager({} as NativePythonFinder, api, log);
+        const environment = createMockPythonEnvironment({ envPath: path.join(root, '.venv'), managerId: 'test:system' });
+        assert.deepStrictEqual(await environmentCapability(manager, EnvironmentCapability.Remove, { environment }), {
+            supported: false, reason: l10n.t('This environment manager does not support removing environments.'),
+        });
     });
 
     suite('Inline-script creation', () => {

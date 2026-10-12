@@ -21,6 +21,7 @@ import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } 
 import * as extensionApis from '../common/extension.apis';
 import * as frameUtils from '../common/utils/frameUtils';
 import { createDeferred } from '../common/utils/deferred';
+import * as platformUtils from '../common/utils/platformUtils';
 import * as windowApis from '../common/window.apis';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
 import { PythonEnvironmentManagers } from '../features/envManagers';
@@ -288,6 +289,27 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         }));
         assert.ok(scopedPackageManagerVersion.calledOnceWithExactly(environment));
         assert.ok(packageManagerVersion.notCalled && environmentManagerVersion.notCalled);
+    });
+
+    test('file project matching respects platform casing and routes the registered URI', async () => {
+        const isWindows = sinon.stub(platformUtils, 'isWindows').returns(false);
+        const create = registerPackages(true);
+        const equivalentProject = { ...project, uri: project.uri.with({ path: project.uri.path.toUpperCase() }) };
+        assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List, equivalentProject)).supported, false);
+        isWindows.returns(true);
+        for (const uri of [
+            project.uri.with({ scheme: 'vscode-remote', authority: 'ssh-remote+other-host' }),
+            project.uri.with({ authority: 'other-host' }),
+        ]) {
+            assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List, { ...project, uri })).supported, false);
+        }
+        assert.ok(create?.notCalled);
+
+        assert.strictEqual(await api.getPackageManagerCapability(environment, PackageCapability.List, equivalentProject), scopedSupport);
+        assert.ok(create?.calledOnceWithExactly(project));
+        assert.ok(configuredPackage.calledWithExactly(projectManager, project.uri));
+        assert.ok(scopedProbe.calledOnceWithExactly({ environment, project }));
+        await clock.tickAsync(0);
     });
 
     test('an untracked explicit project never probes a root or a containing project provider', async () => {

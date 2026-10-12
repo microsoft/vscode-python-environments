@@ -45,7 +45,7 @@ export class SysPythonManager implements EnvironmentManager {
         [EnvironmentCapability.Create]: supportedCapability,
         [EnvironmentCapability.Remove]: async () => ({
             supported: false,
-            reason: l10n.t('Removing a global Python installation is not supported.'),
+            reason: l10n.t('This environment manager does not support removing environments.'),
         }),
     };
 

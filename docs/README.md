@@ -1881,6 +1881,7 @@ environment/project routing. They use registered managers without activation,
 waiting, or prompting. Unavailable managers return `{ supported: false, reason }`.
 An explicit package-query project must be registered; an unregistered nested
 project cannot use its containing project's provider.
+File-project paths are compared using platform-aware normalization and routed through the registered URI.
 Feature-detect query methods when supporting older extension runtimes:
 
 ```typescript
