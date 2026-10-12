@@ -35,13 +35,11 @@ const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = 
 
 const fullPackageCapabilities: Capabilities<PackageManagerCapability> = {
     'packages.list': async () => supported,
-    'packages.refresh': async () => supported,
-    'packages.manage': async () => supported,
-    'packages.manage.install': async () => supported,
-    'packages.manage.uninstall': async () => supported,
-    'packages.manage.upgrade': async () => supported,
-    'packages.direct': async () => supported,
-    'packages.availableVersions': async () => supported,
+    'packages.install': async () => supported,
+    'packages.uninstall': async () => supported,
+    'packages.upgrade': async () => supported,
+    'packages.listDirect': async () => supported,
+    'packages.listAvailableVersions': async () => supported,
 };
 
 function environmentManager(capabilities: Partial<Capabilities<EnvironmentManagerCapability>> = {}): EnvironmentManager {
@@ -74,9 +72,9 @@ suite('Manager capabilities', () => {
             assert.strictEqual(await environmentCapability(env, 'environments.list'), denied);
             assert.strictEqual(await environmentCapability(env, 'environments.create'), supported);
 
-            const pkg = packageManager({ 'packages.manage': async () => denied, 'packages.direct': async () => supported });
-            assert.strictEqual(await packageCapability(pkg, 'packages.manage'), denied);
-            assert.strictEqual(await packageCapability(pkg, 'packages.direct'), supported);
+            const pkg = packageManager({ 'packages.install': async () => denied, 'packages.listDirect': async () => supported });
+            assert.strictEqual(await packageCapability(pkg, 'packages.install'), denied);
+            assert.strictEqual(await packageCapability(pkg, 'packages.listDirect'), supported);
         });
 
         test('a key missing from the capability map resolves unsupported, not a crash', async () => {
@@ -128,15 +126,15 @@ suite('Manager capabilities', () => {
             const context: CapabilityContext = Object.freeze({ scope: 'global', project: { name: 'project', uri: Uri.file('.') } });
             let result: Support = denied;
             const manager = packageManager({
-                'packages.manage': async (received) => {
+                'packages.install': async (received) => {
                     assert.strictEqual(received.scope, context.scope);
                     assert.strictEqual(received.project, context.project);
                     return result;
                 },
             });
-            assert.strictEqual(await packageCapability(manager, 'packages.manage', context), denied);
+            assert.strictEqual(await packageCapability(manager, 'packages.install', context), denied);
             result = supported;
-            assert.strictEqual(await packageCapability(manager, 'packages.manage', context), supported);
+            assert.strictEqual(await packageCapability(manager, 'packages.install', context), supported);
         });
 
         test('sync and async checker failures propagate instead of resolving unsupported', async () => {
@@ -146,9 +144,9 @@ suite('Manager capabilities', () => {
                     throw failure;
                 },
             });
-            const pkg = packageManager({ 'packages.manage': async () => Promise.reject(failure) });
+            const pkg = packageManager({ 'packages.install': async () => Promise.reject(failure) });
             await assert.rejects(environmentCapability(env, 'environments.list'), (error) => error === failure);
-            await assert.rejects(packageCapability(pkg, 'packages.manage'), (error) => error === failure);
+            await assert.rejects(packageCapability(pkg, 'packages.install'), (error) => error === failure);
         });
     });
 
@@ -163,9 +161,9 @@ suite('Manager capabilities', () => {
         });
 
         test('InternalPackageManager resolves through the raw manager without defaults', async () => {
-            const manager = new InternalPackageManager('test:packages', packageManager({ 'packages.direct': async () => denied }));
+            const manager = new InternalPackageManager('test:packages', packageManager({ 'packages.listDirect': async () => denied }));
             try {
-                assert.strictEqual(await manager.getCapability('packages.direct'), denied);
+                assert.strictEqual(await manager.getCapability('packages.listDirect'), denied);
                 assert.deepStrictEqual(await manager.getCapability('packages.list'), supported);
             } finally {
                 manager.dispose();

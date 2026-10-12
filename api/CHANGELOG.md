@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Required `capabilities` maps for environment and package managers, with typed keys, contextual checks, and prerequisite-cycle detection. There are no defaults: a manager must advertise every catalog key explicitly, and an omitted key resolves unsupported.
 - Raw-provider capability resolvers and routed extension API queries that report support without invoking manager operations or prompting.
-- Capability catalogs for 10 environment and 11 package features.
+- Capability catalogs for six environment and six package features, with flat operation names. Listing includes refresh, and package installation, uninstallation, and upgrades are advertised individually rather than through a management umbrella.
 
 ### Changed
 

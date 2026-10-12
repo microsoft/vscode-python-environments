@@ -21,16 +21,14 @@ export const requiredEnvironmentCapabilities: Pick<
 };
 
 /**
- * Every package manager implements these operations; spread into a manager's `capabilities`
- * to advertise them without repeating the same `supportedCapability` checks.
+ * Every package manager implements listing and refresh; spread into a manager's `capabilities`
+ * to advertise them through `packages.list`.
  */
 export const requiredPackageCapabilities: Pick<
     Capabilities<PackageManagerCapability>,
-    'packages.list' | 'packages.refresh' | 'packages.manage'
+    'packages.list'
 > = {
     'packages.list': supportedCapability,
-    'packages.refresh': supportedCapability,
-    'packages.manage': supportedCapability,
 };
 
 /**

@@ -45,11 +45,11 @@ import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../i
 export class CondaPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         ...requiredPackageCapabilities,
-        'packages.manage.install': supportedCapability,
-        'packages.manage.uninstall': supportedCapability,
-        'packages.manage.upgrade': supportedCapability,
-        'packages.availableVersions': supportedCapability,
-        'packages.direct': async () => ({
+        'packages.install': supportedCapability,
+        'packages.uninstall': supportedCapability,
+        'packages.upgrade': supportedCapability,
+        'packages.listAvailableVersions': supportedCapability,
+        'packages.listDirect': async () => ({
             supported: false,
             reason: l10n.t('Conda does not classify direct and transitive packages.'),
         }),

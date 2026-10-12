@@ -113,7 +113,7 @@ suite('Built-in manager capabilities', () => {
 
     suite('Poetry project context', () => {
         let manager: PoetryPackageManager;
-        const projectCapabilities = ['packages.list', 'packages.direct', 'packages.manage', 'packages.refresh'] as const;
+        const projectCapabilities = ['packages.list', 'packages.listDirect', 'packages.install', 'packages.uninstall'] as const;
 
         setup(() => {
             manager = new PoetryPackageManager(api, log, {} as PoetryManager);

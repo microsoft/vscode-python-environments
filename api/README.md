@@ -43,7 +43,7 @@ Capabilities report general manager support without invoking an operation:
 const api = await PythonEnvironments.api();
 const environment = await api.getEnvironment(undefined);
 if (environment && typeof api.getPackageManagerCapability === 'function') {
-    const support = await api.getPackageManagerCapability(environment, 'packages.direct');
+    const support = await api.getPackageManagerCapability(environment, 'packages.listDirect');
     if (support.supported) {
         // Best-effort direct/transitive package classification is available.
     }
@@ -60,7 +60,12 @@ map; return `{ supported: false, reason }` to disable support. Checks must be
 read-only and noninteractive.
 
 Capability keys come from the `EnvironmentManagerCapability` and
-`PackageManagerCapability` type unions. Adding a public key requires updating
+`PackageManagerCapability` type unions. Package keys are `packages.list`,
+`packages.install`, `packages.uninstall`, `packages.upgrade`,
+`packages.listDirect`, and `packages.listAvailableVersions`. Listing includes
+refreshing results; the existing `manage()` method implements installation,
+uninstallation, and upgrades without a separate capability key.
+Adding a public key requires updating
 every built-in manager's `capabilities` map, plus tests and documentation.
 Removing a key from the type union is a breaking API change.
 

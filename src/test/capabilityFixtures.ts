@@ -20,11 +20,9 @@ export const allSupportedEnvironmentCapabilities: Capabilities<EnvironmentManage
 
 export const allSupportedPackageCapabilities: Capabilities<PackageManagerCapability> = {
     'packages.list': supportedCapability,
-    'packages.refresh': supportedCapability,
-    'packages.manage': supportedCapability,
-    'packages.manage.install': supportedCapability,
-    'packages.manage.uninstall': supportedCapability,
-    'packages.manage.upgrade': supportedCapability,
-    'packages.direct': supportedCapability,
-    'packages.availableVersions': supportedCapability,
+    'packages.install': supportedCapability,
+    'packages.uninstall': supportedCapability,
+    'packages.upgrade': supportedCapability,
+    'packages.listDirect': supportedCapability,
+    'packages.listAvailableVersions': supportedCapability,
 };

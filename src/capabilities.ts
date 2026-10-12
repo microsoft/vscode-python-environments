@@ -37,22 +37,18 @@ const environmentCapabilityKeys = [
 
 /** Package capability keys. Every package manager must advertise a check for each key. */
 const packageCapabilityKeys = [
-    /** List installed packages in an environment. Required getPackages operation; an empty result is valid. */
+    /** List/refresh installed packages in an environment. Required getPackages and refresh operations; an empty result is valid. */
     'packages.list',
-    /** Refresh installed package data. Required refresh operation. */
-    'packages.refresh',
-    /** Execute package management requests. Required manage operation; variants have their own keys. */
-    'packages.manage',
     /** Install the requested packages by honoring the install array. */
-    'packages.manage.install',
+    'packages.install',
     /** Uninstall the requested packages by honoring the uninstall array. */
-    'packages.manage.uninstall',
+    'packages.uninstall',
     /** Honor upgrade for installation, without guaranteeing identical solver behavior. */
-    'packages.manage.upgrade',
-    /** Identify direct/transitive packages on a best-effort basis, not exact user installation intent. */
-    'packages.direct',
+    'packages.upgrade',
+    /** List direct package names on a best-effort basis, not exact user installation intent. */
+    'packages.listDirect',
     /** Look up available package versions. */
-    'packages.availableVersions',
+    'packages.listAvailableVersions',
 ] as const;
 
 /** Environment capability keys that every environment manager must advertise a check for. */
@@ -119,8 +115,8 @@ export const unsupportedCapability: CapabilityCheck = async () => ({
 // a compile error rather than a silent runtime mismatch.
 //
 // Callers include both the API layer and managers themselves, which may call these recursively
-// from within a capability check to delegate to a prerequisite (e.g. `'packages.manage.install'`
-// delegating to `'packages.manage'`). There is no cycle protection: a manager that delegates
+// from within a capability check to delegate to a prerequisite (e.g. `'packages.upgrade'`
+// delegating to `'packages.install'`). There is no cycle protection: a manager that delegates
 // in a loop will recurse until the call stack overflows, so keep delegation chains acyclic.
 // ---------------------------------------------------------------------------
 

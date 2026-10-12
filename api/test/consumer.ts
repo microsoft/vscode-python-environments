@@ -54,22 +54,18 @@ if (isPackageVersionLookupNotSupportedError(maybeError)) {
 // Legacy providers must now advertise every capability key explicitly; there are no defaults.
 const fullPackageCapabilities: Capabilities<PackageManagerCapability> = {
     'packages.list': supportedCapability,
-    'packages.refresh': supportedCapability,
-    'packages.manage': supportedCapability,
-    'packages.manage.install': supportedCapability,
-    'packages.manage.uninstall': supportedCapability,
-    'packages.manage.upgrade': supportedCapability,
-    'packages.direct': supportedCapability,
-    'packages.availableVersions': supportedCapability,
+    'packages.install': supportedCapability,
+    'packages.uninstall': supportedCapability,
+    'packages.upgrade': supportedCapability,
+    'packages.listDirect': supportedCapability,
+    'packages.listAvailableVersions': supportedCapability,
 };
 const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
     'environments.list': supportedCapability,
-    'environments.refresh': supportedCapability,
     'environments.resolve': supportedCapability,
     'environments.getSelected': supportedCapability,
     'environments.setSelected': supportedCapability,
     'environments.create': supportedCapability,
-    'environments.create.quick': supportedCapability,
     'environments.remove': supportedCapability,
 };
 
@@ -94,12 +90,12 @@ const legacyEnvironmentManager: EnvironmentManager = {
 // Capability authoring and raw-provider resolution.
 const advertised: Capabilities<PackageManagerCapability> = {
     ...fullPackageCapabilities,
-    'packages.manage.install': (context: CapabilityContext) =>
-        resolvePackageManagerCapability(legacyPackageManager, 'packages.manage', context),
-    'packages.direct': async (_context) => ({ supported: false, reason: 'Unavailable' }),
+    'packages.upgrade': (context: CapabilityContext) =>
+        resolvePackageManagerCapability(legacyPackageManager, 'packages.install', context),
+    'packages.listDirect': async (_context) => ({ supported: false, reason: 'Unavailable' }),
 };
 const managerWithCapabilities: PackageManager = { ...legacyPackageManager, capabilities: advertised };
-resolvePackageManagerCapability(managerWithCapabilities, 'packages.direct', { environment }) satisfies Promise<Support>;
+resolvePackageManagerCapability(managerWithCapabilities, 'packages.listDirect', { environment }) satisfies Promise<Support>;
 resolveEnvironmentManagerCapability(legacyEnvironmentManager, 'environments.create', {
     scope: 'global',
 }) satisfies Promise<Support>;

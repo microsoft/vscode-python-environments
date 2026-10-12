@@ -1857,6 +1857,25 @@ Capabilities report whether an environment or package manager generally supports
 an operation. They are advisory: they do not validate one request, guarantee that
 an operation succeeds, or change operation dispatch and errors.
 
+Capability names describe manager-agnostic operations, rather than CLI command
+names or the API's implementation methods:
+
+| Environment capabilities | Package capabilities |
+| --- | --- |
+| `environments.list` | `packages.list` |
+| `environments.resolve` | `packages.install` |
+| `environments.getSelected` | `packages.uninstall` |
+| `environments.setSelected` | `packages.upgrade` |
+| `environments.create` | `packages.listDirect` |
+| `environments.remove` | `packages.listAvailableVersions` |
+
+Listing capabilities cover both reading known results and refreshing them.
+`packages.install`, `packages.uninstall`, and `packages.upgrade` describe the
+supported operations of the existing `manage()` method; there is no separate
+management capability. `packages.listDirect` retains the best-effort
+classification contract, not exact user installation intent. Environment
+selection describes the selected environment for a scope, not shell activation.
+
 ### Querying support
 
 ```typescript
@@ -1897,7 +1916,7 @@ Feature-detect the query methods when supporting older extension runtimes:
 
 ```typescript
 if (typeof api.getPackageManagerCapability === 'function') {
-    const support = await api.getPackageManagerCapability(environment, 'packages.direct');
+    const support = await api.getPackageManagerCapability(environment, 'packages.listDirect');
     if (!support.supported) {
         // support.reason explains why this feature is unavailable.
     }
@@ -1914,11 +1933,11 @@ implemented' }`. Checks receive `CapabilityContext` and return `Promise<Support>
 // Members of a PackageManager implementation:
 readonly capabilities: Capabilities<PackageManagerCapability> = {
     ...requiredPackageCapabilities, // shared, universally-true operations
-    'packages.direct': async () => ({ supported: true }),
-    'packages.availableVersions': async (context) => this.checkVersionLookupSupport(context),
-    'packages.manage.install': async (context) =>
-        resolvePackageManagerCapability(this, 'packages.manage', context),
-    'packages.manage.upgrade': async (_context) => ({
+    'packages.listDirect': supportedCapability,
+    'packages.listAvailableVersions': async (context) => this.checkVersionLookupSupport(context),
+    'packages.install': supportedCapability,
+    'packages.uninstall': supportedCapability,
+    'packages.upgrade': async (_context) => ({
         supported: false,
         reason: l10n.t('This manager does not support upgrading packages.'),
     }),
@@ -1929,7 +1948,7 @@ readonly capabilities: Capabilities<PackageManagerCapability> = {
 `requiredEnvironmentCapabilities`/`requiredPackageCapabilities`: small,
 internal-only spreadable literals for the handful of operations every built-in
 manager unconditionally supports (for example `environments.list` or
-`packages.manage`). They are a convenience to reduce duplication, not a runtime
+`packages.list`). They are a convenience to reduce duplication, not a runtime
 fallback — a manager's `capabilities` object must still include every key.
 
 Guidance for authoring checks:
@@ -1941,8 +1960,8 @@ Guidance for authoring checks:
   explains why, instead of omitting the key.
 - Keep checks read-only and noninteractive. Do not invoke the operation to test
   it. Let unexpected probe errors reject.
-- When one check depends on another (for example `packages.manage.install`
-  depending on `packages.manage`), call `resolveEnvironmentManagerCapability` or
+- When one check depends on another (for example `packages.upgrade`
+  depending on `packages.install`), call `resolveEnvironmentManagerCapability` or
   `resolvePackageManagerCapability` explicitly from within that key's check and
   forward the received context unchanged. This delegation is a per-manager
   choice, not an automatic cascade. There is no cycle protection: a manager

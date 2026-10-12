@@ -55,10 +55,10 @@ import { VenvManager } from './venvManager';
 export class PipPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         ...requiredPackageCapabilities,
-        'packages.manage.install': supportedCapability,
-        'packages.manage.uninstall': supportedCapability,
-        'packages.manage.upgrade': supportedCapability,
-        'packages.availableVersions': async ({ environment }) => {
+        'packages.install': supportedCapability,
+        'packages.uninstall': supportedCapability,
+        'packages.upgrade': supportedCapability,
+        'packages.listAvailableVersions': async ({ environment }) => {
             try {
                 await this.getPackageAvailableVersionsCommand(environment!);
             } catch (error) {
@@ -67,7 +67,7 @@ export class PipPackageManager implements PackageManager, Disposable {
             return await supportedCapability({ environment });
         },
         // Dependency roots are best-effort classification, not exact user install intent.
-        'packages.direct': supportedCapability,
+        'packages.listDirect': supportedCapability,
     };
 
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();

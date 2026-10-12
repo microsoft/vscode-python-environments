@@ -153,13 +153,13 @@ suite('Manager capabilities integration', function () {
         const denied = { supported: false, reason: 'Disabled by provider' } as const;
         packageCapabilities = {
             ...noPackageCapabilities,
-            'packages.manage': async (context) => {
+            'packages.install': async (context) => {
                 assert.strictEqual(context.environment, environment);
                 return denied;
             },
-            'packages.manage.install': (context) =>
-                resolvePackageManagerCapability(packages, 'packages.manage', context),
+            'packages.upgrade': (context) =>
+                resolvePackageManagerCapability(packages, 'packages.install', context),
         };
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.manage.install'), denied);
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, 'packages.upgrade'), denied);
     });
 });

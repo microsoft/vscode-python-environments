@@ -27,7 +27,7 @@ import {
     PythonEnvironmentApi,
     PythonProject,
 } from '../../api';
-import { Capabilities, PackageManagerCapability, resolvePackageManagerCapability, Support } from '../../capabilities';
+import { Capabilities, PackageManagerCapability, Support } from '../../capabilities';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
 import { PackageManagerRequiresProjectError } from '../common/errors';
@@ -49,18 +49,14 @@ import { PackageToolSupport, PythonToolError, pythonToolSupport, throwIfCancelle
 export class PoetryPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         'packages.list': async () => this.checkProjectSupport(),
-        'packages.direct': async () => this.checkProjectSupport(),
-        'packages.manage': async () => this.checkProjectSupport(),
-        'packages.manage.install': async (context) =>
-            resolvePackageManagerCapability(this, 'packages.manage', context),
-        'packages.manage.uninstall': async (context) =>
-            resolvePackageManagerCapability(this, 'packages.manage', context),
-        'packages.refresh': async () => this.checkProjectSupport(),
-        'packages.availableVersions': async () => ({
+        'packages.listDirect': async () => this.checkProjectSupport(),
+        'packages.install': async () => this.checkProjectSupport(),
+        'packages.uninstall': async () => this.checkProjectSupport(),
+        'packages.listAvailableVersions': async () => ({
             supported: false,
             reason: l10n.t('Poetry package version lookup is not supported by this extension.'),
         }),
-        'packages.manage.upgrade': async () => ({
+        'packages.upgrade': async () => ({
             supported: false,
             reason: l10n.t('Poetry package management does not support the upgrade option.'),
         }),
