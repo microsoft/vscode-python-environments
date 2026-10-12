@@ -25,7 +25,7 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { Capabilities, PackageManagerCapability, supportedCapability, PackageCapability } from '../../capabilities';
+import { Capabilities, CapabilityCheck, PackageManagerCapability, supportedCapability, PackageCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -53,11 +53,18 @@ import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
+    private readonly packageManagementCapability: CapabilityCheck = async ({ environment }) => {
+        if (PythonVersion.tryParse(environment?.version)?.major === 2) {
+            return { supported: false, reason: l10n.t('Python 2.* is not supported (deprecated)') };
+        }
+        return { supported: true };
+    };
+
     readonly capabilities: Capabilities<PackageManagerCapability> = {
         [PackageCapability.List]: supportedCapability,
-        [PackageCapability.Install]: supportedCapability,
-        [PackageCapability.Uninstall]: supportedCapability,
-        [PackageCapability.Upgrade]: supportedCapability,
+        [PackageCapability.Install]: this.packageManagementCapability,
+        [PackageCapability.Uninstall]: this.packageManagementCapability,
+        [PackageCapability.Upgrade]: this.packageManagementCapability,
         [PackageCapability.ListAvailableVersions]: async ({ environment }) => {
             if (!environment) {
                 return { supported: false, reason: l10n.t('An environment is required to check package version lookup support.') };
@@ -134,8 +141,9 @@ export class PipPackageManager implements PackageManager, Disposable {
             }
         }
 
-        if (PythonVersion.tryParse(environment.version)?.major === 2) {
-            throw new Error('Python 2.* is not supported (deprecated)');
+        const support = await this.packageManagementCapability({ environment });
+        if (!support.supported) {
+            throw new Error(support.reason);
         }
 
         const execute = async (token?: CancellationToken): Promise<void> => {

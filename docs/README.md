@@ -1869,6 +1869,7 @@ Listing includes refresh. Package installation, uninstallation, and upgrades
 use the existing `manage()` method. `packages.listDirect` is best-effort
 classification, not exact installation intent. Selection is scoped environment
 selection, not shell activation.
+Pip reports installation, uninstallation, and upgrades as unsupported for Python 2 environments.
 
 Use the exported `EnvironmentCapability` and `PackageCapability` constants or
 their literal string values.

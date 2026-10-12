@@ -236,7 +236,7 @@ suite('PipPackageManager', () => {
         );
     });
 
-    test('rejects package management for Python 2 environments', async () => {
+    test('advertises and enforces the Python 2 package management restriction', async () => {
         const shouldUseUvStub = sinon.stub(helpers, 'shouldUseUv');
         const environment = createMockPythonEnvironment({
             envPath: path.join(process.cwd(), 'python2'),
@@ -249,10 +249,21 @@ suite('PipPackageManager', () => {
             {} as VenvManager,
         );
 
-        await assert.rejects(
-            manager.manage(environment, { install: ['flask'] }),
-            /Python 2\.\* is not supported \(deprecated\)/,
-        );
+        for (const capability of [PackageCapability.Install, PackageCapability.Uninstall, PackageCapability.Upgrade]) {
+            assert.deepStrictEqual(await manager.capabilities[capability]({ environment }), {
+                supported: false, reason: 'Python 2.* is not supported (deprecated)',
+            });
+            assert.deepStrictEqual(await manager.capabilities[capability]({
+                environment: { ...environment, version: '3.12.0' },
+            }), { supported: true });
+            assert.deepStrictEqual(await manager.capabilities[capability]({}), { supported: true });
+        }
+        for (const options of [{ install: ['flask'] }, { uninstall: ['flask'] }, { install: ['flask'], upgrade: true }]) {
+            await assert.rejects(
+                manager.manage(environment, options),
+                /Python 2\.\* is not supported \(deprecated\)/,
+            );
+        }
         assert.strictEqual(shouldUseUvStub.callCount, 0);
     });
 
