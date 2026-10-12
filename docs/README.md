@@ -1879,6 +1879,20 @@ routing. Queries use currently registered managers without activating extensions
 waiting for registration, or prompting. Missing managers and ambiguous routing
 return `{ supported: false, reason }`; probe failures reject.
 
+Public capability queries emit `MANAGER.CAPABILITY_QUERY` through the extension's
+standard telemetry infrastructure. Each event records the routed manager ID,
+kind (`environment` or `package`), tool version, capability key, and outcome
+(`supported`, `unsupported`, `unavailable`, or `error`). Tool versions come from
+the routed instance's `EnvironmentManager.getVersion()` or
+`PackageManager.getVersion(environment)`, not the provider-extension version.
+An absent or unsuccessful version lookup records `unknown`; version lookup
+errors are logged without changing the capability result or probe error.
+Queries without a usable provider record manager ID `none`. Arbitrary runtime
+capability keys are recorded as `unknown`. Context, paths, reasons, and error
+messages are not sent, and internal prerequisite checks do not emit query events.
+Ownership validation and manager routing happen before telemetry capture;
+failures at those stages reject without emitting a capability-query event.
+
 Feature-detect the query methods when supporting older extension runtimes:
 
 ```typescript

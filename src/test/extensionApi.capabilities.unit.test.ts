@@ -3,6 +3,7 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import { explain as parsePep440Version } from '@renovatebot/pep440';
 import { Disposable, EventEmitter, Uri } from 'vscode';
 import type {
     DidChangeEnvironmentVariablesEventArgs,
@@ -12,6 +13,9 @@ import type {
     PythonProject,
 } from '../api';
 import type { CapabilityContext, Support } from '../capabilities';
+import * as logging from '../common/logging';
+import { EventNames } from '../common/telemetry/constants';
+import * as telemetry from '../common/telemetry/sender';
 import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from './capabilityFixtures';
 import * as extensionApis from '../common/extension.apis';
 import * as frameUtils from '../common/utils/frameUtils';
@@ -43,6 +47,10 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     let projects: PythonProject[];
     let disposables: Disposable[];
     let getExtension: sinon.SinonStub;
+    let sendTelemetry: sinon.SinonStub;
+    let environmentManagerVersion: sinon.SinonStub;
+    let packageManagerVersion: sinon.SinonStub;
+    let scopedPackageManagerVersion: sinon.SinonStub;
     let configuredPackage: sinon.SinonStub;
     let envProbe: sinon.SinonStub<[CapabilityContext], Promise<Support>>;
     let pkgProbe: sinon.SinonStub<[CapabilityContext], Promise<Support>>;
@@ -54,6 +62,10 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         disposables = [];
         projects = [project];
         getExtension = sinon.stub(extensionApis, 'getExtension').returns(undefined);
+        sendTelemetry = sinon.stub(telemetry, 'sendTelemetryEvent');
+        environmentManagerVersion = sinon.stub().resolves(parsePep440Version('2.0.0'));
+        packageManagerVersion = sinon.stub().resolves(parsePep440Version('25.1'));
+        scopedPackageManagerVersion = sinon.stub().resolves(parsePep440Version('2.1.0'));
         sinon.stub(frameUtils, 'getCallingExtension').returns(extensionId);
         sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         sinon.stub(windowApis, 'showQuickPick').resolves(undefined);
@@ -103,6 +115,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             get: async () => undefined,
             set: async () => {},
             resolve: async () => undefined,
+            getVersion: environmentManagerVersion,
             capabilities: { ...allSupportedEnvironmentCapabilities, 'environments.list': envProbe },
         };
         return managers.registerEnvironmentManager(provider, { extensionId });
@@ -114,6 +127,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             manage: async () => {},
             refresh: async () => {},
             getPackages: async () => [],
+            getVersion: packageManagerVersion,
             capabilities: { ...allSupportedPackageCapabilities, 'packages.list': pkgProbe },
         };
     }
@@ -122,6 +136,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         const provider = packageProvider(name);
         const create = scoped ? sinon.stub().callsFake(() => ({
             ...packageProvider(name),
+            getVersion: scopedPackageManagerVersion,
             capabilities: { ...allSupportedPackageCapabilities, 'packages.list': scopedProbe },
         })) : undefined;
         managers.registerPackageManager({ ...provider, createForProject: create }, { extensionId });
@@ -135,6 +150,30 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             supported: true,
         });
         assert.ok(envProbe.calledOnceWithExactly(context));
+        assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
+            managerId: ownerId, managerKind: 'environment', managerVersion: '2.0.0',
+            capability: 'environments.list', outcome: 'supported',
+        }));
+        assert.ok(environmentManagerVersion.calledOnceWithExactly());
+    });
+
+    test('version lookup failures are logged without changing support results or probe errors', async () => {
+        registerOwner();
+        const versionError = new Error('Version lookup failed');
+        const probeError = new Error('Probe failed');
+        const trace = sinon.stub(logging, 'traceError');
+        environmentManagerVersion.rejects(versionError);
+
+        assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, 'environments.list'), { supported: true });
+        envProbe.rejects(probeError);
+        await assert.rejects(api.getEnvironmentManagerCapability(ownerId, 'environments.list'), (error) => error === probeError);
+
+        const events = sendTelemetry.getCalls().filter((call) => call.args[0] === EventNames.MANAGER_CAPABILITY_QUERY);
+        assert.deepStrictEqual(events.map((call) => [call.args[2].managerVersion, call.args[2].outcome]), [
+            ['unknown', 'supported'], ['unknown', 'error'],
+        ]);
+        assert.strictEqual(trace.callCount, 2);
+        assert.strictEqual(trace.firstCall.args[1], versionError);
     });
 
     test('rejects contradictory environment ownership before probing', async () => {
@@ -146,6 +185,11 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
     test('availability tracks the registration lifecycle rather than caching a stale result', async () => {
         const support = await api.getEnvironmentManagerCapability(ownerId, 'environments.list');
         assert.ok(!support.supported && support.reason.includes(ownerId));
+        assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
+            managerId: 'none', managerKind: 'environment', managerVersion: 'unknown',
+            capability: 'environments.list', outcome: 'unavailable',
+        }));
+        assert.ok(environmentManagerVersion.notCalled);
         assert.ok(envProbe.notCalled);
         assert.strictEqual(clock.countTimers(), 0);
         const registration = registerOwner();
@@ -176,6 +220,12 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(scopedProbe.calledOnceWithExactly({ environment, project }));
         assert.ok(pkgProbe.notCalled);
         assert.ok(configuredPackage.calledWithExactly(projectManager, project.uri));
+        assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
+            managerId: `${extensionId}:configured`, managerKind: 'package', managerVersion: '2.1.0',
+            capability: 'packages.list', outcome: 'unsupported',
+        }));
+        assert.ok(scopedPackageManagerVersion.calledOnceWithExactly(environment));
+        assert.ok(packageManagerVersion.notCalled && environmentManagerVersion.notCalled);
     });
 
     test('environment-only package queries are unavailable until both providers register', async () => {

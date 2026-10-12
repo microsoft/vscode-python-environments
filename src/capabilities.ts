@@ -20,7 +20,6 @@ import type {
 // ---------------------------------------------------------------------------
 
 /** Environment capability keys. Every environment manager must advertise a check for each key. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- only used via `typeof` below to derive the union type.
 const environmentCapabilityKeys = [
     /** List/rediscover known environments for a scope. Required getEnvironments and refresh operations. */
     'environments.list',
@@ -37,7 +36,6 @@ const environmentCapabilityKeys = [
 ] as const;
 
 /** Package capability keys. Every package manager must advertise a check for each key. */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- only used via `typeof` below to derive the union type.
 const packageCapabilityKeys = [
     /** List installed packages in an environment. Required getPackages operation; an empty result is valid. */
     'packages.list',
@@ -64,6 +62,15 @@ export type EnvironmentManagerCapability = (typeof environmentCapabilityKeys)[nu
 export type PackageManagerCapability = (typeof packageCapabilityKeys)[number];
 
 type ManagerCapability = EnvironmentManagerCapability | PackageManagerCapability;
+
+/**
+ * Identifies catalog keys so telemetry does not record arbitrary runtime input.
+ * @param capability Runtime value supplied by a caller.
+ */
+export function isKnownManagerCapability(capability: unknown): capability is ManagerCapability {
+    return environmentCapabilityKeys.some((key) => key === capability) ||
+        packageCapabilityKeys.some((key) => key === capability);
+}
 
 // ---------------------------------------------------------------------------
 // Public types

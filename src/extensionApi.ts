@@ -1,5 +1,9 @@
 import { Disposable, Event, EventEmitter, l10n, TaskExecution, Terminal, Uri } from 'vscode';
 import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCapability, Support } from './capabilities';
+import { isKnownManagerCapability } from './capabilities';
+import { explain as parsePep440Version } from '@renovatebot/pep440';
+import { EventNames } from './common/telemetry/constants';
+import { sendTelemetryEvent } from './common/telemetry/sender';
 import type {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -46,7 +50,7 @@ import { handlePythonPath } from './common/utils/pythonPath';
 import type { EnvironmentManagers } from './features/envManagers';
 import type { ProjectCreators } from './features/creators/projectCreators';
 import type { PythonProjectManager } from './features/projectManager';
-import type { InternalEnvironmentManager } from './managers/common/registeredManagers';
+import type { InternalEnvironmentManager, InternalPackageManager } from './managers/common/registeredManagers';
 import { PythonEnvironmentImpl, PythonPackageImpl } from './managers/common/models';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './features/common/managerReady';
 import { EnvVarManager } from './features/execution/envVariableManager';
@@ -160,10 +164,13 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             throw new Error(l10n.t('The environment does not belong to environment manager {0}.', managerId));
         }
         const manager = this.envManagers.getEnvironmentManager(managerId);
-        if (manager) {
-            return manager.getCapability(capability, context);
-        }
-        return { supported: false, reason: l10n.t('Environment manager {0} is unavailable.', managerId) };
+        return this.captureCapabilityQuery({
+            kind: 'environment',
+            manager,
+            managerId,
+            capability,
+            context,
+        });
     }
 
     /**
@@ -177,15 +184,72 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         capability: PackageManagerCapability,
         project?: PythonProject,
     ): Promise<Support> {
-        const manager = this.envManagers.getPackageManager(project?.uri ?? environment);
+        let manager = this.envManagers.getPackageManager(project?.uri ?? environment);
         // A project-aware root is not a usable substitute for a missing scoped instance.
-        if (!manager || (manager.createForProject && !manager.project)) {
-            return {
-                supported: false,
-                reason: l10n.t('No package manager is available for the environment and project context.'),
-            };
+        if (manager?.createForProject && !manager.project) {
+            manager = undefined;
         }
-        return manager.getCapability(capability, { environment, project });
+        return this.captureCapabilityQuery({
+            kind: 'package',
+            manager,
+            capability,
+            context: { environment, project },
+        });
+    }
+
+    private async captureCapabilityQuery(
+        query:
+            | {
+                  kind: 'environment';
+                  manager: InternalEnvironmentManager | undefined;
+                  managerId: string;
+                  capability: EnvironmentManagerCapability;
+                  context?: CapabilityContext;
+              }
+            | {
+                  kind: 'package';
+                  manager: InternalPackageManager | undefined;
+                  capability: PackageManagerCapability;
+                  context: CapabilityContext & { environment: PythonEnvironment };
+              },
+    ): Promise<Support> {
+        const { manager, capability } = query;
+        let outcome: 'supported' | 'unsupported' | 'unavailable' | 'error' = 'error';
+        try {
+            if (!query.manager) {
+                outcome = 'unavailable';
+                return {
+                    supported: false,
+                    reason: query.kind === 'environment'
+                        ? l10n.t('Environment manager {0} is unavailable.', query.managerId)
+                        : l10n.t('No package manager is available for the environment and project context.'),
+                };
+            }
+            const support = query.kind === 'environment'
+                ? await query.manager.getCapability(query.capability, query.context)
+                : await query.manager.getCapability(query.capability, query.context);
+            outcome = support.supported ? 'supported' : 'unsupported';
+            return support;
+        } finally {
+            let managerVersion = 'unknown';
+            if (query.manager) {
+                try {
+                    const version = query.kind === 'package'
+                        ? await query.manager.getVersion(query.context.environment)
+                        : await query.manager.getVersion();
+                    managerVersion = version ? parsePep440Version(version.public)?.public ?? 'unknown' : 'unknown';
+                } catch (error) {
+                    traceError(`Failed to retrieve manager version for capability telemetry: ${query.manager.id}`, error);
+                }
+            }
+            sendTelemetryEvent(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
+                managerId: manager?.id ?? 'none',
+                managerKind: query.kind,
+                managerVersion,
+                capability: isKnownManagerCapability(capability) ? capability : 'unknown',
+                outcome,
+            });
+        }
     }
 
     createPythonEnvironmentItem(info: PythonEnvironmentInfo, manager: EnvironmentManager): PythonEnvironment {
