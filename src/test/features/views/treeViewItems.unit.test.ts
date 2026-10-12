@@ -15,7 +15,6 @@ import {
 import { PythonEnvironmentImpl } from '../../../managers/common/models';
 import { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
 import type { InternalPackageManager } from '../../../managers/common/registeredManagers';
-import { allSupportedEnvironmentCapabilities } from '../../capabilityFixtures';
 
 /**
  * Helper to create a mock PythonEnvironmentImpl with minimal required fields.
@@ -76,7 +75,6 @@ function createMockManager(
         resolve: () => Promise.resolve(undefined),
         set: () => Promise.resolve(),
         get: () => Promise.resolve(undefined),
-        capabilities: allSupportedEnvironmentCapabilities,
         ...(options.supportsCreate && { create: () => Promise.resolve(undefined) }),
         ...(options.supportsRemove && { remove: () => Promise.resolve() }),
     });
@@ -468,7 +466,6 @@ suite('Test TreeView Items', () => {
                 resolve: () => Promise.resolve(undefined),
                 set: () => Promise.resolve(),
                 get: () => Promise.resolve(undefined),
-                capabilities: allSupportedEnvironmentCapabilities,
                 create: () => Promise.resolve(undefined),
             });
             const managerItem = new EnvManagerTreeItem(manager);
@@ -491,7 +488,6 @@ suite('Test TreeView Items', () => {
                 resolve: () => Promise.resolve(undefined),
                 set: () => Promise.resolve(),
                 get: () => Promise.resolve(undefined),
-                capabilities: allSupportedEnvironmentCapabilities,
                 create: () => Promise.resolve(undefined),
             });
             const managerItem = new EnvManagerTreeItem(manager);
@@ -514,7 +510,6 @@ suite('Test TreeView Items', () => {
                 resolve: () => Promise.resolve(undefined),
                 set: () => Promise.resolve(),
                 get: () => Promise.resolve(undefined),
-                capabilities: allSupportedEnvironmentCapabilities,
             });
             const managerItem = new EnvManagerTreeItem(manager);
             const item = new NoPythonEnvTreeItem(managerItem);
@@ -534,7 +529,6 @@ suite('Test TreeView Items', () => {
                 resolve: () => Promise.resolve(undefined),
                 set: () => Promise.resolve(),
                 get: () => Promise.resolve(undefined),
-                capabilities: allSupportedEnvironmentCapabilities,
             });
             const managerItem = new EnvManagerTreeItem(manager);
             const item = new NoPythonEnvTreeItem(managerItem);

@@ -6,8 +6,6 @@ import { l10n } from 'vscode';
 import {
     EnvironmentCapability,
     PackageCapability,
-    resolveEnvironmentManagerCapability,
-    resolvePackageManagerCapability,
 } from '../capabilities';
 import type { EnvironmentManagerCapability, PackageManagerCapability } from '../capabilities';
 import { getLegacyEnvironmentManagerCapability, getLegacyPackageManagerCapability } from '../legacyCapabilities';
@@ -17,8 +15,8 @@ function unexpectedOperation(): never {
     throw new Error('Legacy capability inference must not invoke operations');
 }
 
-const unsupported = { supported: false, reason: l10n.t('Capability not implemented') };
-const legacyUnsupported = { ...unsupported, isLegacy: true };
+const legacySupported = { supported: true, isLegacy: true };
+const legacyUnsupported = { supported: false, reason: l10n.t('Capability not implemented'), isLegacy: true };
 
 suite('Legacy manager capabilities', () => {
     test('package capabilities require their callable methods without executing them', async () => {
@@ -40,19 +38,16 @@ suite('Legacy manager capabilities', () => {
         };
 
         for (const capability of Object.values(PackageCapability)) {
-            assert.deepStrictEqual(await getLegacyPackageManagerCapability(manager, capability), { supported: true, isLegacy: true });
-            assert.deepStrictEqual(await resolvePackageManagerCapability(manager, capability), { supported: true, isLegacy: true });
+            assert.deepStrictEqual(await getLegacyPackageManagerCapability(manager, capability), legacySupported);
             for (const method of methods[capability]) {
                 for (const value of [undefined, false]) {
                     Reflect.set(manager, method, value);
                     assert.deepStrictEqual(await getLegacyPackageManagerCapability(manager, capability), legacyUnsupported);
-                    assert.deepStrictEqual(await resolvePackageManagerCapability(manager, capability), legacyUnsupported);
                 }
                 Reflect.set(manager, method, unexpectedOperation);
             }
         }
         assert.deepStrictEqual(await Reflect.apply(getLegacyPackageManagerCapability, undefined, [manager, 'unknown']), legacyUnsupported);
-        assert.deepStrictEqual(await Reflect.apply(resolvePackageManagerCapability, undefined, [manager, 'unknown']), legacyUnsupported);
     });
 
     test('environment capabilities require their callable methods without executing them', async () => {
@@ -77,18 +72,15 @@ suite('Legacy manager capabilities', () => {
         };
 
         for (const capability of Object.values(EnvironmentCapability)) {
-            assert.deepStrictEqual(await getLegacyEnvironmentManagerCapability(manager, capability), { supported: true, isLegacy: true });
-            assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, capability), { supported: true, isLegacy: true });
+            assert.deepStrictEqual(await getLegacyEnvironmentManagerCapability(manager, capability), legacySupported);
             for (const method of methods[capability]) {
                 for (const value of [undefined, false]) {
                     Reflect.set(manager, method, value);
                     assert.deepStrictEqual(await getLegacyEnvironmentManagerCapability(manager, capability), legacyUnsupported);
-                    assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, capability), legacyUnsupported);
                 }
                 Reflect.set(manager, method, unexpectedOperation);
             }
         }
         assert.deepStrictEqual(await Reflect.apply(getLegacyEnvironmentManagerCapability, undefined, [manager, 'unknown']), legacyUnsupported);
-        assert.deepStrictEqual(await Reflect.apply(resolveEnvironmentManagerCapability, undefined, [manager, 'unknown']), legacyUnsupported);
     });
 });

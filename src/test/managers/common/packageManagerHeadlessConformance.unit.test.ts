@@ -32,7 +32,6 @@ import { PoetryManager } from '../../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../../managers/poetry/poetryPackageManager';
 import * as poetryUtils from '../../../managers/poetry/poetryUtils';
 import { MockChildProcess } from '../../mocks/mockChildProcess';
-import { allSupportedPackageCapabilities } from '../../capabilityFixtures';
 
 suite('Package manager headless conformance', () => {
     const environment = {
@@ -170,7 +169,6 @@ suite('Package manager headless conformance', () => {
             manage: sinon.stub().resolves(),
             refresh: sinon.stub().resolves(),
             getPackages: sinon.stub().resolves([]),
-            capabilities: allSupportedPackageCapabilities,
         });
 
         await assert.rejects(

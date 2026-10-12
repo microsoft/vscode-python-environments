@@ -14,7 +14,7 @@ import {
     EnvironmentCapability,
     PackageCapability,
 } from '../capabilities';
-import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
+import { InternalPackageManager } from '../managers/common/registeredManagers';
 import type { EnvironmentManager, PackageManager } from '../types';
 import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from './capabilityFixtures';
 
@@ -121,30 +121,9 @@ suite('Manager capabilities', () => {
         });
     });
 
-    suite('Wrappers forward raw advertisements', () => {
-        test('InternalEnvironmentManager resolves through the raw manager without defaults', async () => {
-            const manager = new InternalEnvironmentManager(
-                'test:environment',
-                environmentManager({ [EnvironmentCapability.Create]: async () => denied }),
-            );
-            assert.strictEqual(await manager.getCapability(EnvironmentCapability.Create), denied);
-            assert.deepStrictEqual(await manager.getCapability(EnvironmentCapability.List), supported);
-        });
-
-        test('InternalPackageManager resolves through the raw manager without defaults', async () => {
-            const manager = new InternalPackageManager('test:packages', packageManager({ [PackageCapability.ListDirect]: async () => denied }));
-            try {
-                assert.strictEqual(await manager.getCapability(PackageCapability.ListDirect), denied);
-                assert.deepStrictEqual(await manager.getCapability(PackageCapability.List), supported);
-            } finally {
-                manager.dispose();
-            }
-        });
-
-        test('disposed package wrappers reject capability queries', () => {
-            const manager = new InternalPackageManager('test:packages', packageManager());
-            manager.dispose();
-            assert.throws(() => manager.getCapability(PackageCapability.List), /disposed/);
-        });
+    test('disposed package wrappers reject capability queries', () => {
+        const manager = new InternalPackageManager('test:packages', packageManager());
+        manager.dispose();
+        assert.throws(() => manager.getCapability(PackageCapability.List), /disposed/);
     });
 });

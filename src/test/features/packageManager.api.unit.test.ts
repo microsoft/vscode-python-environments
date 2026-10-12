@@ -34,7 +34,6 @@ import * as workspaceApis from '../../common/workspace.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import { InternalPackageManager } from '../../managers/common/registeredManagers';
-import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from '../capabilityFixtures';
 import { setupNonThenable } from '../mocks/helper';
 
 /**
@@ -685,7 +684,6 @@ suite('PythonPackageManagerApi Tests', () => {
                     set: async () => undefined,
                     get: getEnvironment,
                     resolve: async () => undefined,
-                    capabilities: allSupportedEnvironmentCapabilities,
                 },
                 { extensionId: 'test-ext' },
             );
@@ -721,14 +719,12 @@ suite('PythonPackageManagerApi Tests', () => {
                 manage: async () => undefined,
                 refresh: async () => undefined,
                 getPackages: async () => [],
-                capabilities: allSupportedPackageCapabilities,
             }));
             disposable = envManagers.registerPackageManager({
                 name: 'project-pkg-mgr',
                 manage: async () => undefined,
                 refresh: async () => undefined,
                 getPackages: async () => [],
-                capabilities: allSupportedPackageCapabilities,
                 createForProject,
             });
             return { manager: envManagers.packageManagers[0], createForProject };
@@ -868,14 +864,12 @@ suite('PythonPackageManagerApi Tests', () => {
                 manage: async () => undefined,
                 refresh: async () => undefined,
                 getPackages: async () => [],
-                capabilities: allSupportedPackageCapabilities,
                 createForProject: () => {
                     const scopedManager: PackageManager = {
                         name: 'project-pkg-mgr',
                         manage: async () => undefined,
                         refresh: async () => undefined,
                         getPackages: async () => [],
-                        capabilities: allSupportedPackageCapabilities,
                     };
                     scopedManagers.push(scopedManager);
                     return scopedManager;
@@ -909,7 +903,6 @@ suite('PythonPackageManagerApi Tests', () => {
                 manage: async () => undefined,
                 refresh: async () => undefined,
                 getPackages: async () => [],
-                capabilities: allSupportedPackageCapabilities,
             });
             const project = {
                 name: 'project',
@@ -932,7 +925,6 @@ suite('PythonPackageManagerApi Tests', () => {
                 manage: async () => undefined,
                 refresh: async () => undefined,
                 getPackages: async () => [],
-                capabilities: allSupportedPackageCapabilities,
             });
             const project = {
                 name: 'project',
@@ -1044,7 +1036,6 @@ suite('PythonPackageManagerApi Tests', () => {
                 manage: async () => undefined,
                 refresh: async () => undefined,
                 getPackages: async () => [],
-                capabilities: allSupportedPackageCapabilities,
                 createForProject: () => {
                     const emitter = new EventEmitter<DidChangePackagesEventArgs>();
                     const dispose = sinon.stub();
@@ -1053,7 +1044,6 @@ suite('PythonPackageManagerApi Tests', () => {
                         manage: async () => undefined,
                         refresh: async () => undefined,
                         getPackages: async () => [],
-                        capabilities: allSupportedPackageCapabilities,
                         onDidChangePackages: emitter.event,
                         dispose,
                     };
@@ -1121,13 +1111,11 @@ suite('PythonPackageManagerApi Tests', () => {
                 manage: async () => undefined,
                 refresh: async () => undefined,
                 getPackages: async () => [],
-                capabilities: allSupportedPackageCapabilities,
                 createForProject: () => ({
                     name: 'project-pkg-mgr',
                     manage: async () => undefined,
                     refresh: async () => undefined,
                     getPackages: async () => [],
-                    capabilities: allSupportedPackageCapabilities,
                     dispose: scopedDispose,
                 }),
             });
@@ -1156,13 +1144,11 @@ suite('PythonPackageManagerApi Tests', () => {
                 manage: async () => undefined,
                 refresh: async () => undefined,
                 getPackages: async () => [],
-                capabilities: allSupportedPackageCapabilities,
                 createForProject: () => ({
                     name: 'project-pkg-mgr',
                     manage: async () => undefined,
                     refresh: async () => undefined,
                     getPackages: async () => [],
-                    capabilities: allSupportedPackageCapabilities,
                     dispose: scopedDispose,
                 }),
             });

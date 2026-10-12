@@ -4,13 +4,12 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { explain as parsePep440Version } from '@renovatebot/pep440';
-import { Disposable, EventEmitter, Uri } from 'vscode';
+import { Disposable, EventEmitter, l10n, Uri } from 'vscode';
 import type {
     DidChangeEnvironmentVariablesEventArgs,
     EnvironmentManager,
     PackageManager,
     Pep440Version,
-    PythonEnvironment,
     PythonProject,
 } from '../api';
 import { EnvironmentCapability, PackageCapability } from '../capabilities';
@@ -27,22 +26,14 @@ import { PythonEnvironmentApiImpl } from '../extensionApi';
 import { PythonEnvironmentManagers } from '../features/envManagers';
 import type { PythonProjectManager } from '../features/projectManager';
 import * as settings from '../features/settings/settingHelpers';
+import { createMockPythonEnvironment } from './mocks/pythonEnvironment';
 
 suite('PythonEnvironmentApiImpl - capability queries', () => {
     const extensionId = 'test.capabilities';
     const ownerId = `${extensionId}:owner`;
     const packageId = `${extensionId}:packages`;
     const project: PythonProject = { name: 'project', uri: Uri.joinPath(Uri.file(process.cwd()), 'project') };
-    const environment: PythonEnvironment = {
-        envId: { managerId: ownerId, id: 'environment' },
-        name: 'environment',
-        displayName: 'environment',
-        displayPath: process.cwd(),
-        version: '3.12.0',
-        environmentPath: Uri.file(process.cwd()),
-        execInfo: { run: { executable: 'python' } },
-        sysPrefix: process.cwd(),
-    };
+    const environment = createMockPythonEnvironment({ envPath: process.cwd(), managerId: ownerId });
     let clock: sinon.SinonFakeTimers;
     let api: PythonEnvironmentApiImpl;
     let managers: PythonEnvironmentManagers;
@@ -109,7 +100,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         }
     });
 
-    function registerOwner(): Disposable {
+    function registerOwner(overrides: Partial<EnvironmentManager> = {}): Disposable {
         const provider: EnvironmentManager = {
             name: 'owner',
             preferredPackageManagerId: packageId,
@@ -120,8 +111,9 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             resolve: async () => undefined,
             getVersion: environmentManagerVersion,
             capabilities: { ...allSupportedEnvironmentCapabilities, [EnvironmentCapability.List]: envProbe },
+            ...overrides,
         };
-        return managers.registerEnvironmentManager(provider, { extensionId });
+        return api.registerEnvironmentManager(provider, { extensionId });
     }
 
     function packageProvider(name = 'packages'): PackageManager {
@@ -142,27 +134,42 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             getVersion: scopedPackageManagerVersion,
             capabilities: { ...allSupportedPackageCapabilities, [PackageCapability.List]: scopedProbe },
         })) : undefined;
-        managers.registerPackageManager({ ...provider, createForProject: create }, { extensionId });
+        api.registerPackageManager({ ...provider, createForProject: create }, { extensionId });
         return create;
     }
 
     test('queries only the explicit registered environment manager', async () => {
         registerOwner();
-        envProbe.resolves({ supported: true, isLegacy: true });
         const context = { environment, project, scope: project.uri };
         assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List, context), {
             supported: true,
-            isLegacy: true,
         });
         await clock.tickAsync(0);
         assert.ok(envProbe.calledOnceWithExactly(context));
         assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
             managerId: ownerId, managerKind: 'environment', managerVersion: '2.0.0',
             capability: EnvironmentCapability.List, outcome: 'supported',
-            isLegacy: true,
+            isLegacy: false,
         }));
         assert.ok(environmentManagerVersion.calledOnceWithExactly());
         assert.strictEqual(clock.countTimers(), 0);
+    });
+
+    test('registered legacy providers infer supported and unsupported capabilities without advertised checks', async () => {
+        registerOwner({ capabilities: undefined });
+        api.registerPackageManager({ ...packageProvider(), capabilities: undefined }, { extensionId });
+        const supported = { supported: true, isLegacy: true };
+        const unsupported = { supported: false, reason: l10n.t('Capability not implemented'), isLegacy: true };
+
+        assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List), supported);
+        assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.Create), unsupported);
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, PackageCapability.Install), supported);
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, PackageCapability.ListDirect), unsupported);
+        assert.ok(envProbe.notCalled && pkgProbe.notCalled);
+        await clock.tickAsync(0);
+        const events = sendTelemetry.withArgs(EventNames.MANAGER_CAPABILITY_QUERY);
+        assert.strictEqual(events.callCount, 4);
+        assert.ok(events.getCalls().every((call) => call.args[2].isLegacy === true));
     });
 
     test('version lookup failures are logged without changing support results or probe errors', async () => {
@@ -226,7 +233,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(envProbe.notCalled);
     });
 
-    test('availability tracks the registration lifecycle rather than caching a stale result', async () => {
+    test('environment and package availability follows registration and disposal', async () => {
         const support = await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List);
         assert.ok(!support.supported && support.reason.includes(ownerId));
         assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
@@ -237,14 +244,22 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(environmentManagerVersion.notCalled);
         assert.ok(envProbe.notCalled);
         assert.strictEqual(clock.countTimers(), 0);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List)).supported, false);
         const registration = registerOwner();
+        assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List)).supported, false);
+        const packageRegistration = api.registerPackageManager(packageProvider(), { extensionId });
         assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List), {
             supported: true,
         });
+        assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List)).supported, true);
+        await clock.tickAsync(0);
         envProbe.resetHistory();
+        pkgProbe.resetHistory();
+        packageRegistration.dispose();
+        assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List)).supported, false);
         registration.dispose();
         assert.strictEqual((await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List)).supported, false);
-        assert.ok(envProbe.notCalled);
+        assert.ok(envProbe.notCalled && pkgProbe.notCalled);
     });
 
     test('provider probe failures reach the public caller', async () => {
@@ -273,18 +288,6 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         }));
         assert.ok(scopedPackageManagerVersion.calledOnceWithExactly(environment));
         assert.ok(packageManagerVersion.notCalled && environmentManagerVersion.notCalled);
-    });
-
-    test('environment-only package queries are unavailable until both providers register', async () => {
-        const support = await api.getPackageManagerCapability(environment, PackageCapability.List);
-        assert.ok(!support.supported && support.reason.length > 0);
-        assert.strictEqual(clock.countTimers(), 0);
-        registerOwner();
-        assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List)).supported, false);
-        assert.strictEqual(clock.countTimers(), 0);
-        assert.ok(pkgProbe.notCalled);
-        registerPackages();
-        assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List)).supported, true);
     });
 
     test('an untracked explicit project never probes a root or a containing project provider', async () => {
