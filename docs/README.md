@@ -1939,7 +1939,8 @@ probe failures reject.
 Public routed queries emit `MANAGER.CAPABILITY_QUERY` with the manager ID, kind,
 tool version, capability, outcome, and `isLegacy` (false when omitted from support).
 Unavailable managers use ID `none`;
-unknown or failed version lookups use `unknown` without changing query results.
+unknown or failed version lookups use `unknown`. Version collection runs in the
+background with a one-second timeout and cannot delay query results or errors.
 Context, paths, reasons, and error messages are not sent. Routing/ownership
 failures and internal checks do not emit this event.
 

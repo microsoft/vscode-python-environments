@@ -66,6 +66,7 @@ import type { PythonToolsApi } from './internal/pythonToolsApi';
 // workspace/configuration handler) from hanging on the full environment enumeration at startup.
 const GET_ENVIRONMENT_TIMEOUT_MS = 1000;
 const GET_ENVIRONMENT_TIMED_OUT = Symbol('getEnvironmentTimedOut');
+const CAPABILITY_TELEMETRY_VERSION_TIMEOUT_MS = 1000;
 
 export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     readonly __pythonTools: PythonToolsApi;
@@ -233,25 +234,40 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             isLegacy = support.isLegacy === true;
             return support;
         } finally {
-            let managerVersion = 'unknown';
-            if (query.manager) {
-                try {
-                    const version = query.kind === 'package'
-                        ? await query.manager.getVersion(query.context.environment)
-                        : await query.manager.getVersion();
-                    managerVersion = version ? parsePep440Version(version.public)?.public ?? 'unknown' : 'unknown';
-                } catch (error) {
-                    traceError(`Failed to retrieve manager version for capability telemetry: ${query.manager.id}`, error);
+            void (async () => {
+                let managerVersion = 'unknown';
+                if (query.manager) {
+                    let versionTimer: ReturnType<typeof setTimeout> | undefined;
+                    try {
+                        const version = await Promise.race([
+                            query.kind === 'package'
+                                ? query.manager.getVersion(query.context.environment)
+                                : query.manager.getVersion(),
+                            new Promise<never>((_, reject) => {
+                                versionTimer = setTimeout(
+                                    () => reject(new Error('Manager version lookup timed out.')),
+                                    CAPABILITY_TELEMETRY_VERSION_TIMEOUT_MS,
+                                );
+                            }),
+                        ]);
+                        managerVersion = version ? parsePep440Version(version.public)?.public ?? 'unknown' : 'unknown';
+                    } catch (error) {
+                        traceError(`Failed to retrieve manager version for capability telemetry: ${query.manager.id}`, error);
+                    } finally {
+                        if (versionTimer !== undefined) {
+                            clearTimeout(versionTimer);
+                        }
+                    }
                 }
-            }
-            sendTelemetryEvent(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
-                managerId: manager?.id ?? 'none',
-                managerKind: query.kind,
-                managerVersion,
-                capability: isKnownManagerCapability(capability) ? capability : 'unknown',
-                outcome,
-                isLegacy,
-            });
+                sendTelemetryEvent(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
+                    managerId: manager?.id ?? 'none',
+                    managerKind: query.kind,
+                    managerVersion,
+                    capability: isKnownManagerCapability(capability) ? capability : 'unknown',
+                    outcome,
+                    isLegacy,
+                });
+            })().catch((error) => traceError('Failed to send manager capability query telemetry:', error));
         }
     }
 

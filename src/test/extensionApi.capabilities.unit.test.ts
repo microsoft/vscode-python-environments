@@ -9,6 +9,7 @@ import type {
     DidChangeEnvironmentVariablesEventArgs,
     EnvironmentManager,
     PackageManager,
+    Pep440Version,
     PythonEnvironment,
     PythonProject,
 } from '../api';
@@ -20,6 +21,7 @@ import * as telemetry from '../common/telemetry/sender';
 import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from './capabilityFixtures';
 import * as extensionApis from '../common/extension.apis';
 import * as frameUtils from '../common/utils/frameUtils';
+import { createDeferred } from '../common/utils/deferred';
 import * as windowApis from '../common/window.apis';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
 import { PythonEnvironmentManagers } from '../features/envManagers';
@@ -152,6 +154,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             supported: true,
             isLegacy: true,
         });
+        await clock.tickAsync(0);
         assert.ok(envProbe.calledOnceWithExactly(context));
         assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
             managerId: ownerId, managerKind: 'environment', managerVersion: '2.0.0',
@@ -159,6 +162,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
             isLegacy: true,
         }));
         assert.ok(environmentManagerVersion.calledOnceWithExactly());
+        assert.strictEqual(clock.countTimers(), 0);
     });
 
     test('version lookup failures are logged without changing support results or probe errors', async () => {
@@ -171,6 +175,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List), { supported: true });
         envProbe.rejects(probeError);
         await assert.rejects(api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List), (error) => error === probeError);
+        await clock.tickAsync(0);
 
         const events = sendTelemetry.getCalls().filter((call) => call.args[0] === EventNames.MANAGER_CAPABILITY_QUERY);
         assert.deepStrictEqual(events.map((call) => [call.args[2].managerVersion, call.args[2].outcome]), [
@@ -178,6 +183,41 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         ]);
         assert.strictEqual(trace.callCount, 2);
         assert.strictEqual(trace.firstCall.args[1], versionError);
+    });
+
+    test('stalled version lookups cannot delay results or errors and emit unknown after one second', async () => {
+        registerOwner();
+        registerPackages();
+        const version = createDeferred<Pep440Version | undefined>();
+        environmentManagerVersion.returns(version.promise);
+        packageManagerVersion.returns(version.promise);
+        const trace = sinon.stub(logging, 'traceError');
+        const events = sendTelemetry.withArgs(EventNames.MANAGER_CAPABILITY_QUERY);
+
+        assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List), { supported: true });
+        const probeError = new Error('Probe failed');
+        envProbe.rejects(probeError);
+        await assert.rejects(api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List), (error) => error === probeError);
+        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, PackageCapability.List), { supported: true });
+        assert.ok(events.notCalled);
+
+        await clock.tickAsync(999);
+        assert.ok(events.notCalled);
+        await clock.tickAsync(1);
+        assert.deepStrictEqual(events.getCalls().map((call) => [
+            call.args[2].managerKind, call.args[2].managerVersion, call.args[2].outcome,
+        ]), [
+            ['environment', 'unknown', 'supported'],
+            ['environment', 'unknown', 'error'],
+            ['package', 'unknown', 'supported'],
+        ]);
+        assert.strictEqual(trace.callCount, 3);
+        assert.strictEqual(clock.countTimers(), 0);
+
+        version.reject(new Error('Late version failure'));
+        await clock.tickAsync(0);
+        assert.strictEqual(events.callCount, 3);
+        assert.strictEqual(trace.callCount, 3);
     });
 
     test('rejects contradictory environment ownership before probing', async () => {
@@ -221,6 +261,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         configuredPackage.returns(`${extensionId}:configured`);
         const create = registerPackages(true, 'configured');
         assert.strictEqual(await api.getPackageManagerCapability(environment, PackageCapability.List, project), scopedSupport);
+        await clock.tickAsync(0);
         assert.ok(create?.calledOnceWithExactly(project));
         assert.ok(scopedProbe.calledOnceWithExactly({ environment, project }));
         assert.ok(pkgProbe.notCalled);
