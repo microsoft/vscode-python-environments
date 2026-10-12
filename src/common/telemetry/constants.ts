@@ -335,7 +335,8 @@ export interface IEventNamePropertyMapping {
             "managerKind": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
             "managerVersion": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
             "capability": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
-            "outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" }
+            "outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "isLegacy": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" }
         }
     */
     [EventNames.MANAGER_CAPABILITY_QUERY]: {
@@ -344,6 +345,7 @@ export interface IEventNamePropertyMapping {
         managerVersion: string;
         capability: string;
         outcome: 'supported' | 'unsupported' | 'unavailable' | 'error';
+        isLegacy: boolean;
     };
 
     /* __GDPR__

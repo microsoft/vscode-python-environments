@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import { l10n } from 'vscode';
+import { getLegacyEnvironmentManagerCapability, getLegacyPackageManagerCapability } from './legacyCapabilities.js';
 import type {
     CreateEnvironmentScope,
     EnvironmentManager,
@@ -58,12 +59,17 @@ const packageCapabilityKeys = Object.values(PackageCapability);
  * @param capability Runtime value supplied by a caller.
  */
 export function isKnownManagerCapability(capability: unknown): capability is ManagerCapability {
-    return environmentCapabilityKeys.some((key) => key === capability) ||
-        packageCapabilityKeys.some((key) => key === capability);
+    return (
+        environmentCapabilityKeys.some((key) => key === capability) ||
+        packageCapabilityKeys.some((key) => key === capability)
+    );
 }
 
 /** General feature support, not a guarantee that a particular operation will succeed. */
-export type Support = { readonly supported: true } | { readonly supported: false; readonly reason: string };
+export type Support = ({ readonly supported: true } | { readonly supported: false; readonly reason: string }) & {
+    /** Whether support was inferred from legacy methods. Omitted means false. */
+    readonly isLegacy?: boolean;
+};
 
 /** Context for a support query. Operation arguments and request validation are intentionally excluded. */
 export interface CapabilityContext {
@@ -99,6 +105,9 @@ export function resolveEnvironmentManagerCapability(
     capability: EnvironmentManagerCapability,
     context: CapabilityContext = {},
 ): Promise<Support> {
+    if (!manager.capabilities) {
+        return getLegacyEnvironmentManagerCapability(manager, capability);
+    }
     return resolveCapability(manager, capability, context);
 }
 
@@ -114,6 +123,9 @@ export function resolvePackageManagerCapability(
     capability: PackageManagerCapability,
     context: CapabilityContext = {},
 ): Promise<Support> {
+    if (!manager.capabilities) {
+        return getLegacyPackageManagerCapability(manager, capability);
+    }
     return resolveCapability(manager, capability, context);
 }
 
@@ -123,8 +135,9 @@ async function resolveCapability<C extends ManagerCapability>(
     context: CapabilityContext,
 ): Promise<Support> {
     const capabilities = manager.capabilities;
-    const check = capabilities && Object.prototype.hasOwnProperty.call(capabilities, capability)
-        ? capabilities[capability]
-        : undefined;
+    const check =
+        capabilities && Object.prototype.hasOwnProperty.call(capabilities, capability)
+            ? capabilities[capability]
+            : undefined;
     return typeof check === 'function' ? check(context) : unsupportedCapability(context);
 }

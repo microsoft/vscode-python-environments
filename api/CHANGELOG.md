@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Raw-provider capability resolvers and routed extension API queries that report support without invoking manager operations or prompting.
 - Capability catalogs for six environment and six package features, with flat operation names. Listing includes refresh, and package installation, uninstallation, and upgrades are advertised individually rather than through a management umbrella.
 - Exported `EnvironmentCapability` and `PackageCapability` constant objects for named access to capability keys, with derived string-literal unions.
+- Opt-in `getLegacyPackageManagerCapability` and `getLegacyEnvironmentManagerCapability` helpers that infer support from method presence without invoking operations or changing advertisement-based queries.
+- Optional `Support.isLegacy` metadata, set to true by legacy inference helpers and included in public capability-query telemetry.
 
 ### Notes
 

@@ -215,6 +215,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     ): Promise<Support> {
         const { manager, capability } = query;
         let outcome: 'supported' | 'unsupported' | 'unavailable' | 'error' = 'error';
+        let isLegacy = false;
         try {
             if (!query.manager) {
                 outcome = 'unavailable';
@@ -229,6 +230,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
                 ? await query.manager.getCapability(query.capability, query.context)
                 : await query.manager.getCapability(query.capability, query.context);
             outcome = support.supported ? 'supported' : 'unsupported';
+            isLegacy = support.isLegacy === true;
             return support;
         } finally {
             let managerVersion = 'unknown';
@@ -248,6 +250,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
                 managerVersion,
                 capability: isKnownManagerCapability(capability) ? capability : 'unknown',
                 outcome,
+                isLegacy,
             });
         }
     }

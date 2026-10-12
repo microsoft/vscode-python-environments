@@ -13,6 +13,8 @@ import type {
 } from '@vscode/python-environments';
 import {
     EnvironmentCapability,
+    getLegacyEnvironmentManagerCapability,
+    getLegacyPackageManagerCapability,
     isPackageVersionLookupNotSupportedError,
     PackageCapability,
     PackageVersionLookupNotSupportedError,
@@ -87,6 +89,9 @@ const legacyEnvironmentManager: EnvironmentManager = {
     resolve: async () => undefined,
 };
 
+getLegacyPackageManagerCapability(legacyPackageManager, PackageCapability.Install) satisfies Promise<Support>;
+getLegacyEnvironmentManagerCapability(legacyEnvironmentManager, EnvironmentCapability.Create) satisfies Promise<Support>;
+
 // Capability authoring and raw-provider resolution.
 const advertised: Capabilities<PackageManagerCapability> = {
     ...fullPackageCapabilities,
@@ -104,11 +109,16 @@ resolveEnvironmentManagerCapability(legacyEnvironmentManager, EnvironmentCapabil
 api.getPackageManagerCapability(environment, PackageCapability.List) satisfies Promise<Support>;
 api.getEnvironmentManagerCapability('example:legacy', EnvironmentCapability.List, { scope: 'all' }) satisfies Promise<Support>;
 declare const support: Support;
+support.isLegacy satisfies boolean | undefined;
 if (!support.supported) {
     support.reason satisfies string;
 }
 
 // Invalid capability keys, advertisements, and context must remain compile errors.
+// @ts-expect-error Legacy environment inference requires an environment capability.
+getLegacyEnvironmentManagerCapability(legacyEnvironmentManager, PackageCapability.List);
+// @ts-expect-error Legacy package inference requires a package capability.
+getLegacyPackageManagerCapability(legacyPackageManager, EnvironmentCapability.List);
 // @ts-expect-error Package keys do not belong to the environment capability domain.
 PackageCapability.List satisfies EnvironmentManagerCapability;
 // @ts-expect-error Environment keys do not belong to the package capability domain.

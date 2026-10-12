@@ -1898,6 +1898,15 @@ map must advertise every capability key. There are no inferred defaults: a
 missing map or key resolves `{ supported: false, reason: 'Capability not
 implemented' }`. Checks receive `CapabilityContext` and return `Promise<Support>`.
 
+For opt-in legacy inference, use `getLegacyPackageManagerCapability(manager, capability)`
+or `getLegacyEnvironmentManagerCapability(manager, capability)`. They inspect method
+presence without executing methods or reading advertisements. Listing requires both
+listing and refresh methods; package install, uninstall, and upgrade require `manage`.
+Other capabilities require their corresponding methods. This does not verify tool
+versions or option behavior, and regular capability queries do not use this fallback.
+Legacy helper results include `isLegacy: true`; other `Support` results may omit
+the field, which means false.
+
 ```typescript
 import {
     Capabilities,
@@ -1927,7 +1936,8 @@ Return `{ supported: false, reason }` for unsupported features; let unexpected
 probe failures reject.
 
 Public routed queries emit `MANAGER.CAPABILITY_QUERY` with the manager ID, kind,
-tool version, capability, and outcome. Unavailable managers use ID `none`;
+tool version, capability, outcome, and `isLegacy` (false when omitted from support).
+Unavailable managers use ID `none`;
 unknown or failed version lookups use `unknown` without changing query results.
 Context, paths, reasons, and error messages are not sent. Routing/ownership
 failures and internal checks do not emit this event.

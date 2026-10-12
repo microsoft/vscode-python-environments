@@ -146,14 +146,17 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
 
     test('queries only the explicit registered environment manager', async () => {
         registerOwner();
+        envProbe.resolves({ supported: true, isLegacy: true });
         const context = { environment, project, scope: project.uri };
         assert.deepStrictEqual(await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List, context), {
             supported: true,
+            isLegacy: true,
         });
         assert.ok(envProbe.calledOnceWithExactly(context));
         assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
             managerId: ownerId, managerKind: 'environment', managerVersion: '2.0.0',
             capability: EnvironmentCapability.List, outcome: 'supported',
+            isLegacy: true,
         }));
         assert.ok(environmentManagerVersion.calledOnceWithExactly());
     });
@@ -189,6 +192,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
             managerId: 'none', managerKind: 'environment', managerVersion: 'unknown',
             capability: EnvironmentCapability.List, outcome: 'unavailable',
+            isLegacy: false,
         }));
         assert.ok(environmentManagerVersion.notCalled);
         assert.ok(envProbe.notCalled);
@@ -224,6 +228,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
             managerId: `${extensionId}:configured`, managerKind: 'package', managerVersion: '2.1.0',
             capability: PackageCapability.List, outcome: 'unsupported',
+            isLegacy: false,
         }));
         assert.ok(scopedPackageManagerVersion.calledOnceWithExactly(environment));
         assert.ok(packageManagerVersion.notCalled && environmentManagerVersion.notCalled);
