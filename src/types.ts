@@ -1223,8 +1223,9 @@ export interface PythonPackageGetterApi {
      * Only currently registered managers are queried; no activation or registration wait occurs.
      * @param environment Environment used for the support check and default manager routing.
      * @param capability Feature to query; support does not guarantee a particular request succeeds.
-     * @param project Explicit project for project-specific manager selection. If omitted, existing
-     * routing must identify a unique project when the selected manager requires one.
+     * @param project Explicit registered project for project-specific manager selection.
+     * Unregistered projects return unavailable instead of using a containing project's provider.
+     * If omitted, existing routing must identify a unique project when the selected manager requires one.
      * @returns Support, or a reason when routing is unresolved/ambiguous or the feature unsupported.
      * Unavailable managers can be queried again after registration.
      * Unexpected lookup/probe errors reject. Feature-detect on older extension runtimes.

@@ -200,7 +200,12 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         capability: PackageManagerCapability,
         project?: PythonProject,
     ): Promise<Support> {
-        let manager = this.envManagers.getPackageManager(project?.uri ?? environment);
+        const projectIsRegistered = !project || this.projectManager.getProjects().some(
+            (candidate) => candidate.uri.toString() === project.uri.toString(),
+        );
+        let manager = projectIsRegistered
+            ? this.envManagers.getPackageManager(project?.uri ?? environment)
+            : undefined;
         // A project-aware root is not a usable substitute for a missing scoped instance.
         if (manager?.createForProject && !manager.project) {
             manager = undefined;

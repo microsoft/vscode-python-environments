@@ -137,6 +137,12 @@ suite('Manager capabilities integration', function () {
                 { path: '.', packageManager: `${ENVS_EXTENSION_ID}:${provider.name}` },
                 ...config.get<unknown[]>('pythonProjects', []),
             ], target);
+            const nestedProject = { name: 'unregistered', uri: Uri.joinPath(project.uri, 'unregistered-capability-project') };
+            assert.strictEqual(api.getPythonProject(nestedProject.uri)?.uri.toString(), project.uri.toString());
+            assert.deepStrictEqual(
+                await api.getPackageManagerCapability(environment, PackageCapability.List, nestedProject),
+                { supported: false, reason: 'No package manager is available for the environment and project context.' },
+            );
             assert.deepStrictEqual(
                 await api.getPackageManagerCapability(environment, PackageCapability.List, project),
                 scopedSupport,

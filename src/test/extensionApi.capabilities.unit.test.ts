@@ -287,11 +287,19 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List)).supported, true);
     });
 
-    test('an untracked explicit project never probes a project-aware root', async () => {
+    test('an untracked explicit project never probes a root or a containing project provider', async () => {
         projects = [];
-        registerPackages(true);
+        const create = registerPackages(true);
         assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List, project)).supported, false);
+
+        projects = [project];
+        const nestedProject: PythonProject = { name: 'nested', uri: Uri.joinPath(project.uri, 'nested') };
+        sinon.stub(projectManager, 'get').returns(project);
+        assert.strictEqual(projectManager.get(nestedProject.uri), project);
+        assert.strictEqual((await api.getPackageManagerCapability(environment, PackageCapability.List, nestedProject)).supported, false);
+        assert.ok(create?.notCalled);
         assert.ok(pkgProbe.notCalled);
+        assert.ok(scopedProbe.notCalled);
     });
 
     test('a missing configured provider cannot fall back to the preferred root', async () => {
