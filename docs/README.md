@@ -1944,8 +1944,9 @@ tool version, capability, outcome, and `isLegacy` (false when omitted from suppo
 Unavailable managers use ID `none`;
 unknown or failed version lookups use `unknown`. Version collection runs in the
 background with a one-second timeout and cannot delay query results or errors.
-Context, paths, reasons, and error messages are not sent. Routing/ownership
-failures and internal checks do not emit this event.
+Context, paths, reasons, and error messages are not sent. Unresolved routing
+emits an `unavailable` event. Ownership errors and routing exceptions thrown
+before capture, as well as internal checks, do not emit this event.
 
 ## Compatibility guidance
 

@@ -61,18 +61,18 @@ suite('Manager capabilities', () => {
             assert.strictEqual(await packageCapability(pkg, PackageCapability.ListDirect), supported);
         });
 
-        test('missing maps use legacy inference, but missing advertised keys remain unsupported', async () => {
+        test('only omitted maps use legacy inference; supplied maps and missing keys remain unsupported', async () => {
             const env = environmentManager();
             const pkg = packageManager();
-            for (const capabilities of [{}, undefined, null]) {
+            for (const capabilities of [{}, undefined, null, false, 0, '']) {
                 Reflect.set(env, 'capabilities', capabilities);
                 Reflect.set(pkg, 'capabilities', capabilities);
-                const expected: Support = capabilities ? notImplemented : { supported: true, isLegacy: true };
+                const expected: Support = capabilities === undefined ? { supported: true, isLegacy: true } : notImplemented;
                 assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), expected);
                 assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), expected);
                 assert.deepStrictEqual(
                     await environmentCapability(env, EnvironmentCapability.Create),
-                    capabilities ? notImplemented : { ...notImplemented, isLegacy: true },
+                    capabilities === undefined ? { ...notImplemented, isLegacy: true } : notImplemented,
                 );
             }
         });

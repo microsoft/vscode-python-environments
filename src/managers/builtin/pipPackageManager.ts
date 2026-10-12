@@ -350,7 +350,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
         if (compare(version.public, '21.2.0') < 0) {
             throw new PackageVersionLookupNotSupportedError(
-                `Package version lookup requires pip 21.2 or newer; the environment has pip ${version.public}.`,
+                l10n.t('Package version lookup requires pip 21.2 or newer; the environment has pip {0}.', version.public),
             );
         }
         if (compare(version.public, '25.1') >= 0) {

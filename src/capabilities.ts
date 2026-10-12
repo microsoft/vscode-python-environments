@@ -105,7 +105,7 @@ export function resolveEnvironmentManagerCapability(
     capability: EnvironmentManagerCapability,
     context: CapabilityContext = {},
 ): Promise<Support> {
-    if (!manager.capabilities) {
+    if (manager.capabilities === undefined) {
         return getLegacyEnvironmentManagerCapability(manager, capability);
     }
     return resolveCapability(manager, capability, context);
@@ -123,7 +123,7 @@ export function resolvePackageManagerCapability(
     capability: PackageManagerCapability,
     context: CapabilityContext = {},
 ): Promise<Support> {
-    if (!manager.capabilities) {
+    if (manager.capabilities === undefined) {
         return getLegacyPackageManagerCapability(manager, capability);
     }
     return resolveCapability(manager, capability, context);

@@ -101,7 +101,7 @@ suite('PipPackageManager', () => {
         const support = await manager.capabilities[PackageCapability.ListAvailableVersions]({ environment });
         assert.strictEqual(support.supported, false);
         if (!support.supported) {
-            assert.match(support.reason, /pip 21.2 or newer/);
+            assert.strictEqual(support.reason, 'Package version lookup requires pip 21.2 or newer; the environment has pip 20.3.4.');
         }
         assert.strictEqual((await manager.capabilities[PackageCapability.ListAvailableVersions]({})).supported, false);
     });
