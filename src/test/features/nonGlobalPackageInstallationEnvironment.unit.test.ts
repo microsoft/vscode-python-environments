@@ -24,13 +24,14 @@ suite('Non-global Package Installation Environment Tests', () => {
     let showQuickPick: sinon.SinonStub;
     let pickEnvironment: sinon.SinonStub;
     let createEnvironment: sinon.SinonStub;
+    let waitForEnvManagerId: sinon.SinonStub;
     let envManagers: EnvironmentManagers;
 
     setup(() => {
         getSetting = sinon.stub().returns('ask');
         sinon.stub(workspaceApis, 'getConfiguration').returns({ get: getSetting } as never);
         sinon.stub(managerReady, 'waitForAllEnvManagers').resolves();
-        sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
+        waitForEnvManagerId = sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
         showQuickPick = sinon.stub(windowApis, 'showQuickPick');
         pickEnvironment = sinon.stub(environmentPickers, 'pickEnvironmentFrom');
         createEnvironment = sinon.stub().resolves(createdEnvironment);
@@ -56,6 +57,7 @@ suite('Non-global Package Installation Environment Tests', () => {
 
         assert.strictEqual(result, environment);
         sinon.assert.calledOnce(showQuickPick);
+        sinon.assert.calledWithExactly(waitForEnvManagerId, ['test-manager']);
     });
 
     test('continues globally without prompting when configured', async () => {

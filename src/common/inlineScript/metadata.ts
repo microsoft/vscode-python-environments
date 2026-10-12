@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import * as tomljs from '@iarna/toml';
+import { createHash } from 'crypto';
 import * as fs from 'fs/promises';
 import { l10n, Uri } from 'vscode';
 import { traceVerbose, traceWarn } from '../logging';
@@ -29,6 +30,8 @@ export interface InlineScriptMetadata {
      */
     readonly range: { readonly start: number; readonly end: number };
     readonly sourceRange?: { readonly start: number; readonly end: number };
+    /** Saved block fingerprint for edit detection and presentation, separate from semantic/cache identity. */
+    readonly sourceHash?: string;
 }
 
 /**
@@ -69,6 +72,24 @@ export type InlineScriptMetadataParseResult =
       }
     | { readonly kind: 'none' }
     | { readonly kind: 'invalid'; readonly problems: readonly InlineScriptMetadataProblem[] };
+
+/**
+ * Explain why parsed metadata cannot be used by the interactive setup action.
+ * This presentation check does not change the parser's tolerant metadata or routing contract.
+ */
+export function getInlineScriptSetupProblem(
+    result: InlineScriptMetadataParseResult,
+): 'metadata' | 'requires-python' | undefined {
+    if (
+        result.kind !== 'parsed' ||
+        result.problems.length > 0 ||
+        result.metadata.dependencies?.some((dependency) => dependency.trim().length === 0)
+    ) {
+        return 'metadata';
+    }
+    const requirement = result.metadata.requiresPython?.trim();
+    return requirement && !PythonVersionSpecifier.tryParse(requirement) ? 'requires-python' : undefined;
+}
 
 /**
  * Canonical block regex from the PEP 723 spec, translated to JavaScript
@@ -122,6 +143,57 @@ const NO_METADATA: InlineScriptMetadataParseResult = { kind: 'none' };
 
 const OPENER_PREFIX = '# /// ';
 
+/**
+ * Fingerprint the same structural script block selected by the metadata parser, without parsing TOML,
+ * logging, or I/O. Malformed markers return undefined; ignored body examples do not affect the hash.
+ * Normalize BOM/line endings as the parser does so disk and editor representations compare equally.
+ */
+export function getInlineScriptSourceHash(scriptText: string): string | undefined {
+    const text = scriptText.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+    const { scriptMatches, problems } = scanInlineScriptBlocks(
+        text,
+        (start, end) => ({ start, end }),
+        '',
+        false,
+    );
+    return scriptMatches.length === 1 && problems.length === 0
+        ? hashScriptBlock(scriptMatches[0][0])
+        : undefined;
+}
+
+function hashScriptBlock(block: string): string {
+    return createHash('sha256').update(block, 'utf8').digest('hex');
+}
+
+function scanInlineScriptBlocks(
+    text: string,
+    toSourceRange: (start: number, end: number) => { start: number; end: number },
+    where: string,
+    logProblems = true,
+): { scriptMatches: RegExpMatchArray[]; problems: InlineScriptMetadataProblem[] } {
+    const scriptMatches: RegExpMatchArray[] = [];
+    // matchAll leaves the shared regex's lastIndex untouched.
+    for (const match of text.matchAll(BLOCK_RE)) {
+        if (match.groups?.type === 'script') {
+            scriptMatches.push(match);
+        }
+    }
+    const matchedRanges = scriptMatches.map((match) => ({ start: match.index!, end: match.index! + match[0].length }));
+    const problems: InlineScriptMetadataProblem[] = [];
+    const headerEnd = headerRegionEnd(text);
+    for (const opener of findScriptOpeners(text)) {
+        if (matchedRanges.some((range) => opener.offset >= range.start && opener.offset < range.end)) {
+            continue;
+        }
+        const { problem, ignorableBelowHeader } = diagnoseMalformedBlock(text, opener, toSourceRange, where, logProblems);
+        if (ignorableBelowHeader && opener.offset >= headerEnd) {
+            continue;
+        }
+        problems.push(problem);
+    }
+    return { scriptMatches, problems };
+}
+
 /** As `readInlineScriptMetadata`, but reports why and where parsing failed. Offsets index the original `scriptText`. */
 export function parseInlineScriptMetadata(scriptText: string, source?: string): InlineScriptMetadataParseResult {
     const where = source ? ` in ${source}` : '';
@@ -147,37 +219,7 @@ export function parseInlineScriptMetadata(scriptText: string, source?: string): 
         end: bomOffset + sourceOffsetForNormalizedOffset(sourceText, end),
     });
 
-    // Collect ALL matches first so we can detect the "multiple script
-    // blocks" error case the spec requires us to surface.
-    //
-    // `matchAll` constructs a fresh iterator and does not mutate the
-    // shared `BLOCK_RE.lastIndex`, so this loop is re-entrant and safe
-    // even if a caller (or an exception) ever interrupts a previous
-    // pass.
-    const scriptMatches: RegExpMatchArray[] = [];
-    for (const m of text.matchAll(BLOCK_RE)) {
-        // Per spec, tools MUST NOT read non-standardized block types.
-        // The only standardized type today is `script`.
-        if (m.groups?.type === 'script') {
-            scriptMatches.push(m);
-        }
-    }
-
-    const matchedRanges = scriptMatches.map((m) => ({ start: m.index!, end: m.index! + m[0].length }));
-    const problems: InlineScriptMetadataProblem[] = [];
-    const headerEnd = headerRegionEnd(text);
-    for (const opener of findScriptOpeners(text)) {
-        if (matchedRanges.some((r) => opener.offset >= r.start && opener.offset < r.end)) {
-            continue;
-        }
-        const { problem, ignorableBelowHeader } = diagnoseMalformedBlock(text, opener, toSourceRange, where);
-        // Blocks the spec tells us to ignore are only worth flagging in the leading comment
-        // region, where they are a header being typed rather than a documentation example.
-        if (ignorableBelowHeader && opener.offset >= headerEnd) {
-            continue;
-        }
-        problems.push(problem);
-    }
+    const { scriptMatches, problems } = scanInlineScriptBlocks(text, toSourceRange, where);
 
     if (scriptMatches.length === 0) {
         if (problems.length === 0) {
@@ -368,7 +410,7 @@ export function parseInlineScriptMetadata(scriptText: string, source?: string): 
         end += 1;
     }
 
-    return {
+    const result: InlineScriptMetadataParseResult = {
         kind: 'parsed',
         problems,
         metadata: {
@@ -377,6 +419,13 @@ export function parseInlineScriptMetadata(scriptText: string, source?: string): 
             tool,
             range: { start: matchStart, end },
             sourceRange: toSourceRange(matchStart, end),
+        },
+    };
+    return {
+        ...result,
+        metadata: {
+            ...result.metadata,
+            sourceHash: getInlineScriptSetupProblem(result) === undefined ? hashScriptBlock(match[0]) : undefined,
         },
     };
 }
@@ -447,13 +496,16 @@ function diagnoseMalformedBlock(
     opener: ScriptOpener,
     toSourceRange: (start: number, end: number) => { start: number; end: number },
     where: string,
+    logProblems: boolean,
 ): MalformedBlockDiagnosis {
     const openerRange = toSourceRange(opener.offset, opener.lineEnd);
 
     if (opener.trailing.length > 0) {
-        traceWarn(
-            `inline script metadata${where}: the \`# /// script\` marker on line ${countLines(text, opener.offset)} has trailing whitespace`,
-        );
+        if (logProblems) {
+            traceWarn(
+                `inline script metadata${where}: the \`# /// script\` marker on line ${countLines(text, opener.offset)} has trailing whitespace`,
+            );
+        }
         return {
             ignorableBelowHeader: false,
             problem: {
@@ -475,9 +527,11 @@ function diagnoseMalformedBlock(
         }
 
         if (line !== line.trimEnd() && line.trimEnd() === CLOSER_LINE) {
-            traceWarn(
-                `inline script metadata${where}: the closing \`# ///\` marker on line ${countLines(text, offset)} has trailing whitespace`,
-            );
+            if (logProblems) {
+                traceWarn(
+                    `inline script metadata${where}: the closing \`# ///\` marker on line ${countLines(text, offset)} has trailing whitespace`,
+                );
+            }
             return {
                 ignorableBelowHeader: false,
                 problem: {
@@ -494,10 +548,12 @@ function diagnoseMalformedBlock(
             // closing marker is still ahead the author wrote a real block around a bad line.
             const isComment = line.startsWith('#');
             if (isComment || hasCloserAhead(text, lineEnd)) {
-                traceWarn(
-                    `inline script metadata${where}: invalid content line ${countLines(text, offset)} ` +
-                        `(expected '#' or '# '): ${JSON.stringify(line)}`,
-                );
+                if (logProblems) {
+                    traceWarn(
+                        `inline script metadata${where}: invalid content line ${countLines(text, offset)} ` +
+                            `(expected '#' or '# '): ${JSON.stringify(line)}`,
+                    );
+                }
                 return {
                     ignorableBelowHeader: !isComment,
                     problem: {
@@ -520,9 +576,11 @@ function diagnoseMalformedBlock(
         offset = lineEnd + 1;
     }
 
-    traceWarn(
-        `inline script metadata${where}: the \`# /// script\` block on line ${countLines(text, opener.offset)} is missing its closing \`# ///\` marker`,
-    );
+    if (logProblems) {
+        traceWarn(
+            `inline script metadata${where}: the \`# /// script\` block on line ${countLines(text, opener.offset)} is missing its closing \`# ///\` marker`,
+        );
+    }
     return {
         ignorableBelowHeader: true,
         problem: { code: 'unterminated-block', severity: 'warning', sourceRange: openerRange },
@@ -661,6 +719,28 @@ export async function readInlineScriptMetadataFromFile(
     uri: Uri,
     strict = false,
 ): Promise<InlineScriptMetadata | undefined> {
+    const text = await readInlineScriptHeaderFromFile(uri, strict);
+    if (text === undefined) {
+        return undefined;
+    }
+    const result = parseInlineScriptMetadata(text, uri.fsPath);
+    if (
+        strict &&
+        (result.kind === 'invalid' ||
+            (result.kind === 'parsed' && result.problems.some((problem) => problem.severity === 'error')))
+    ) {
+        throw new Error(l10n.t('Fix the PEP 723 metadata in {0} before configuring its environment.', uri.fsPath));
+    }
+    return result.kind === 'parsed' ? result.metadata : undefined;
+}
+
+/**
+ * Read at most MAX_HEADER_BYTES of a local script as UTF-8, without parsing its metadata.
+ * Unsupported URI schemes and I/O failures return undefined and are logged.
+ * @param uri The local script to read.
+ * @param strict Throw on I/O errors instead of treating them as absent.
+ */
+export async function readInlineScriptHeaderFromFile(uri: Uri, strict = false): Promise<string | undefined> {
     if (uri.scheme !== 'file') {
         traceVerbose(`inline script metadata: skipping non-file URI scheme '${uri.scheme}'`);
         return undefined;
@@ -683,15 +763,7 @@ export async function readInlineScriptMetadataFromFile(
         return undefined;
     }
 
-    const result = parseInlineScriptMetadata(text, uri.fsPath);
-    if (
-        strict &&
-        (result.kind === 'invalid' ||
-            (result.kind === 'parsed' && result.problems.some((problem) => problem.severity === 'error')))
-    ) {
-        throw new Error(l10n.t('Fix the PEP 723 metadata in {0} before configuring its environment.', uri.fsPath));
-    }
-    return result.kind === 'parsed' ? result.metadata : undefined;
+    return text;
 }
 
 /**

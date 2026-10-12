@@ -240,6 +240,7 @@ suite('InlineScriptEnvManager', () => {
                     renameFilesListener = undefined;
                 });
             });
+        sinon.stub(workspaceApis, 'onDidChangeTextDocument').returns(new Disposable(() => undefined));
         openDocumentsStub = sinon.stub(workspaceApis, 'getOpenTextDocuments').returns([]);
         createWithProgressStub = sinon.stub(venvUtils, 'createWithProgress').callsFake(async (...args: unknown[]) => {
             const envDir = args[6] as string;
@@ -3377,30 +3378,47 @@ suite('InlineScriptEnvManager', () => {
         });
 
         test('discovers a build that completes after the short retry window', async () => {
+            clock.restore();
+            clock = sinon.useFakeTimers({ now: NOW, toFake: ['Date', 'setTimeout', 'clearTimeout'] });
             const sidecar = await makeSidecar();
             setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
             const retryManager = manager as unknown as {
                 getDiscoveryRetryDelayMs(attempt: number): number | undefined;
             };
-            assert.strictEqual(retryManager.getDiscoveryRetryDelayMs(2), 30_000);
-            const retryDelayStub = sinon
-                .stub(retryManager, 'getDiscoveryRetryDelayMs')
-                .callsFake((attempt) => (attempt < 2 ? 0 : attempt === 2 ? 25 : undefined));
+            const getRetryDelay = retryManager.getDiscoveryRetryDelayMs.bind(retryManager);
+            const scheduledRetries = [createDeferred<void>(), createDeferred<void>(), createDeferred<void>()];
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').callsFake((attempt) => {
+                scheduledRetries[attempt]?.resolve();
+                return getRetryDelay(attempt);
+            });
             const lockPath = `${path.resolve(envDir().fsPath)}.lock`;
             await fs.ensureDir(lockPath);
 
             manager.startActivationDiscovery();
-            await waitForStubCallCount(retryDelayStub, 3);
+            await scheduledRetries[0].promise;
+            await clock.tickAsync(1_000);
+            await scheduledRetries[1].promise;
+            await clock.tickAsync(5_000);
+            await scheduledRetries[2].promise;
+            sinon.assert.notCalled(resolveVenvStub);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+
             const environment = await createOwnedEnvironment();
             resolveVenvStub.resolves(environment);
             await fs.remove(lockPath);
 
-            await waitForStubCall(resolveVenvStub);
-            await waitForCondition(
-                async () => (await manager.getEnvironments('all')).length === 1,
-                'Expected the extended retry to publish the completed build',
-            );
-            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            const discovered = createDeferred<void>();
+            const listener = manager.onDidChangeEnvironments(() => discovered.resolve());
+            try {
+                await clock.tickAsync(29_999);
+                sinon.assert.notCalled(resolveVenvStub);
+                await clock.tickAsync(1);
+                await discovered.promise;
+                sinon.assert.calledOnce(resolveVenvStub);
+                assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            } finally {
+                listener.dispose();
+            }
         });
 
         test('explicit refresh does not schedule a delayed follow-up after an uncertain pass', async () => {
@@ -7840,9 +7858,12 @@ suite('InlineScriptEnvManager', () => {
 
         test('recovers an old usable environment after a single stamp failure without a save', async () => {
             const uri = scriptUri('recover.py');
+            const scriptText = '# /// script\n# requires-python = ">=3.11"\n# dependencies = ["requests"]\n# ///\n';
+            const metadata = metadataReader.readInlineScriptMetadata(scriptText)!;
+            readMetadataStub.resolves(metadata);
             const environment = await createOwnedEnvironment();
             await manager.set(uri, environment);
-            await triggerSavedMetadataChange(routingRegistry, manager, uri);
+            await triggerSavedMetadataChange(routingRegistry, manager, uri, metadata);
             setSidecar(
                 await makeSidecar({
                     lastUsedAt: new Date(NOW.getTime() - 20 * 24 * 60 * 60 * 1000).toISOString(),
@@ -7858,7 +7879,7 @@ suite('InlineScriptEnvManager', () => {
             const provider = new InlineScriptCodeLensProvider(routingRegistry, 'setup');
             try {
                 const document = new MockDocument(
-                    '# /// script\n# dependencies = ["requests"]\n# ///\n',
+                    scriptText,
                     uri.fsPath,
                     async () => true,
                 );
@@ -7874,7 +7895,10 @@ suite('InlineScriptEnvManager', () => {
                 await ready.promise;
 
                 assert.strictEqual(await manager.get(uri), environment);
-                assert.strictEqual(provider.provideCodeLenses(document, {} as never).length, 0);
+                const lenses = provider.provideCodeLenses(document, {} as never);
+                assert.strictEqual(lenses.length, 1);
+                assert.strictEqual(lenses[0].command?.command, '');
+                assert.strictEqual(lenses[0].command?.title, 'Script environment ready (Python 3.12.4)');
                 assert.strictEqual(writeMetaStub.callCount, 2);
                 sinon.assert.notCalled(createWithProgressStub);
             } finally {

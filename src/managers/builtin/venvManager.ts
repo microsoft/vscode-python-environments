@@ -49,6 +49,7 @@ import { findParentIfFile } from '../../features/envCommands';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
+import { getDefaultGlobalPython } from './utils';
 import { promptInstallPythonViaUv } from './uvPythonInstaller';
 import {
     clearVenvCache,
@@ -667,6 +668,7 @@ export class VenvManager implements EnvironmentManager {
             if (resolved.envId.managerId === `${PYTHON_EXTENSION_ID}:venv`) {
                 // We should only return the resolved env if it is a venv.
                 // Fall through an return undefined if it is not a venv
+                this.addEnvironment(resolved, true);
                 return resolved;
             }
         }
@@ -738,7 +740,7 @@ export class VenvManager implements EnvironmentManager {
 
         // If a global environment is still not set, use latest from globals
         if (!this.globalEnv) {
-            this.globalEnv = getLatest(globals);
+            this.globalEnv = getDefaultGlobalPython(globals);
         }
     }
 
@@ -808,10 +810,17 @@ export class VenvManager implements EnvironmentManager {
                 }
             } else {
                 // Search through all known environments (e) and check if any are associated with the current project path. If so, add that environment and path in the map.
-                const found = sorted.find((e) => {
+                const projectEnvs = sorted.filter((e) => {
                     const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
                     return t && normalizePath(t) === normalizedPath;
                 });
+                // Prefer the project's own environment (e.g. `<project>/.venv`) over one nested in a
+                // subfolder (e.g. `<project>/tools/.venv`), even when the nested one has a newer Python.
+                // Broken environments are not preferred, matching their last place in the sort order.
+                const found =
+                    projectEnvs.find(
+                        (e) => !e.error && normalizePath(path.dirname(e.sysPrefix)) === normalizedPath,
+                    ) ?? projectEnvs[0];
                 if (found) {
                     this.fsPathToEnv.set(normalizedPath, found);
                 }

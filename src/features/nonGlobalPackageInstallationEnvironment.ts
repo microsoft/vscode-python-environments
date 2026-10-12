@@ -44,6 +44,7 @@ export async function selectPackageManagementEnvironment(
         return environment;
     }
 
+    await waitForEnvManagerId([environment.envId.managerId]);
     const globalEnvironments = await getEnvironments(envManagers, 'global');
     if (!globalEnvironments.some((globalEnvironment) => hasSameEnvironmentId(environment, globalEnvironment))) {
         return environment;

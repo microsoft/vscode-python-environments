@@ -21,6 +21,7 @@ This guide covers the full testing lifecycle:
 - Pip commands that return JSON must pass `--disable-pip-version-check`; the process helper combines stderr with stdout, so update notices can otherwise make valid JSON unparseable (1).
 - When a view subscribes to a newly added provider event, TypeMoq-based view tests must return a real `EventEmitter.event`; an unstubbed event yields an undefined disposable and fails during teardown (1).
 - Test agent selections across a full reload with `python.defaultInterpreterPath` set. An effective manager value equal to the extension default does not prove a workspace value was saved; tool-owned persistence must inspect `workspaceValue` or startup can restore the global interpreter (1).
+- `vscode.executeCodeLensProvider` verifies provider output, not visible editor refresh. VS Code cancels its debounced CodeLens refresh when the editor loses focus; account for background UI automation restoring focus to another app before diagnosing a stale rendered lens (1).
 
 ### When to Use This Guide
 
@@ -615,3 +616,4 @@ envConfig.inspect
 - **pet binary is required for environment manager registration**: The smoke/E2E/integration tests require the `pet` binary from `microsoft/python-environment-tools` to be built and placed in `python-env-tools/bin/`. Without it, `waitForApiReady()` will timeout because managers never register. CI must build pet from source using `cargo build --release --package pet` (2)
 - **Check exact project registration with `getPythonProjects()`**: `getPythonProject(uri)` can return a containing parent project, so it cannot prove that a nested project was registered or unregistered (1)
 - **Use controlled fixture providers for package lifecycle integration tests**: Discovering an existing Conda environment does not guarantee API quick-create can succeed. Use `createEnvironmentFixture()` so creation prerequisites and cleanup are deterministic (1)
+- **Retry Windows integration-test cleanup at the filesystem operation, not the suite**: After closing VS Code editors, use bounded `fs.rm(..., { recursive: true, force: true, maxRetries, retryDelay })` for temporary workspaces because Windows can briefly return `EBUSY`; keep final failures visible instead of adding sleeps or Mocha retries (1)

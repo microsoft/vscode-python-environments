@@ -51,7 +51,6 @@ import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from '.
 import { EnvVarManager } from './features/execution/envVariableManager';
 import { runAsTask } from './features/execution/runAsTask';
 import { runInBackground } from './features/execution/runInBackground';
-import { selectPackageManagementEnvironment } from './features/nonGlobalPackageInstallationEnvironment';
 import { runInTerminal } from './features/terminal/runInTerminal';
 import { TerminalManager } from './features/terminal/terminalManager';
 import { PythonToolsApiImpl } from './internal/pythonTools';
@@ -305,17 +304,12 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     }
 
     async managePackages(context: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
-        const environment = await selectPackageManagementEnvironment(this.envManagers, context, options);
-        if (!environment) {
-            return;
-        }
-
-        await waitForEnvManagerId([environment.envId.managerId]);
-        const manager = this.envManagers.getPackageManager(environment);
+        await waitForEnvManagerId([context.envId.managerId]);
+        const manager = this.envManagers.getPackageManager(context);
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
         }
-        return manager.manage(environment, options);
+        return manager.manage(context, options);
     }
     async refreshPackages(context: PythonEnvironment): Promise<void> {
         await waitForEnvManagerId([context.envId.managerId]);
