@@ -3378,30 +3378,47 @@ suite('InlineScriptEnvManager', () => {
         });
 
         test('discovers a build that completes after the short retry window', async () => {
+            clock.restore();
+            clock = sinon.useFakeTimers({ now: NOW, toFake: ['Date', 'setTimeout', 'clearTimeout'] });
             const sidecar = await makeSidecar();
             setSidecarResults({ [CACHE_KEY]: { kind: 'valid', metadata: sidecar } });
             const retryManager = manager as unknown as {
                 getDiscoveryRetryDelayMs(attempt: number): number | undefined;
             };
-            assert.strictEqual(retryManager.getDiscoveryRetryDelayMs(2), 30_000);
-            const retryDelayStub = sinon
-                .stub(retryManager, 'getDiscoveryRetryDelayMs')
-                .callsFake((attempt) => (attempt < 2 ? 0 : attempt === 2 ? 25 : undefined));
+            const getRetryDelay = retryManager.getDiscoveryRetryDelayMs.bind(retryManager);
+            const scheduledRetries = [createDeferred<void>(), createDeferred<void>(), createDeferred<void>()];
+            sinon.stub(retryManager, 'getDiscoveryRetryDelayMs').callsFake((attempt) => {
+                scheduledRetries[attempt]?.resolve();
+                return getRetryDelay(attempt);
+            });
             const lockPath = `${path.resolve(envDir().fsPath)}.lock`;
             await fs.ensureDir(lockPath);
 
             manager.startActivationDiscovery();
-            await waitForStubCallCount(retryDelayStub, 3);
+            await scheduledRetries[0].promise;
+            await clock.tickAsync(1_000);
+            await scheduledRetries[1].promise;
+            await clock.tickAsync(5_000);
+            await scheduledRetries[2].promise;
+            sinon.assert.notCalled(resolveVenvStub);
+            assert.deepStrictEqual(await manager.getEnvironments('all'), []);
+
             const environment = await createOwnedEnvironment();
             resolveVenvStub.resolves(environment);
             await fs.remove(lockPath);
 
-            await waitForStubCall(resolveVenvStub);
-            await waitForCondition(
-                async () => (await manager.getEnvironments('all')).length === 1,
-                'Expected the extended retry to publish the completed build',
-            );
-            assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            const discovered = createDeferred<void>();
+            const listener = manager.onDidChangeEnvironments(() => discovered.resolve());
+            try {
+                await clock.tickAsync(29_999);
+                sinon.assert.notCalled(resolveVenvStub);
+                await clock.tickAsync(1);
+                await discovered.promise;
+                sinon.assert.calledOnce(resolveVenvStub);
+                assert.deepStrictEqual(await manager.getEnvironments('all'), [environment]);
+            } finally {
+                listener.dispose();
+            }
         });
 
         test('explicit refresh does not schedule a delayed follow-up after an uncertain pass', async () => {
