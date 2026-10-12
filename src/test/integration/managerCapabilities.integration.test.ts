@@ -11,7 +11,6 @@ import {
     PackageManagerCapability,
     PythonEnvironment,
     PythonEnvironmentApi,
-    resolvePackageManagerCapability,
     EnvironmentCapability,
     PackageCapability,
 } from '../../api';
@@ -28,7 +27,6 @@ suite('Manager capabilities integration', function () {
     let api: PythonEnvironmentApi;
     let environment: PythonEnvironment;
     let packages: PackageManager;
-    let packageCapabilities: Capabilities<PackageManagerCapability>;
     let environmentCapabilities: Capabilities<EnvironmentManagerCapability>;
     const disposables: Disposable[] = [];
 
@@ -40,13 +38,10 @@ suite('Manager capabilities integration', function () {
     });
 
     setup(() => {
-        packageCapabilities = noPackageCapabilities;
         environmentCapabilities = noEnvironmentCapabilities;
         packages = {
             name: 'capability-test-packages',
-            get capabilities() {
-                return packageCapabilities;
-            },
+            capabilities: noPackageCapabilities,
             manage: async () => assert.fail('Capability queries must not manage packages'),
             refresh: async () => {},
             getPackages: async () => [],
@@ -151,17 +146,4 @@ suite('Manager capabilities integration', function () {
         }
     });
 
-    test('package prerequisites preserve context and reasons across separately loaded modules', async () => {
-        const denied = { supported: false, reason: 'Disabled by provider' } as const;
-        packageCapabilities = {
-            ...noPackageCapabilities,
-            [PackageCapability.Install]: async (context) => {
-                assert.strictEqual(context.environment, environment);
-                return denied;
-            },
-            [PackageCapability.Upgrade]: (context) =>
-                resolvePackageManagerCapability(packages, PackageCapability.Install, context),
-        };
-        assert.deepStrictEqual(await api.getPackageManagerCapability(environment, PackageCapability.Upgrade), denied);
-    });
 });

@@ -52,33 +52,12 @@ if (environment && typeof api.getPackageManagerCapability === 'function') {
 }
 ```
 
-`capabilities` is optional on both `EnvironmentManager` and `PackageManager` for
-compatibility with legacy providers. When supplied, the map must advertise every
-capability key explicitly; there are no inferred defaults. A missing map or key resolves
-`{ supported: false, reason: 'Capability not implemented' }`.
-
-To change a manager's advertised support, update the check for that key in its
-map; return `{ supported: false, reason }` to disable support. Checks must be
-read-only and noninteractive.
-
-`EnvironmentCapability` and `PackageCapability` are exported `as const` objects.
-The `EnvironmentManagerCapability` and `PackageManagerCapability` type unions
-are derived from their values; both named constants and literal strings are
-accepted. Package keys are `packages.list`,
-`packages.install`, `packages.uninstall`, `packages.upgrade`,
-`packages.listDirect`, and `packages.listAvailableVersions`. Listing includes
-refreshing results; the existing `manage()` method implements installation,
-uninstallation, and upgrades without a separate capability key.
-Adding a public key requires updating
-every built-in manager's `capabilities` map, plus tests and documentation.
-Removing a key from the type union is a breaking API change.
-
-Feature-detect query methods when supporting older extension runtimes. Queries
-use currently registered managers and describe support, not request validity or
-guaranteed success.
+Manager advertisements are optional for legacy compatibility. Missing maps or
+keys report unsupported; there are no inferred defaults. Support is advisory,
+not a guarantee that an operation succeeds.
 
 See the [capability guide](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#manager-capabilities)
-for the full catalog and provider maintenance.
+for the full catalog and provider authoring.
 
 ## Full API reference
 

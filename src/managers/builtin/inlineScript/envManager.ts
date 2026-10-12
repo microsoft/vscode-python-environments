@@ -91,7 +91,6 @@ import { PythonVersion } from '../../../common/pythonVersion';
 import { PythonVersionSpecifier, splitClause } from '../../../common/pythonVersionSpecifier';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import { getOpenTextDocuments, onDidDeleteFiles, onDidRenameFiles } from '../../../common/workspace.apis';
-import { requiredEnvironmentCapabilities } from '../../common/capabilityDeclarations';
 import { NativePythonFinder } from '../../common/nativePythonFinder';
 import { sortEnvironments } from '../../common/utils';
 import { resolveSystemPythonEnvironmentPath } from '../utils';
@@ -294,11 +293,13 @@ interface SavedMetadataSnapshot {
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
-        ...requiredEnvironmentCapabilities,
+        [EnvironmentCapability.List]: supportedCapability,
         [EnvironmentCapability.Resolve]: async () => ({
             supported: false,
             reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),
         }),
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
         [EnvironmentCapability.Remove]: supportedCapability,
         [EnvironmentCapability.Create]: async ({ scope }) => {
             const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;

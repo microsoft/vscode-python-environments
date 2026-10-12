@@ -31,7 +31,6 @@ import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
 import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 import { CommandConstructorOptions } from '../base/commands/index';
-import { requiredPackageCapabilities } from '../common/capabilityDeclarations';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import { createPipOrUvCommand, createPipOrUvCommandWithKind } from './commands/factory';
@@ -55,7 +54,7 @@ import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
-        ...requiredPackageCapabilities,
+        [PackageCapability.List]: supportedCapability,
         [PackageCapability.Install]: supportedCapability,
         [PackageCapability.Uninstall]: supportedCapability,
         [PackageCapability.Upgrade]: supportedCapability,

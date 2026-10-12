@@ -1853,12 +1853,8 @@ directly on the single flat API object.
 
 ## Manager capabilities
 
-Capabilities report whether an environment or package manager generally supports
-an operation. They are advisory: they do not validate one request, guarantee that
-an operation succeeds, or change operation dispatch and errors.
-
-Capability names describe manager-agnostic operations, rather than CLI command
-names or the API's implementation methods:
+Capabilities are advisory, read-only checks of manager support. They do not
+invoke operations, validate requests, or guarantee success.
 
 | Environment capabilities | Package capabilities |
 | --- | --- |
@@ -1869,56 +1865,20 @@ names or the API's implementation methods:
 | `environments.create` | `packages.listDirect` |
 | `environments.remove` | `packages.listAvailableVersions` |
 
-Listing capabilities cover both reading known results and refreshing them.
-`packages.install`, `packages.uninstall`, and `packages.upgrade` describe the
-supported operations of the existing `manage()` method; there is no separate
-management capability. `packages.listDirect` retains the best-effort
-classification contract, not exact user installation intent. Environment
-selection describes the selected environment for a scope, not shell activation.
+Listing includes refresh. Package installation, uninstallation, and upgrades
+use the existing `manage()` method. `packages.listDirect` is best-effort
+classification, not exact installation intent. Selection is scoped environment
+selection, not shell activation.
 
-`EnvironmentCapability` and `PackageCapability` are exported `as const` objects
-with named members such as `EnvironmentCapability.Create` and
-`PackageCapability.Install`. Their values define the capability type unions;
-both named constants and literal strings are accepted. The string values remain
-the identifiers used in telemetry and can be serialized directly for JSON-RPC.
+Use the exported `EnvironmentCapability` and `PackageCapability` constants or
+their literal string values.
 
 ### Querying support
 
-```typescript
-getEnvironmentManagerCapability(
-    managerId: string,
-    capability: EnvironmentManagerCapability,
-    context?: CapabilityContext,
-): Promise<Support>;
-
-getPackageManagerCapability(
-    environment: PythonEnvironment,
-    capability: PackageManagerCapability,
-    project?: PythonProject,
-): Promise<Support>;
-```
-
-Environment queries target one explicit manager, without picking or aggregating
-managers. Package queries follow existing manager selection and project-scoped
-routing. Queries use currently registered managers without activating extensions,
-waiting for registration, or prompting. Missing managers and ambiguous routing
-return `{ supported: false, reason }`; probe failures reject.
-
-Public capability queries emit `MANAGER.CAPABILITY_QUERY` through the extension's
-standard telemetry infrastructure. Each event records the routed manager ID,
-kind (`environment` or `package`), tool version, capability key, and outcome
-(`supported`, `unsupported`, `unavailable`, or `error`). Tool versions come from
-the routed instance's `EnvironmentManager.getVersion()` or
-`PackageManager.getVersion(environment)`, not the provider-extension version.
-An absent or unsuccessful version lookup records `unknown`; version lookup
-errors are logged without changing the capability result or probe error.
-Queries without a usable provider record manager ID `none`. Arbitrary runtime
-capability keys are recorded as `unknown`. Context, paths, reasons, and error
-messages are not sent, and internal prerequisite checks do not emit query events.
-Ownership validation and manager routing happen before telemetry capture;
-failures at those stages reject without emitting a capability-query event.
-
-Feature-detect the query methods when supporting older extension runtimes:
+Environment queries target an explicit manager ID; package queries follow
+environment/project routing. They use registered managers without activation,
+waiting, or prompting. Unavailable managers return `{ supported: false, reason }`.
+Feature-detect query methods when supporting older extension runtimes:
 
 ```typescript
 import { PackageCapability } from '@vscode/python-environments';
@@ -1962,52 +1922,15 @@ readonly capabilities: Capabilities<PackageManagerCapability> = {
 };
 ```
 
-`src/managers/common/capabilityDeclarations.ts` exports
-`requiredEnvironmentCapabilities`/`requiredPackageCapabilities`: small,
-internal-only spreadable literals for the handful of operations every built-in
-manager unconditionally supports (for example `environments.list` or
-`packages.list`). They are a convenience to reduce duplication, not a runtime
-fallback — a manager's `capabilities` object must still include every key.
+Checks must not prompt, mutate state, or invoke operations to test support.
+Return `{ supported: false, reason }` for unsupported features; let unexpected
+probe failures reject.
 
-Guidance for authoring checks:
-
-- Advertise every key explicitly, even when the answer is unsupported. There is
-  no partial-map or inheritance mechanism in the resolver; any key your manager
-  omits resolves unsupported with the generic reason above.
-- Disable support with an explicit `{ supported: false, reason }` result that
-  explains why, instead of omitting the key.
-- Keep checks read-only and noninteractive. Do not invoke the operation to test
-  it. Let unexpected probe errors reject.
-- When one check depends on another (for example `packages.upgrade`
-  depending on `packages.install`), call `resolveEnvironmentManagerCapability` or
-  `resolvePackageManagerCapability` explicitly from within that key's check and
-  forward the received context unchanged. This delegation is a per-manager
-  choice, not an automatic cascade. There is no cycle protection: a manager
-  that delegates in a loop recurses until the call stack overflows, so keep
-  delegation chains acyclic.
-
-Legacy providers without a `capabilities` map remain source-compatible; queries
-report unsupported without inferring support from their operation methods. The
-resolver looks up `capability` as the map's own property and calls it if
-it's a function; a missing key, an inherited property (for example
-`toString`), or a declared value that isn't a function all resolve unsupported
-rather than throwing.
-
-### Adding or removing catalog capabilities
-
-Capability key types are derived from the exported `as const` objects in
-`src/capabilities.ts`. To add a public capability:
-
-1. Add a documented member to `EnvironmentCapability` or `PackageCapability` in `src/capabilities.ts`.
-2. Update every built-in manager to advertise the new key explicitly (true,
-   false with a reason, or a delegating check).
-3. Update capability tests and this summary.
-
-Removing a key from a manager's `capabilities` map only removes that manager's
-advertisement for that key (it resolves unsupported at runtime for that
-manager). Removing a key from the catalog in `src/capabilities.ts` removes it
-from the public type union and is a breaking API change; deprecate it first and
-remove it only in a major release.
+Public routed queries emit `MANAGER.CAPABILITY_QUERY` with the manager ID, kind,
+tool version, capability, and outcome. Unavailable managers use ID `none`;
+unknown or failed version lookups use `unknown` without changing query results.
+Context, paths, reasons, and error messages are not sent. Routing/ownership
+failures and internal checks do not emit this event.
 
 ## Compatibility guidance
 

@@ -11,14 +11,6 @@ import type {
     PythonProject,
 } from './types.js';
 
-// ---------------------------------------------------------------------------
-// Capability catalogs
-//
-// The catalogs below are the single source of truth for which capability keys exist. A manager
-// may omit advertisements for legacy compatibility. When present, a map must include every key;
-// there are no defaults, so unimplemented capabilities advertise `unsupportedCapability`.
-// ---------------------------------------------------------------------------
-
 /** Environment capability keys. Advertised maps must include a check for each key. */
 export const EnvironmentCapability = {
     /** List/rediscover known environments for a scope. Required getEnvironments and refresh operations. */
@@ -70,10 +62,6 @@ export function isKnownManagerCapability(capability: unknown): capability is Man
         packageCapabilityKeys.some((key) => key === capability);
 }
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
-
 /** General feature support, not a guarantee that a particular operation will succeed. */
 export type Support = { readonly supported: true } | { readonly supported: false; readonly reason: string };
 
@@ -90,43 +78,20 @@ export type CapabilityCheck = (context: CapabilityContext) => Promise<Support>;
 /** Every capability key must be advertised as a read-only, noninteractive check; there are no defaults. */
 export type Capabilities<C extends ManagerCapability> = Readonly<Record<C, CapabilityCheck>>;
 
-// ---------------------------------------------------------------------------
-// Shared capability checks
-//
-// Convenience constants for the two most common advertisements, so managers don't need to write
-// out `async () => ({ supported: ... })` by hand for unconditional or unimplemented capabilities.
-// ---------------------------------------------------------------------------
-
 /** A capability check that always reports support. Use for unconditionally supported operations. */
 export const supportedCapability: CapabilityCheck = async () => ({ supported: true });
 
-/**
- * A capability check that always reports the generic "not implemented" reason. Use when a manager
- * has no reason more specific than "unsupported"; otherwise return a custom `{ supported: false, reason }`.
- */
+/** A capability check that reports unsupported with the generic "not implemented" reason. */
 export const unsupportedCapability: CapabilityCheck = async () => ({
     supported: false,
     reason: l10n.t('Capability not implemented'),
 });
 
-// ---------------------------------------------------------------------------
-// Public resolvers
-//
-// These are the only two entry points managers and API callers should use. Each pins a manager
-// type to its matching capability-key type, so a capability key for the wrong kind of manager is
-// a compile error rather than a silent runtime mismatch.
-//
-// Callers include both the API layer and managers themselves, which may call these recursively
-// from within a capability check to delegate to a prerequisite (e.g. `'packages.upgrade'`
-// delegating to `'packages.install'`). There is no cycle protection: a manager that delegates
-// in a loop will recurse until the call stack overflows, so keep delegation chains acyclic.
-// ---------------------------------------------------------------------------
-
 /**
  * Resolves environment-manager support without invoking the operation or prompting.
  * @param manager Manager whose advertised capabilities are queried.
  * @param capability Environment capability to look up; keys the manager hasn't advertised resolve unsupported.
- * @param context Query context. Forward the received context unchanged when checking prerequisites.
+ * @param context Context forwarded unchanged to the advertised check.
  * @returns Support, including a reason when unsupported. Probe errors reject.
  */
 export function resolveEnvironmentManagerCapability(
@@ -141,7 +106,7 @@ export function resolveEnvironmentManagerCapability(
  * Resolves package-manager support without invoking the operation or prompting.
  * @param manager Manager whose advertised capabilities are queried, including the project-bound instance when applicable.
  * @param capability Package capability to look up; keys the manager hasn't advertised resolve unsupported.
- * @param context Query context. Forward the received context unchanged when checking prerequisites.
+ * @param context Context forwarded unchanged to the advertised check.
  * @returns Support, including a reason when unsupported. Probe errors reject.
  */
 export function resolvePackageManagerCapability(
@@ -152,17 +117,8 @@ export function resolvePackageManagerCapability(
     return resolveCapability(manager, capability, context);
 }
 
-// ---------------------------------------------------------------------------
-// Resolution engine (internal)
-// ---------------------------------------------------------------------------
-
-/**
- * Looks up `capability` as the manager's own advertised property and calls it if present.
- * Anything else - a missing key, an inherited property (e.g. `toString`), or a declared value
- * that isn't a function - resolves unsupported rather than invoking anything.
- */
-async function resolveCapability<M extends { readonly capabilities?: Capabilities<C> }, C extends ManagerCapability>(
-    manager: M,
+async function resolveCapability<C extends ManagerCapability>(
+    manager: { readonly capabilities?: Capabilities<C> },
     capability: C,
     context: CapabilityContext,
 ): Promise<Support> {

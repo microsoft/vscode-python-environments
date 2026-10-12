@@ -28,7 +28,6 @@ import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
 
-import { requiredPackageCapabilities } from '../common/capabilityDeclarations';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import {
@@ -44,7 +43,7 @@ import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../i
 
 export class CondaPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
-        ...requiredPackageCapabilities,
+        [PackageCapability.List]: supportedCapability,
         [PackageCapability.Install]: supportedCapability,
         [PackageCapability.Uninstall]: supportedCapability,
         [PackageCapability.Upgrade]: supportedCapability,

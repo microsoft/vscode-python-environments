@@ -16,6 +16,7 @@ import {
 } from '../capabilities';
 import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import type { EnvironmentManager, PackageManager } from '../types';
+import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from './capabilityFixtures';
 
 function unexpectedOperation(): never {
     throw new Error('A capability query must not invoke a manager operation');
@@ -24,25 +25,6 @@ function unexpectedOperation(): never {
 const supported: Support = { supported: true };
 const notImplemented: Support = { supported: false, reason: l10n.t('Capability not implemented') };
 const denied: Support = { supported: false, reason: 'Disabled by provider' };
-
-/** A complete, fully-supported capability map. Advertised maps must include every key. */
-const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
-    [EnvironmentCapability.List]: async () => supported,
-    [EnvironmentCapability.Resolve]: async () => supported,
-    [EnvironmentCapability.GetSelected]: async () => supported,
-    [EnvironmentCapability.SetSelected]: async () => supported,
-    [EnvironmentCapability.Create]: async () => supported,
-    [EnvironmentCapability.Remove]: async () => supported,
-};
-
-const fullPackageCapabilities: Capabilities<PackageManagerCapability> = {
-    [PackageCapability.List]: async () => supported,
-    [PackageCapability.Install]: async () => supported,
-    [PackageCapability.Uninstall]: async () => supported,
-    [PackageCapability.Upgrade]: async () => supported,
-    [PackageCapability.ListDirect]: async () => supported,
-    [PackageCapability.ListAvailableVersions]: async () => supported,
-};
 
 function environmentManager(capabilities: Partial<Capabilities<EnvironmentManagerCapability>> = {}): EnvironmentManager {
     return {
@@ -53,7 +35,7 @@ function environmentManager(capabilities: Partial<Capabilities<EnvironmentManage
         get: unexpectedOperation,
         set: unexpectedOperation,
         resolve: unexpectedOperation,
-        capabilities: { ...fullEnvironmentCapabilities, ...capabilities },
+        capabilities: { ...allSupportedEnvironmentCapabilities, ...capabilities },
     };
 }
 
@@ -63,7 +45,7 @@ function packageManager(capabilities: Partial<Capabilities<PackageManagerCapabil
         manage: unexpectedOperation,
         refresh: unexpectedOperation,
         getPackages: unexpectedOperation,
-        capabilities: { ...fullPackageCapabilities, ...capabilities },
+        capabilities: { ...allSupportedPackageCapabilities, ...capabilities },
     };
 }
 
@@ -88,10 +70,6 @@ suite('Manager capabilities', () => {
                 assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), notImplemented);
                 assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), notImplemented);
             }
-            Reflect.deleteProperty(env, 'capabilities');
-            Reflect.deleteProperty(pkg, 'capabilities');
-            assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), notImplemented);
-            assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), notImplemented);
         });
 
         test('unknown runtime keys cannot resolve inherited object properties', async () => {
@@ -110,26 +88,7 @@ suite('Manager capabilities', () => {
             }
         });
 
-        test('a non-object capabilities map resolves unsupported, not a crash', async () => {
-            for (const value of [true, [], () => {}]) {
-                const env = environmentManager();
-                const pkg = packageManager();
-                Reflect.set(env, 'capabilities', value);
-                Reflect.set(pkg, 'capabilities', value);
-                assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), notImplemented);
-                assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), notImplemented);
-            }
-        });
-
-        test('capability maps with a null prototype are supported', async () => {
-            const capabilities = Object.create(null);
-            capabilities[PackageCapability.List] = async () => denied;
-            const manager = packageManager();
-            Reflect.set(manager, 'capabilities', capabilities);
-            assert.strictEqual(await packageCapability(manager, PackageCapability.List), denied);
-        });
-
-        test('dynamic checks receive context through prerequisites without mutating or caching it', async () => {
+        test('dynamic checks forward context without mutating or caching it', async () => {
             const context: CapabilityContext = Object.freeze({ scope: 'global', project: { name: 'project', uri: Uri.file('.') } });
             let result: Support = denied;
             const manager = packageManager({

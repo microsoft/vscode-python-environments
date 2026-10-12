@@ -23,7 +23,6 @@ import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { EnvironmentToolSupport, pythonToolSupport } from '../../internal/pythonToolSupport';
 import { withProgress } from '../../common/window.apis';
-import { requiredEnvironmentCapabilities } from '../common/capabilityDeclarations';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import {
@@ -39,7 +38,10 @@ import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToIns
 
 export class SysPythonManager implements EnvironmentManager {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
-        ...requiredEnvironmentCapabilities,
+        [EnvironmentCapability.List]: supportedCapability,
+        [EnvironmentCapability.Resolve]: supportedCapability,
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
         [EnvironmentCapability.Create]: supportedCapability,
         [EnvironmentCapability.Remove]: async () => ({
             supported: false,
