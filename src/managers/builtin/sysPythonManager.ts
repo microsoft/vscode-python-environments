@@ -310,7 +310,7 @@ export class SysPythonManager implements EnvironmentManager {
         _options?: CreateEnvironmentOptions,
     ): Promise<PythonEnvironment | undefined> {
         // Show QuickPick to select Python version
-        const selectedVersion = await selectPythonVersionToInstall();
+        const selectedVersion = await selectPythonVersionToInstall(this.log);
         if (!selectedVersion) {
             // User cancelled
             return undefined;
