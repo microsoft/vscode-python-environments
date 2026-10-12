@@ -1894,16 +1894,17 @@ if (typeof api.getPackageManagerCapability === 'function') {
 ### Advertising manager support
 
 Managers may omit `capabilities` for legacy compatibility. When supplied, the
-map must advertise every capability key. There are no inferred defaults: a
-missing map or key resolves `{ supported: false, reason: 'Capability not
-implemented' }`. Checks receive `CapabilityContext` and return `Promise<Support>`.
+map must advertise every capability key. An omitted map uses legacy method
+inference; a missing key in a supplied map resolves `{ supported: false,
+reason: 'Capability not implemented' }`. Checks receive `CapabilityContext`
+and return `Promise<Support>`.
 
-For opt-in legacy inference, use `getLegacyPackageManagerCapability(manager, capability)`
+Legacy inference uses `getLegacyPackageManagerCapability(manager, capability)`
 or `getLegacyEnvironmentManagerCapability(manager, capability)`. They inspect method
 presence without executing methods or reading advertisements. Listing requires both
 listing and refresh methods; package install, uninstall, and upgrade require `manage`.
 Other capabilities require their corresponding methods. This does not verify tool
-versions or option behavior, and regular capability queries do not use this fallback.
+versions or option behavior. Regular queries use this fallback only when the map is omitted.
 Legacy helper results include `isLegacy: true`; other `Support` results may omit
 the field, which means false.
 

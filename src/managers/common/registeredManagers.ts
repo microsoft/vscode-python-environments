@@ -98,7 +98,7 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         return this.manager.create !== undefined;
     }
 
-    /** Resolves raw-provider advertisements without defaults, independently of operational fallbacks. */
+    /** Resolves raw-provider advertisements or legacy method support, independently of operational fallbacks. */
     public getCapability(capability: EnvironmentManagerCapability, context?: CapabilityContext): Promise<Support> {
         return resolveEnvironmentManagerCapability(this.manager, capability, context);
     }

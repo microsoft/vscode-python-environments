@@ -380,7 +380,7 @@ export interface RemoveEnvironmentOptions {
 export interface EnvironmentManager {
     /**
      * Optional for legacy providers. When present, advertises every environment capability key.
-     * Missing advertisements resolve unsupported; there are no inferred defaults.
+     * An omitted map uses legacy method inference. Missing keys in a supplied map resolve unsupported.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
     readonly capabilities?: Capabilities<EnvironmentManagerCapability>;
@@ -671,7 +671,7 @@ export interface DidChangePackagesEventArgs {
 export interface PackageManager {
     /**
      * Optional for legacy providers. When present, advertises every package capability key.
-     * Missing advertisements resolve unsupported; there are no inferred defaults.
+     * An omitted map uses legacy method inference. Missing keys in a supplied map resolve unsupported.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
     readonly capabilities?: Capabilities<PackageManagerCapability>;

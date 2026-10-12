@@ -50,7 +50,7 @@ function packageManager(capabilities: Partial<Capabilities<PackageManagerCapabil
 }
 
 suite('Manager capabilities', () => {
-    suite('Optional advertisements, no defaults', () => {
+    suite('Optional advertisements with legacy fallback', () => {
         test('advertised checks are honored in either direction', async () => {
             const env = environmentManager({ [EnvironmentCapability.List]: async () => denied, [EnvironmentCapability.Create]: async () => supported });
             assert.strictEqual(await environmentCapability(env, EnvironmentCapability.List), denied);
@@ -61,14 +61,19 @@ suite('Manager capabilities', () => {
             assert.strictEqual(await packageCapability(pkg, PackageCapability.ListDirect), supported);
         });
 
-        test('missing advertisements resolve unsupported, not a crash', async () => {
+        test('missing maps use legacy inference, but missing advertised keys remain unsupported', async () => {
             const env = environmentManager();
             const pkg = packageManager();
             for (const capabilities of [{}, undefined, null]) {
                 Reflect.set(env, 'capabilities', capabilities);
                 Reflect.set(pkg, 'capabilities', capabilities);
-                assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), notImplemented);
-                assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), notImplemented);
+                const expected: Support = capabilities ? notImplemented : { supported: true, isLegacy: true };
+                assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), expected);
+                assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), expected);
+                assert.deepStrictEqual(
+                    await environmentCapability(env, EnvironmentCapability.Create),
+                    capabilities ? notImplemented : { ...notImplemented, isLegacy: true },
+                );
             }
         });
 

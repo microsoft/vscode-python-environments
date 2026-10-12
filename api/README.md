@@ -52,9 +52,9 @@ if (environment && typeof api.getPackageManagerCapability === 'function') {
 }
 ```
 
-Manager advertisements are optional for legacy compatibility. Missing maps or
-keys report unsupported; there are no inferred defaults. Support is advisory,
-not a guarantee that an operation succeeds.
+Manager advertisements are optional for legacy compatibility. Missing maps use
+method-presence inference and return `isLegacy: true`; missing keys in a supplied
+map report unsupported. Support is advisory, not a guarantee that an operation succeeds.
 
 See the [capability guide](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#manager-capabilities)
 for the full catalog and provider authoring.

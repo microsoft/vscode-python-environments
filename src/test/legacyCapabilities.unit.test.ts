@@ -41,16 +41,18 @@ suite('Legacy manager capabilities', () => {
 
         for (const capability of Object.values(PackageCapability)) {
             assert.deepStrictEqual(await getLegacyPackageManagerCapability(manager, capability), { supported: true, isLegacy: true });
+            assert.deepStrictEqual(await resolvePackageManagerCapability(manager, capability), { supported: true, isLegacy: true });
             for (const method of methods[capability]) {
                 for (const value of [undefined, false]) {
                     Reflect.set(manager, method, value);
                     assert.deepStrictEqual(await getLegacyPackageManagerCapability(manager, capability), legacyUnsupported);
+                    assert.deepStrictEqual(await resolvePackageManagerCapability(manager, capability), legacyUnsupported);
                 }
                 Reflect.set(manager, method, unexpectedOperation);
             }
         }
         assert.deepStrictEqual(await Reflect.apply(getLegacyPackageManagerCapability, undefined, [manager, 'unknown']), legacyUnsupported);
-        assert.deepStrictEqual(await resolvePackageManagerCapability(manager, PackageCapability.Install), unsupported);
+        assert.deepStrictEqual(await Reflect.apply(resolvePackageManagerCapability, undefined, [manager, 'unknown']), legacyUnsupported);
     });
 
     test('environment capabilities require their callable methods without executing them', async () => {
@@ -76,15 +78,17 @@ suite('Legacy manager capabilities', () => {
 
         for (const capability of Object.values(EnvironmentCapability)) {
             assert.deepStrictEqual(await getLegacyEnvironmentManagerCapability(manager, capability), { supported: true, isLegacy: true });
+            assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, capability), { supported: true, isLegacy: true });
             for (const method of methods[capability]) {
                 for (const value of [undefined, false]) {
                     Reflect.set(manager, method, value);
                     assert.deepStrictEqual(await getLegacyEnvironmentManagerCapability(manager, capability), legacyUnsupported);
+                    assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, capability), legacyUnsupported);
                 }
                 Reflect.set(manager, method, unexpectedOperation);
             }
         }
         assert.deepStrictEqual(await Reflect.apply(getLegacyEnvironmentManagerCapability, undefined, [manager, 'unknown']), legacyUnsupported);
-        assert.deepStrictEqual(await resolveEnvironmentManagerCapability(manager, EnvironmentCapability.Create), unsupported);
+        assert.deepStrictEqual(await Reflect.apply(resolveEnvironmentManagerCapability, undefined, [manager, 'unknown']), legacyUnsupported);
     });
 });

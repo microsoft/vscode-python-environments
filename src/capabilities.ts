@@ -96,9 +96,9 @@ export const unsupportedCapability: CapabilityCheck = async () => ({
 /**
  * Resolves environment-manager support without invoking the operation or prompting.
  * @param manager Manager whose advertised capabilities are queried.
- * @param capability Environment capability to look up; keys the manager hasn't advertised resolve unsupported.
+ * @param capability Environment capability to look up; missing keys in a supplied map resolve unsupported.
  * @param context Context forwarded unchanged to the advertised check.
- * @returns Support, including a reason when unsupported. Probe errors reject.
+ * @returns Advertised support, or legacy method inference when the map is omitted. Probe errors reject.
  */
 export function resolveEnvironmentManagerCapability(
     manager: EnvironmentManager,
@@ -114,9 +114,9 @@ export function resolveEnvironmentManagerCapability(
 /**
  * Resolves package-manager support without invoking the operation or prompting.
  * @param manager Manager whose advertised capabilities are queried, including the project-bound instance when applicable.
- * @param capability Package capability to look up; keys the manager hasn't advertised resolve unsupported.
+ * @param capability Package capability to look up; missing keys in a supplied map resolve unsupported.
  * @param context Context forwarded unchanged to the advertised check.
- * @returns Support, including a reason when unsupported. Probe errors reject.
+ * @returns Advertised support, or legacy method inference when the map is omitted. Probe errors reject.
  */
 export function resolvePackageManagerCapability(
     manager: PackageManager,
