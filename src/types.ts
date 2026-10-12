@@ -379,10 +379,11 @@ export interface RemoveEnvironmentOptions {
  */
 export interface EnvironmentManager {
     /**
-     * Advertises support for every environment capability key; there are no defaults.
+     * Optional for legacy providers. When present, advertises every environment capability key.
+     * Missing advertisements resolve unsupported; there are no inferred defaults.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
-    readonly capabilities: Capabilities<EnvironmentManagerCapability>;
+    readonly capabilities?: Capabilities<EnvironmentManagerCapability>;
 
     /**
      * The name of the environment manager. Allowed characters (a-z, A-Z, 0-9, -, _).
@@ -669,10 +670,11 @@ export interface DidChangePackagesEventArgs {
  */
 export interface PackageManager {
     /**
-     * Advertises support for every package capability key; there are no defaults.
+     * Optional for legacy providers. When present, advertises every package capability key.
+     * Missing advertisements resolve unsupported; there are no inferred defaults.
      * Use instance-field arrow functions to retain manager state; checks must not prompt or mutate.
      */
-    readonly capabilities: Capabilities<PackageManagerCapability>;
+    readonly capabilities?: Capabilities<PackageManagerCapability>;
 
     /**
      * The name of the package manager. Allowed characters (a-z, A-Z, 0-9, -, _).

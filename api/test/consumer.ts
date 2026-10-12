@@ -53,7 +53,7 @@ if (isPackageVersionLookupNotSupportedError(maybeError)) {
     maybeError.code satisfies 'PackageVersionLookupNotSupported';
 }
 
-// Legacy providers must now advertise every capability key explicitly; there are no defaults.
+// Legacy providers may omit advertisements; advertised maps must include every key without defaults.
 const fullPackageCapabilities: Capabilities<PackageManagerCapability> = {
     [PackageCapability.List]: supportedCapability,
     [PackageCapability.Install]: supportedCapability,
@@ -76,7 +76,6 @@ const legacyPackageManager: PackageManager = {
     manage: async () => {},
     refresh: async () => {},
     getPackages: async () => [],
-    capabilities: fullPackageCapabilities,
 };
 const legacyEnvironmentManager: EnvironmentManager = {
     name: 'legacy',
@@ -86,7 +85,6 @@ const legacyEnvironmentManager: EnvironmentManager = {
     get: async () => undefined,
     set: async () => {},
     resolve: async () => undefined,
-    capabilities: fullEnvironmentCapabilities,
 };
 
 // Capability authoring and raw-provider resolution.

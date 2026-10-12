@@ -7,6 +7,7 @@ import * as sinon from 'sinon';
 import { LogOutputChannel, Uri } from 'vscode';
 import {
     Package,
+    PackageCapability,
     PythonEnvironment,
     PythonEnvironmentApi,
     isPackageVersionLookupNotSupportedError,
@@ -97,6 +98,12 @@ suite('PipPackageManager', () => {
             manager.getPackageAvailableVersions(environment, 'requests'),
             isPackageVersionLookupNotSupportedError,
         );
+        const support = await manager.capabilities[PackageCapability.ListAvailableVersions]({ environment });
+        assert.strictEqual(support.supported, false);
+        if (!support.supported) {
+            assert.match(support.reason, /pip 21.2 or newer/);
+        }
+        assert.strictEqual((await manager.capabilities[PackageCapability.ListAvailableVersions]({})).supported, false);
     });
 
     test('propagates version lookup command failures for supported pip', async () => {
@@ -104,7 +111,7 @@ suite('PipPackageManager', () => {
         const environment = createEnvironment();
         const lookupError = new Error('pip index failed');
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
-        const runPython = sinon.stub(helpers, 'runPython');
+        const runPython = sinon.stub(helpers, 'runPython').resolves('pip 25.1 from /path/to/pip (python 3.12)');
         runPython.onFirstCall().resolves('pip 25.1 from /path/to/pip (python 3.12)');
         runPython.onSecondCall().rejects(lookupError);
 
@@ -112,6 +119,9 @@ suite('PipPackageManager', () => {
             manager.getPackageAvailableVersions(environment, 'requests'),
             (error: unknown) => error === lookupError,
         );
+        assert.deepStrictEqual(await manager.capabilities[PackageCapability.ListAvailableVersions]({ environment }), {
+            supported: true,
+        });
     });
 
     test('propagates pip version command failures during version lookup', async () => {
@@ -123,6 +133,10 @@ suite('PipPackageManager', () => {
 
         await assert.rejects(
             manager.getPackageAvailableVersions(environment, 'requests'),
+            (error: unknown) => error === versionError,
+        );
+        await assert.rejects(
+            manager.capabilities[PackageCapability.ListAvailableVersions]({ environment }),
             (error: unknown) => error === versionError,
         );
     });

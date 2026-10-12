@@ -25,7 +25,7 @@ const supported: Support = { supported: true };
 const notImplemented: Support = { supported: false, reason: l10n.t('Capability not implemented') };
 const denied: Support = { supported: false, reason: 'Disabled by provider' };
 
-/** A complete, fully-supported capability map. Every manager must advertise every key. */
+/** A complete, fully-supported capability map. Advertised maps must include every key. */
 const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
     [EnvironmentCapability.List]: async () => supported,
     [EnvironmentCapability.Resolve]: async () => supported,
@@ -68,7 +68,7 @@ function packageManager(capabilities: Partial<Capabilities<PackageManagerCapabil
 }
 
 suite('Manager capabilities', () => {
-    suite('Required advertisements, no defaults', () => {
+    suite('Optional advertisements, no defaults', () => {
         test('advertised checks are honored in either direction', async () => {
             const env = environmentManager({ [EnvironmentCapability.List]: async () => denied, [EnvironmentCapability.Create]: async () => supported });
             assert.strictEqual(await environmentCapability(env, EnvironmentCapability.List), denied);
@@ -79,12 +79,17 @@ suite('Manager capabilities', () => {
             assert.strictEqual(await packageCapability(pkg, PackageCapability.ListDirect), supported);
         });
 
-        test('a key missing from the capability map resolves unsupported, not a crash', async () => {
-            // Simulates a non-TypeScript provider whose capability map omits a required key.
+        test('missing advertisements resolve unsupported, not a crash', async () => {
             const env = environmentManager();
-            Reflect.set(env, 'capabilities', {});
             const pkg = packageManager();
-            Reflect.set(pkg, 'capabilities', {});
+            for (const capabilities of [{}, undefined, null]) {
+                Reflect.set(env, 'capabilities', capabilities);
+                Reflect.set(pkg, 'capabilities', capabilities);
+                assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), notImplemented);
+                assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), notImplemented);
+            }
+            Reflect.deleteProperty(env, 'capabilities');
+            Reflect.deleteProperty(pkg, 'capabilities');
             assert.deepStrictEqual(await environmentCapability(env, EnvironmentCapability.List), notImplemented);
             assert.deepStrictEqual(await packageCapability(pkg, PackageCapability.List), notImplemented);
         });

@@ -52,9 +52,9 @@ if (environment && typeof api.getPackageManagerCapability === 'function') {
 }
 ```
 
-Managers advertise every capability key explicitly: there are no defaults, and
-`capabilities` is a required property on both `EnvironmentManager` and
-`PackageManager`. A key a manager omits at runtime resolves
+`capabilities` is optional on both `EnvironmentManager` and `PackageManager` for
+compatibility with legacy providers. When supplied, the map must advertise every
+capability key explicitly; there are no inferred defaults. A missing map or key resolves
 `{ supported: false, reason: 'Capability not implemented' }`.
 
 To change a manager's advertised support, update the check for that key in its

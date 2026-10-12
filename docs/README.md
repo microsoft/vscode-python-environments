@@ -1555,7 +1555,7 @@ trigger, as the specification.
 | `name` | `string` | Yes | Manager name. Allowed characters: `a-z`, `A-Z`, `0-9`, `-`, `_`. |
 | `displayName` | `string` | No | Name shown in the UI. |
 | `preferredPackageManagerId` | `string` | Yes | Package manager to pair with, formatted `<publisher>.<extension>:<manager-name>`, for example `ms-python.python:pip`. |
-| `capabilities` | `Capabilities<EnvironmentManagerCapability>` | Yes | Explicit support for every environment capability key; see [manager capabilities](#manager-capabilities). |
+| `capabilities` | `Capabilities<EnvironmentManagerCapability>` | No | Optional advertisements for legacy compatibility; when supplied, includes every environment capability key. See [manager capabilities](#manager-capabilities). |
 | `description` | `string` | No | Secondary text shown in the UI. |
 | `tooltip` | `string \| MarkdownString` | No | Hover text for the manager. |
 | `iconPath` | [`IconPath`](#iconpath) | No | Icon shown for the manager. |
@@ -1629,7 +1629,7 @@ Reports and changes the packages of an environment.
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
 | `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
-| `capabilities` | `Capabilities<PackageManagerCapability>` | Yes | Explicit support for every package capability key, evaluated on the correct project-bound instance; see [manager capabilities](#manager-capabilities). |
+| `capabilities` | `Capabilities<PackageManagerCapability>` | No | Optional advertisements for legacy compatibility; when supplied, includes every package capability key, evaluated on the correct project-bound instance. See [manager capabilities](#manager-capabilities). |
 | `dispose()` | `() => void` | No | Releases resources owned by the manager. The extension disposes project-scoped managers when their project is removed or replaced, their provider is unregistered, or the extension shuts down. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
@@ -1933,16 +1933,26 @@ if (typeof api.getPackageManagerCapability === 'function') {
 
 ### Advertising manager support
 
-Managers must advertise every capability key as a `capabilities` map. There are
-no defaults: a missing key resolves `{ supported: false, reason: 'Capability not
+Managers may omit `capabilities` for legacy compatibility. When supplied, the
+map must advertise every capability key. There are no inferred defaults: a
+missing map or key resolves `{ supported: false, reason: 'Capability not
 implemented' }`. Checks receive `CapabilityContext` and return `Promise<Support>`.
 
 ```typescript
+import {
+    Capabilities,
+    PackageCapability,
+    PackageManagerCapability,
+    supportedCapability,
+    unsupportedCapability,
+} from '@vscode/python-environments';
+import { l10n } from 'vscode';
+
 // Members of a PackageManager implementation:
 readonly capabilities: Capabilities<PackageManagerCapability> = {
-    ...requiredPackageCapabilities, // shared, universally-true operations
+    [PackageCapability.List]: supportedCapability,
     [PackageCapability.ListDirect]: supportedCapability,
-    [PackageCapability.ListAvailableVersions]: async (context) => this.checkVersionLookupSupport(context),
+    [PackageCapability.ListAvailableVersions]: unsupportedCapability,
     [PackageCapability.Install]: supportedCapability,
     [PackageCapability.Uninstall]: supportedCapability,
     [PackageCapability.Upgrade]: async (_context) => ({
@@ -1976,9 +1986,9 @@ Guidance for authoring checks:
   that delegates in a loop recurses until the call stack overflows, so keep
   delegation chains acyclic.
 
-Legacy providers without a `capabilities` map no longer compile: `capabilities`
-is a required property on `EnvironmentManager` and `PackageManager`. The
-resolver looks up `capability` as the manager's own property and calls it if
+Legacy providers without a `capabilities` map remain source-compatible; queries
+report unsupported without inferring support from their operation methods. The
+resolver looks up `capability` as the map's own property and calls it if
 it's a function; a missing key, an inherited property (for example
 `toString`), or a declared value that isn't a function all resolve unsupported
 rather than throwing.

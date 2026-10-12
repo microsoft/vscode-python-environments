@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 /**
- * Shared, fully-supported capability maps for unit test fixtures. Every manager must advertise
+ * Shared, fully-supported capability maps for unit test fixtures. Advertised maps must include
  * every capability key; tests that aren't exercising capability behavior itself can spread these
  * constants into their fake managers instead of repeating the full key list.
  */

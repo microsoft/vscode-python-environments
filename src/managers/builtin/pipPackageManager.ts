@@ -20,6 +20,7 @@ import {
     Package,
     PackageManagementOptions,
     PackageManager,
+    isPackageVersionLookupNotSupportedError,
     PackageVersionLookupNotSupportedError,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -59,10 +60,16 @@ export class PipPackageManager implements PackageManager, Disposable {
         [PackageCapability.Uninstall]: supportedCapability,
         [PackageCapability.Upgrade]: supportedCapability,
         [PackageCapability.ListAvailableVersions]: async ({ environment }) => {
+            if (!environment) {
+                return { supported: false, reason: l10n.t('An environment is required to check package version lookup support.') };
+            }
             try {
-                await this.getPackageAvailableVersionsCommand(environment!);
+                await this.getPackageAvailableVersionsCommand(environment);
             } catch (error) {
-                return { supported: false, reason: (error as Error).message };
+                if (isPackageVersionLookupNotSupportedError(error)) {
+                    return { supported: false, reason: error.message };
+                }
+                throw error;
             }
             return await supportedCapability({ environment });
         },

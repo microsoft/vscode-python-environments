@@ -14,12 +14,12 @@ import type {
 // ---------------------------------------------------------------------------
 // Capability catalogs
 //
-// The catalogs below are the single source of truth for which capability keys exist. Every
-// environment/package manager must advertise a check for each key in its catalog; there are no
-// defaults, so unimplemented capabilities must advertise `unsupportedCapability` explicitly.
+// The catalogs below are the single source of truth for which capability keys exist. A manager
+// may omit advertisements for legacy compatibility. When present, a map must include every key;
+// there are no defaults, so unimplemented capabilities advertise `unsupportedCapability`.
 // ---------------------------------------------------------------------------
 
-/** Environment capability keys. Every environment manager must advertise a check for each key. */
+/** Environment capability keys. Advertised maps must include a check for each key. */
 export const EnvironmentCapability = {
     /** List/rediscover known environments for a scope. Required getEnvironments and refresh operations. */
     List: 'environments.list',
@@ -35,7 +35,7 @@ export const EnvironmentCapability = {
     Remove: 'environments.remove',
 } as const;
 
-/** Package capability keys. Every package manager must advertise a check for each key. */
+/** Package capability keys. Advertised maps must include a check for each key. */
 export const PackageCapability = {
     /** List/refresh installed packages in an environment. Required getPackages and refresh operations; an empty result is valid. */
     List: 'packages.list',
@@ -51,10 +51,10 @@ export const PackageCapability = {
     ListAvailableVersions: 'packages.listAvailableVersions',
 } as const;
 
-/** Environment capability keys that every environment manager must advertise a check for. */
+/** Environment capability keys for manager advertisements. */
 export type EnvironmentManagerCapability = (typeof EnvironmentCapability)[keyof typeof EnvironmentCapability];
 
-/** Package capability keys that every package manager must advertise a check for. */
+/** Package capability keys for manager advertisements. */
 export type PackageManagerCapability = (typeof PackageCapability)[keyof typeof PackageCapability];
 
 type ManagerCapability = EnvironmentManagerCapability | PackageManagerCapability;
@@ -161,13 +161,14 @@ export function resolvePackageManagerCapability(
  * Anything else - a missing key, an inherited property (e.g. `toString`), or a declared value
  * that isn't a function - resolves unsupported rather than invoking anything.
  */
-async function resolveCapability<M extends { readonly capabilities: Capabilities<C> }, C extends ManagerCapability>(
+async function resolveCapability<M extends { readonly capabilities?: Capabilities<C> }, C extends ManagerCapability>(
     manager: M,
     capability: C,
     context: CapabilityContext,
 ): Promise<Support> {
-    const check = Object.prototype.hasOwnProperty.call(manager.capabilities, capability)
-        ? manager.capabilities[capability]
+    const capabilities = manager.capabilities;
+    const check = capabilities && Object.prototype.hasOwnProperty.call(capabilities, capability)
+        ? capabilities[capability]
         : undefined;
     return typeof check === 'function' ? check(context) : unsupportedCapability(context);
 }
