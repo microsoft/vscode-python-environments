@@ -68,6 +68,21 @@ const GET_ENVIRONMENT_TIMEOUT_MS = 1000;
 const GET_ENVIRONMENT_TIMED_OUT = Symbol('getEnvironmentTimedOut');
 const CAPABILITY_TELEMETRY_VERSION_TIMEOUT_MS = 1000;
 
+type ManagerCapabilityQuery =
+    | {
+          kind: 'environment';
+          manager: InternalEnvironmentManager | undefined;
+          managerId: string;
+          capability: EnvironmentManagerCapability;
+          context?: CapabilityContext;
+      }
+    | {
+          kind: 'package';
+          manager: InternalPackageManager | undefined;
+          capability: PackageManagerCapability;
+          context: CapabilityContext & { environment: PythonEnvironment };
+      };
+
 export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     readonly __pythonTools: PythonToolsApi;
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
@@ -198,22 +213,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         });
     }
 
-    private async captureCapabilityQuery(
-        query:
-            | {
-                  kind: 'environment';
-                  manager: InternalEnvironmentManager | undefined;
-                  managerId: string;
-                  capability: EnvironmentManagerCapability;
-                  context?: CapabilityContext;
-              }
-            | {
-                  kind: 'package';
-                  manager: InternalPackageManager | undefined;
-                  capability: PackageManagerCapability;
-                  context: CapabilityContext & { environment: PythonEnvironment };
-              },
-    ): Promise<Support> {
+    private async captureCapabilityQuery(query: ManagerCapabilityQuery): Promise<Support> {
         const { manager, capability } = query;
         let outcome: 'supported' | 'unsupported' | 'unavailable' | 'error' = 'error';
         let isLegacy = false;
@@ -234,40 +234,50 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             isLegacy = support.isLegacy === true;
             return support;
         } finally {
-            void (async () => {
-                let managerVersion = 'unknown';
-                if (query.manager) {
-                    let versionTimer: ReturnType<typeof setTimeout> | undefined;
-                    try {
-                        const version = await Promise.race([
-                            query.kind === 'package'
-                                ? query.manager.getVersion(query.context.environment)
-                                : query.manager.getVersion(),
-                            new Promise<never>((_, reject) => {
-                                versionTimer = setTimeout(
-                                    () => reject(new Error('Manager version lookup timed out.')),
-                                    CAPABILITY_TELEMETRY_VERSION_TIMEOUT_MS,
-                                );
-                            }),
-                        ]);
-                        managerVersion = version ? parsePep440Version(version.public)?.public ?? 'unknown' : 'unknown';
-                    } catch (error) {
-                        traceError(`Failed to retrieve manager version for capability telemetry: ${query.manager.id}`, error);
-                    } finally {
-                        if (versionTimer !== undefined) {
-                            clearTimeout(versionTimer);
-                        }
-                    }
-                }
-                sendTelemetryEvent(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
-                    managerId: manager?.id ?? 'none',
-                    managerKind: query.kind,
-                    managerVersion,
-                    capability: isKnownManagerCapability(capability) ? capability : 'unknown',
-                    outcome,
-                    isLegacy,
-                });
-            })().catch((error) => traceError('Failed to send manager capability query telemetry:', error));
+            void this.getManagerVersionForTelemetryWithTimeout(query, CAPABILITY_TELEMETRY_VERSION_TIMEOUT_MS)
+                .then((managerVersion) => {
+                    sendTelemetryEvent(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
+                        managerId: manager?.id ?? 'none',
+                        managerKind: query.kind,
+                        managerVersion,
+                        capability: isKnownManagerCapability(capability) ? capability : 'unknown',
+                        outcome,
+                        isLegacy,
+                    });
+                })
+                .catch((error) => traceError('Failed to send manager capability query telemetry:', error));
+        }
+    }
+
+    private async getManagerVersionForTelemetryWithTimeout(
+        query: ManagerCapabilityQuery,
+        timeoutMs: number,
+    ): Promise<string> {
+        if (!query.manager) {
+            return 'unknown';
+        }
+
+        let versionTimer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            const version = await Promise.race([
+                query.kind === 'package'
+                    ? query.manager.getVersion(query.context.environment)
+                    : query.manager.getVersion(),
+                new Promise<never>((_, reject) => {
+                    versionTimer = setTimeout(
+                        () => reject(new Error('Manager version lookup timed out.')),
+                        timeoutMs,
+                    );
+                }),
+            ]);
+            return version ? parsePep440Version(version.public)?.public ?? 'unknown' : 'unknown';
+        } catch (error) {
+            traceError(`Failed to retrieve manager version for capability telemetry: ${query.manager.id}`, error);
+            return 'unknown';
+        } finally {
+            if (versionTimer !== undefined) {
+                clearTimeout(versionTimer);
+            }
         }
     }
 
