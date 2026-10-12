@@ -283,7 +283,11 @@ async function _runConda(
     }
 }
 
-async function runConda(args: string[], log?: LogOutputChannel, token?: CancellationToken): Promise<string> {
+export async function runConda(
+    args: string[],
+    log?: LogOutputChannel,
+    token?: CancellationToken,
+): Promise<string> {
     const conda = await getConda();
     return await _runConda(conda, args, log, token);
 }
