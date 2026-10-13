@@ -11,6 +11,8 @@ import {
     TaskScope,
 } from 'vscode';
 import { spawnProcess } from '../../common/childProcess.apis';
+import { launchBrowser } from '../../common/env.apis';
+import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { Common, UvInstallStrings } from '../../common/localize';
 import { traceError, traceInfo, traceLog, traceWarn } from '../../common/logging';
 import { getGlobalPersistentState } from '../../common/persistentState';
@@ -28,14 +30,15 @@ export const UV_INSTALL_PYTHON_DONT_ASK_KEY = 'python-envs:uv:UV_INSTALL_PYTHON_
 
 const MAX_PROMPT_DETAIL_LENGTH = 120;
 const TASK_TIMEOUT_MS = 5 * 60 * 1000;
+const PYTHON_INSTALLATION_OPTIONS_URL =
+    'https://code.visualstudio.com/docs/python/python-tutorial#_install-a-python-interpreter';
 
 // Accept only numeric release segments before forwarding script-controlled input to uv.
 const INSTALLABLE_PYTHON_VERSION = /^\d+(?:\.\d+)*(?:(?:a|b|rc)\d+)?(?:\.dev\d+)?$/i;
 
 // Remove C0/C1 controls and Unicode zero-width/bidirectional formatting characters
 // before displaying script-controlled text in a modal prompt.
-const PROMPT_CONTROL_CHARACTERS =
-    /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
+const PROMPT_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/g;
 
 export type UvPythonInstallTrigger = 'activation' | 'createEnvironment' | 'inlineScript';
 
@@ -225,26 +228,28 @@ export async function installUv(_log?: LogOutputChannel): Promise<boolean> {
     return success;
 }
 
-export async function ensureUvForInlineScriptVersionLookupDetailed(
-    requiresPython: string,
+async function ensureUvForVersionLookup(
+    prompt: string,
     log?: LogOutputChannel,
 ): Promise<EnsureUvForInlineScriptVersionLookupResult> {
     if (await isUvInstalled(log)) {
         return 'available';
     }
-    const displayedRequirement = sanitizePromptDetail(requiresPython);
-    if (!displayedRequirement) {
-        return 'failed';
-    }
-    const selection = await showInformationMessage(
-        UvInstallStrings.inlineScriptInstallUvForVersionLookupPrompt(displayedRequirement),
-        { modal: true },
-        UvInstallStrings.installUv,
-    );
+    const selection = await showInformationMessage(prompt, { modal: true }, UvInstallStrings.installUv);
     if (selection !== UvInstallStrings.installUv) {
         return 'declined';
     }
+    return installUvForVersionLookup(log);
+}
+
+async function installUvForVersionLookup(
+    log?: LogOutputChannel,
+    showInstallFailure = false,
+): Promise<EnsureUvForInlineScriptVersionLookupResult> {
     if (!(await installUv(log))) {
+        if (showInstallFailure) {
+            await showErrorMessageWithLogs(UvInstallStrings.uvInstallFailed, log);
+        }
         return 'failed';
     }
     if (await isUvInstalled(log)) {
@@ -252,6 +257,47 @@ export async function ensureUvForInlineScriptVersionLookupDetailed(
     }
     showErrorMessage(UvInstallStrings.uvInstallRestartRequired);
     return 'failed';
+}
+
+/**
+ * Ensures uv is available before listing installable Python versions.
+ *
+ * @param log Optional log output channel.
+ * @returns Whether uv is available for version lookup.
+ */
+export async function ensureUvForPythonVersionLookup(log?: LogOutputChannel): Promise<boolean> {
+    if (await isUvInstalled(log)) {
+        return true;
+    }
+
+    const selection = await showInformationMessage(
+        UvInstallStrings.installUvForVersionLookupPrompt,
+        { modal: true },
+        UvInstallStrings.installUv,
+        UvInstallStrings.otherPythonInstallationOptions,
+    );
+    if (selection === UvInstallStrings.otherPythonInstallationOptions) {
+        await launchBrowser(PYTHON_INSTALLATION_OPTIONS_URL);
+        return false;
+    }
+    if (selection !== UvInstallStrings.installUv) {
+        return false;
+    }
+    return (await installUvForVersionLookup(log, true)) === 'available';
+}
+
+export async function ensureUvForInlineScriptVersionLookupDetailed(
+    requiresPython: string,
+    log?: LogOutputChannel,
+): Promise<EnsureUvForInlineScriptVersionLookupResult> {
+    const displayedRequirement = sanitizePromptDetail(requiresPython);
+    if (!displayedRequirement) {
+        return 'failed';
+    }
+    return ensureUvForVersionLookup(
+        UvInstallStrings.inlineScriptInstallUvForVersionLookupPrompt(displayedRequirement),
+        log,
+    );
 }
 
 export async function ensureUvForInlineScriptVersionLookup(
@@ -306,8 +352,8 @@ export async function getUvPythonPath(version?: string): Promise<string | undefi
                         const installed = versions.find((v) => v.path);
                         resolve(installed?.path ?? undefined);
                     }
-                } catch {
-                    traceError('Failed to parse uv python list output');
+                } catch (error) {
+                    traceError('Failed to parse uv python list output:', error);
                     resolve(undefined);
                 }
             } else {
@@ -339,17 +385,21 @@ export async function getAvailablePythonVersions(
         args.push('--output-format', 'json');
         const proc = spawnProcess(executable, args);
         proc.stdout?.on('data', (data) => chunks.push(data.toString()));
-        proc.on('error', () => resolve([]));
+        proc.on('error', (error) => {
+            traceError('Failed to run uv python list:', error);
+            resolve([]);
+        });
         proc.on('exit', (code) => {
             if (code === 0 && chunks.length > 0) {
                 try {
                     const versions = JSON.parse(chunks.join('')) as UvPythonVersion[];
                     resolve(versions);
-                } catch {
-                    traceError('Failed to parse uv python list output');
+                } catch (error) {
+                    traceError('Failed to parse uv python list output:', error);
                     resolve([]);
                 }
             } else {
+                traceError(`uv python list exited with code ${code}`);
                 resolve([]);
             }
         });
@@ -363,9 +413,14 @@ interface PythonVersionQuickPickItem extends QuickPickItem {
 
 /**
  * Shows a QuickPick to select a Python version to install.
+ * @param log Optional log output channel.
  * @returns Promise that resolves to the selected version string, or undefined if cancelled
  */
-export async function selectPythonVersionToInstall(): Promise<string | undefined> {
+export async function selectPythonVersionToInstall(log?: LogOutputChannel): Promise<string | undefined> {
+    if (!(await ensureUvForPythonVersionLookup(log))) {
+        return undefined;
+    }
+
     const versions = await withProgress(
         {
             location: ProgressLocation.Notification,

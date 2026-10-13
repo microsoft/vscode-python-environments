@@ -1,3 +1,4 @@
+import { explain as parsePep440Version } from '@renovatebot/pep440';
 import * as path from 'path';
 import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
@@ -8,6 +9,7 @@ import {
     GetEnvironmentScope,
     GetEnvironmentsScope,
     IconPath,
+    Pep440Version,
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
@@ -35,6 +37,7 @@ import {
     getPyenv,
     getPyenvForGlobal,
     getPyenvForWorkspace,
+    getPyenvVersion,
     PYENV_VERSIONS,
     refreshPyenv,
     resolvePyenvPath,
@@ -75,6 +78,15 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
     public dispose() {
         this.collection = [];
         this.fsPathToEnv.clear();
+    }
+
+    public async getVersion(): Promise<Pep440Version | undefined> {
+        const pyenv = await getPyenv();
+        if (!pyenv) {
+            return undefined;
+        }
+        const version = await getPyenvVersion(pyenv);
+        return version ? (parsePep440Version(version) ?? undefined) : undefined;
     }
 
     private _initialized: Deferred<void> | undefined;

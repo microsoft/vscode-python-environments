@@ -391,6 +391,10 @@ export namespace UvInstallStrings {
     );
     export const clickToInstallPython = l10n.t('No Python found, click to install');
     export const selectPythonVersion = l10n.t('Select Python version to install');
+    export const installUvForVersionLookupPrompt = l10n.t(
+        'The Global environment manager uses uv to find and install Python versions. uv was not found. Install uv to continue, or install Python another way.',
+    );
+    export const otherPythonInstallationOptions = l10n.t('Other installation options');
     export const installed = l10n.t('installed');
     export const fetchingVersions = l10n.t('Fetching available Python versions...');
     export const failedToFetchVersions = l10n.t('Failed to fetch available Python versions');

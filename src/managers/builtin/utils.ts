@@ -1,3 +1,5 @@
+import * as fs from 'fs-extra';
+import * as path from 'path';
 import { LogOutputChannel, QuickPickItem, Uri, window } from 'vscode';
 import { EnvironmentManager, Package, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../api';
 import { getExtension } from '../../common/extension.apis';
@@ -12,11 +14,14 @@ import {
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
-import { shortenVersionString, sortEnvironments } from '../common/utils';
+import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
 
 const PIXI_EXTENSION_ID = 'renan-r-santos.pixi-code';
 const PIXI_RECOMMEND_DONT_ASK_KEY = 'pixi-extension-recommend-dont-ask';
 let pixiRecommendationShown = false;
+
+// Global environments created for uv-managed Python installations.
+const uvManagedPythons = new WeakSet<PythonEnvironment>();
 
 function asPackageQuickPickItem(name: string, version?: string): QuickPickItem {
     return {
@@ -66,9 +71,9 @@ function getKindName(kind: NativePythonEnvironmentKind | undefined): string | un
     }
 }
 
-function getPythonInfo(env: NativeEnvInfo): PythonEnvironmentInfo {
+function getPythonInfo(env: NativeEnvInfo, uvManaged: boolean = false): PythonEnvironmentInfo {
     if (env.executable && env.version && env.prefix) {
-        const kindName = getKindName(env.kind);
+        const kindName = uvManaged ? 'uv' : getKindName(env.kind);
         const sv = shortenVersionString(env.version);
         const name = kindName ? `Python ${sv} (${kindName})` : `Python ${sv}`;
         const displayName = kindName ? `Python ${sv} (${kindName})` : `Python ${sv}`;
@@ -127,6 +132,36 @@ async function recommendPixiExtension(): Promise<void> {
     }
 }
 
+/**
+ * Returns true when PET reports a Python installation managed by uv (`uv python install`).
+ *
+ * PET reports both uv-created virtual environments and uv-managed Python installations with the
+ * `Uv` kind. Only virtual environments have a `pyvenv.cfg` in their prefix, so its absence
+ * identifies a base interpreter that belongs with the global Python installations.
+ *
+ * @param env Environment information reported by PET.
+ * @returns `true` for a uv-managed base interpreter, otherwise `false`.
+ */
+export async function isUvManagedPythonInstall(env: NativeEnvInfo): Promise<boolean> {
+    if (env.kind !== NativePythonEnvironmentKind.venvUv || !env.prefix) {
+        return false;
+    }
+    return !(await fs.pathExists(path.join(env.prefix, 'pyvenv.cfg')));
+}
+
+/**
+ * Returns the global Python to use by default: the newest one, preferring installations that are not
+ * managed by uv. uv marks its installations EXTERNALLY-MANAGED (PEP 668), so installing packages into
+ * them fails; they are used by default only when no other Python is available.
+ *
+ * @param globals Global Python environments.
+ * @returns The default global Python, or `undefined` when there is none.
+ */
+export function getDefaultGlobalPython(globals: PythonEnvironment[]): PythonEnvironment | undefined {
+    const preferred = globals.filter((e) => !e.error && !uvManagedPythons.has(e));
+    return getLatest(preferred.length > 0 ? preferred : globals);
+}
+
 export async function refreshPythons(
     hardRefresh: boolean,
     nativeFinder: NativePythonFinder,
@@ -144,26 +179,34 @@ export async function refreshPythons(
         recommendPixiExtension().catch((e) => log.error('Error recommending Pixi extension', e));
     }
 
-    const envs = allNativeEnvs.filter(
-        (e) =>
+    const envs: { env: NativeEnvInfo; uvManaged: boolean }[] = [];
+    for (const e of allNativeEnvs) {
+        const uvManaged = e.kind === NativePythonEnvironmentKind.venvUv && (await isUvManagedPythonInstall(e));
+        if (
+            uvManaged ||
             e.kind === undefined ||
-            (e.kind &&
-                [
-                    NativePythonEnvironmentKind.globalPaths,
-                    NativePythonEnvironmentKind.homebrew,
-                    NativePythonEnvironmentKind.linuxGlobal,
-                    NativePythonEnvironmentKind.macCommandLineTools,
-                    NativePythonEnvironmentKind.macPythonOrg,
-                    NativePythonEnvironmentKind.macXCode,
-                    NativePythonEnvironmentKind.windowsRegistry,
-                    NativePythonEnvironmentKind.windowsStore,
-                    NativePythonEnvironmentKind.winpython,
-                ].includes(e.kind)),
-    );
-    envs.forEach((env) => {
+            [
+                NativePythonEnvironmentKind.globalPaths,
+                NativePythonEnvironmentKind.homebrew,
+                NativePythonEnvironmentKind.linuxGlobal,
+                NativePythonEnvironmentKind.macCommandLineTools,
+                NativePythonEnvironmentKind.macPythonOrg,
+                NativePythonEnvironmentKind.macXCode,
+                NativePythonEnvironmentKind.windowsRegistry,
+                NativePythonEnvironmentKind.windowsStore,
+                NativePythonEnvironmentKind.winpython,
+            ].includes(e.kind)
+        ) {
+            envs.push({ env: e, uvManaged });
+        }
+    }
+    envs.forEach(({ env, uvManaged }) => {
         try {
-            const envInfo = getPythonInfo(env);
+            const envInfo = getPythonInfo(env, uvManaged);
             const python = api.createPythonEnvironmentItem(envInfo, manager);
+            if (uvManaged) {
+                uvManagedPythons.add(python);
+            }
             collection.push(python);
         } catch (e) {
             log.error((e as Error).message);
@@ -222,8 +265,12 @@ export async function resolveSystemPythonEnvironmentPath(
 
         // This is supposed to handle a python interpreter as long as we know some basic things about it
         if (resolved.executable && resolved.version && resolved.prefix) {
-            const envInfo = getPythonInfo(resolved);
-            return api.createPythonEnvironmentItem(envInfo, manager);
+            const uvManaged = await isUvManagedPythonInstall(resolved);
+            const python = api.createPythonEnvironmentItem(getPythonInfo(resolved, uvManaged), manager);
+            if (uvManaged) {
+                uvManagedPythons.add(python);
+            }
+            return python;
         }
     } catch (ex) {
         traceVerbose(`Failed to resolve env "${fsPath}": ${ex}`);

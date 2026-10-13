@@ -4,7 +4,7 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import * as typemoq from 'typemoq';
-import { Uri } from 'vscode';
+import { Disposable, Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../../common/constants';
 import { InlineScriptMetadata } from '../../../common/inlineScript/metadata';
@@ -215,6 +215,19 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
 
         assert.ok(infoStub.calledOnce);
         manager.verify((m) => m.create(typemoq.It.isAny(), typemoq.It.isAny()), typemoq.Times.never());
+    });
+
+    test('searches for Python file extensions case-insensitively', async () => {
+        findFilesStub.resolves([]);
+
+        await setUpInlineScriptEnvironmentsInWorkspace(em.object, routing);
+
+        sinon.assert.calledOnceWithExactly(
+            findFilesStub,
+            '**/*.{py,Py,pY,PY}',
+            '{**/.venv/**,**/node_modules/**}',
+            1000,
+        );
     });
 
     test('only sets up the selected files that declare inline metadata', async () => {
@@ -543,6 +556,7 @@ suite('setupInlineScriptEnvironmentHandler', () => {
         sinon.assert.notCalled(saveStub);
         assert.deepStrictEqual(routing.getMetadata(scriptUri), metadata);
         assert.strictEqual(routing.shouldRoute(scriptUri), true);
+        sinon.stub(wapi, 'onDidChangeTextDocument').returns(new Disposable(() => undefined));
         const provider = new InlineScriptCodeLensProvider(routing, 'setup');
         try {
             const document = new MockDocument(currentText, scriptUri.fsPath, async () => true);

@@ -14,6 +14,7 @@ suite('Conda commands', () => {
     let environmentPath: string;
     let mockLog: LogOutputChannel;
     let runCondaStub: sinon.SinonStub;
+    let runConfiguredCondaStub: sinon.SinonStub;
 
     setup(() => {
         environmentPath = Uri.file('environment').fsPath;
@@ -22,6 +23,7 @@ suite('Conda commands', () => {
             get: () => undefined,
         } as unknown as ReturnType<typeof workspaceApis.getConfiguration>);
         runCondaStub = sinon.stub(condaUtils, 'runCondaExecutable').resolves('');
+        runConfiguredCondaStub = sinon.stub(condaUtils, 'runConda').resolves('');
     });
 
     teardown(() => {
@@ -142,12 +144,12 @@ suite('Conda commands', () => {
     });
 
     test('CondaVersionCommand parses the version', async () => {
-        runCondaStub.resolves('conda 24.1.2');
+        runConfiguredCondaStub.resolves('conda 24.1.2');
         const command = new CondaVersionCommand({ pythonExecutable: 'conda', log: mockLog });
 
         const result = await command.execute();
 
-        assert.deepStrictEqual(runCondaStub.firstCall.args[0], ['--version']);
+        assert.deepStrictEqual(runConfiguredCondaStub.firstCall.args[0], ['--version']);
         assert.strictEqual(result?.public, '24.1.2');
     });
 });

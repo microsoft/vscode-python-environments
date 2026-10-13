@@ -4,9 +4,15 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Uri } from 'vscode';
+import {
+    Disposable,
+    TextDocumentChangeEvent,
+    TextDocumentContentChangeEvent,
+    Uri,
+} from 'vscode';
 import { MAX_HEADER_BYTES, readInlineScriptMetadata } from '../../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../../common/inlineScript/routingRegistry';
+import * as wapi from '../../../common/workspace.apis';
 import { InlineScriptCodeLensProvider } from '../../../features/inlineScript/codeLens';
 import { MockDocument } from '../../mocks/mockDocument';
 
@@ -17,8 +23,16 @@ suite('Inline script CodeLens provider', () => {
     const scriptUri = Uri.file(path.join(process.cwd(), 'lens-tests', 'app.py'));
     let routing: InlineScriptRoutingRegistry;
     let provider: InlineScriptCodeLensProvider;
+    let changeListener: ((event: TextDocumentChangeEvent) => void) | undefined;
 
     setup(() => {
+        changeListener = undefined;
+        sinon.stub(wapi, 'onDidChangeTextDocument').callsFake((listener) => {
+            changeListener = listener;
+            return new Disposable(() => {
+                changeListener = undefined;
+            });
+        });
         routing = new InlineScriptRoutingRegistry();
         provider = new InlineScriptCodeLensProvider(routing, SETUP_COMMAND);
     });
@@ -49,8 +63,77 @@ suite('Inline script CodeLens provider', () => {
         return lenses[0];
     }
 
+    function fireChange(
+        text: string,
+        rangeOffset: number,
+        rangeLength: number,
+        insertedText: string,
+        uri = scriptUri,
+    ): void {
+        assert.ok(changeListener, 'document change listener should be registered');
+        const contentChange: TextDocumentContentChangeEvent = {
+            range: undefined as never,
+            rangeOffset,
+            rangeLength,
+            text: insertedText,
+        };
+        changeListener({
+            document: document(text, true, uri),
+            contentChanges: [contentChange],
+            reason: undefined,
+        });
+    }
+
     test('does not decorate ordinary Python files', () => {
         assert.deepStrictEqual(provider.provideCodeLenses(document('print("hello")'), {} as never), []);
+    });
+
+    test('refreshes when a dirty ordinary file gains its first script block', () => {
+        assert.deepStrictEqual(provider.provideCodeLenses(document('print("hello")'), {} as never), []);
+        const changed = sinon.spy();
+        provider.onDidChangeCodeLenses(changed);
+
+        fireChange(SCRIPT, 0, 0, SCRIPT);
+
+        sinon.assert.calledOnce(changed);
+        assert.strictEqual(lens(SCRIPT, true).command?.command, SETUP_COMMAND);
+    });
+
+    test('refreshes when dirty inline metadata changes before routing catches up', () => {
+        ready();
+        assert.strictEqual(lens().command?.command, '');
+        const changed = sinon.spy();
+        provider.onDidChangeCodeLenses(changed);
+        const edited = SCRIPT.replace('requests', 'httpx');
+
+        fireChange(edited, SCRIPT.indexOf('requests'), 'requests'.length, 'httpx');
+
+        sinon.assert.calledOnce(changed);
+        assert.strictEqual(lens(edited, true).command?.command, SETUP_COMMAND);
+    });
+
+    test('does not refresh for a body-only edit after the inline block', () => {
+        ready();
+        assert.strictEqual(lens().command?.command, '');
+        const changed = sinon.spy();
+        provider.onDidChangeCodeLenses(changed);
+        const edited = SCRIPT.replace('hello', 'changed body');
+
+        fireChange(edited, SCRIPT.indexOf('hello'), 'hello'.length, 'changed body');
+
+        sinon.assert.notCalled(changed);
+    });
+
+    test('refreshes when a dirty script block is removed', () => {
+        assert.strictEqual(lens(SCRIPT, true).command?.command, SETUP_COMMAND);
+        const changed = sinon.spy();
+        provider.onDidChangeCodeLenses(changed);
+        const plain = 'print("hello")\n';
+
+        fireChange(plain, 0, SCRIPT.length, plain);
+
+        sinon.assert.calledOnce(changed);
+        assert.deepStrictEqual(provider.provideCodeLenses(document(plain, true), {} as never), []);
     });
 
     test('offers setup for a newly typed block before detection or saving', () => {
