@@ -17,6 +17,11 @@ function errnoError(code: string): NodeJS.ErrnoException {
     return error;
 }
 
+function pathKey(filePath: string): string {
+    const normalizedPath = path.normalize(filePath);
+    return process.platform === 'win32' ? normalizedPath.toLowerCase() : normalizedPath;
+}
+
 suite('PythonEnvVariableManager.getEnvironmentVariables', () => {
     let sandbox: sinon.SinonSandbox;
     let parseEnvFileStub: sinon.SinonStub;
@@ -29,12 +34,13 @@ suite('PythonEnvVariableManager.getEnvironmentVariables', () => {
     const configuredFile = path.normalize(path.resolve('/config/custom.env'));
 
     function parsedPaths(): string[] {
-        return parseEnvFileStub.getCalls().map((c) => (c.args[0] as Uri).fsPath);
+        return parseEnvFileStub.getCalls().map((c) => pathKey((c.args[0] as Uri).fsPath));
     }
 
     function stubStat(results: Map<string, StatResult>): void {
+        const normalizedResults = new Map([...results].map(([p, result]) => [pathKey(p), result]));
         sandbox.stub(fsapi, 'stat').callsFake((async (p: string) => {
-            const result = results.get(path.normalize(p)) ?? errnoError('ENOENT');
+            const result = normalizedResults.get(pathKey(p)) ?? errnoError('ENOENT');
             if (result === 'file' || result === 'directory') {
                 return { isFile: () => result === 'file' } as fsapi.Stats;
             }
@@ -61,8 +67,7 @@ suite('PythonEnvVariableManager.getEnvironmentVariables', () => {
 
         parseEnvFileStub = sandbox.stub(envVarUtils, 'parseEnvFile');
         parseEnvFileStub.callsFake(async (uri: Uri) => {
-            const p = path.normalize(uri.fsPath);
-            if (p === projectEnvFile) {
+            if (pathKey(uri.fsPath) === pathKey(projectEnvFile)) {
                 return { PROJECT_VAR: 'project', SHARED: 'from-project' };
             }
             return { CONFIG_VAR: 'config', SHARED: 'from-config' };
@@ -101,7 +106,7 @@ suite('PythonEnvVariableManager.getEnvironmentVariables', () => {
 
         const env = await manager.getEnvironmentVariables(projectUri, undefined, { BASE: 'base' });
 
-        assert.deepStrictEqual(parsedPaths(), [projectEnvFile]);
+        assert.deepStrictEqual(parsedPaths(), [pathKey(projectEnvFile)]);
         assert.strictEqual(env.PROJECT_VAR, 'project');
         assert.strictEqual(env.CONFIG_VAR, undefined);
     });
@@ -117,7 +122,7 @@ suite('PythonEnvVariableManager.getEnvironmentVariables', () => {
 
         const env = await manager.getEnvironmentVariables(projectUri, undefined, { BASE: 'base' });
 
-        assert.deepStrictEqual(parsedPaths(), [configuredFile]);
+        assert.deepStrictEqual(parsedPaths(), [pathKey(configuredFile)]);
         assert.strictEqual(env.CONFIG_VAR, 'config');
         assert.strictEqual(env.SHARED, 'from-config');
     });
@@ -133,7 +138,7 @@ suite('PythonEnvVariableManager.getEnvironmentVariables', () => {
 
         const env = await manager.getEnvironmentVariables(projectUri, undefined, { BASE: 'base' });
 
-        assert.deepStrictEqual(parsedPaths(), [configuredFile, projectEnvFile]);
+        assert.deepStrictEqual(parsedPaths(), [pathKey(configuredFile), pathKey(projectEnvFile)]);
         assert.strictEqual(env.SHARED, 'from-project');
         assert.strictEqual(env.PROJECT_VAR, 'project');
     });
@@ -190,7 +195,7 @@ suite('PythonEnvVariableManager.getEnvironmentVariables', () => {
 
             const env = await manager.getEnvironmentVariables(projectUri, undefined, { BASE: 'base' });
 
-            assert.deepStrictEqual(parsedPaths(), [path.normalize(link)]);
+            assert.deepStrictEqual(parsedPaths(), [pathKey(link)]);
             assert.strictEqual(env.CONFIG_VAR, 'config');
         });
 
