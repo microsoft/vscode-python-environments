@@ -2,14 +2,24 @@ import * as tomljs from '@iarna/toml';
 import { valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import { l10n, LogOutputChannel, ProgressLocation, QuickInputButtons, QuickPickItem, Uri, window } from 'vscode';
+import {
+    CancellationToken,
+    l10n,
+    LogOutputChannel,
+    ProgressLocation,
+    QuickInputButtons,
+    QuickPickItem,
+    Uri,
+    window,
+} from 'vscode';
 import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
 import { traceInfo } from '../../common/logging';
-import { normalizePath } from '../../common/utils/pathUtils';
+import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
 import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
+import { throwIfCancelled } from '../../internal/pythonToolSupport';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { normalizePackageName } from '../common/packageUtils';
 import { Installable } from '../common/types';
@@ -69,11 +79,16 @@ export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
     return undefined;
 }
 
-async function tomlParse(fsPath: string, log?: LogOutputChannel): Promise<tomljs.JsonMap> {
+async function tomlParse(fsPath: string, log?: LogOutputChannel, strict = false): Promise<tomljs.JsonMap> {
     try {
         const content = await fse.readFile(fsPath, 'utf-8');
         return tomljs.parse(content);
     } catch (err) {
+        if (strict) {
+            throw new Error(
+                l10n.t('Could not read or parse {0}: {1}', fsPath, err instanceof Error ? err.message : String(err)),
+            );
+        }
         log?.error('Failed to parse `pyproject.toml`:', err);
     }
     return {};
@@ -263,6 +278,8 @@ export interface ProjectInstallableOptions {
      * Creation root used to prefer the pyproject.toml that owns the environment.
      */
     preferredRoot?: Uri;
+    token?: CancellationToken;
+    runHeadless?: boolean;
 }
 
 export async function getWorkspacePackagesToInstall(
@@ -309,168 +326,179 @@ export async function getProjectInstallable(
     const installable: Installable[] = [];
     let validationError: { message: string; fileUri: Uri } | undefined;
 
-    await withProgress(
-        {
-            location: ProgressLocation.Notification,
-            title: VenvManagerStrings.searchingDependencies,
-        },
-        async (_progress, token) => {
-            const results: Uri[] = (
-                await Promise.all([
-                    findFiles('**/*requirements*.txt', exclude, undefined, token),
-                    findFiles('*requirements*.txt', exclude, undefined, token),
-                    findFiles('**/requirements/*.txt', exclude, undefined, token),
-                    findFiles('**/pyproject.toml', exclude, undefined, token),
-                ])
-            ).flat();
+    const search = async (token?: CancellationToken) => {
+        throwIfCancelled(options?.token);
+        const results: Uri[] = (
+            await Promise.all([
+                findFiles('**/*requirements*.txt', exclude, undefined, token),
+                findFiles('*requirements*.txt', exclude, undefined, token),
+                findFiles('**/requirements/*.txt', exclude, undefined, token),
+                findFiles('**/pyproject.toml', exclude, undefined, token),
+            ])
+        ).flat();
 
-            // Deduplicate by fsPath
-            const uniqueResults = Array.from(new Map(results.map((uri) => [uri.fsPath, uri])).values());
+        // Deduplicate by fsPath
+        const uniqueResults = Array.from(new Map(results.map((uri) => [uri.fsPath, uri])).values());
 
-            const fsPaths = projects.map((p) => p.uri.fsPath);
-            // Compute depth relative to the owning project root so ordering reflects
-            // "shallower within the project", independent of where the project lives on disk.
-            const depthFromProject = (uri: Uri): number => {
-                const projectRoot = api.getPythonProject(uri)?.uri.fsPath;
-                if (!projectRoot) {
-                    return Number.MAX_SAFE_INTEGER;
-                }
-                const rel = path.relative(projectRoot, uri.fsPath);
-                if (!rel) {
-                    return 0;
-                }
-                return rel.split(path.sep).filter((segment) => segment.length > 0).length;
-            };
-            const filtered = uniqueResults
-                .filter((uri) => {
-                    const p = api.getPythonProject(uri)?.uri.fsPath;
-                    return p && fsPaths.includes(p);
-                })
-                .sort((a, b) => {
-                    // Sort by path depth relative to the project root (shallowest first) so
-                    // top-level files like requirements.txt appear before deeply nested ones.
-                    const depthA = depthFromProject(a);
-                    const depthB = depthFromProject(b);
-                    if (depthA !== depthB) {
-                        return depthA - depthB;
-                    }
-                    const pathA = normalizePath(a.fsPath);
-                    const pathB = normalizePath(b.fsPath);
-                    return pathA < pathB ? -1 : pathA > pathB ? 1 : 0;
-                });
-
-            // Parse all TOML files first (in parallel), keyed by fsPath, so the
-            // subsequent duplicate-detection pass can run sequentially and
-            // deterministically over the depth-sorted `filtered` list.
-            const parsedTomls = new Map<string, tomljs.JsonMap>();
-            await Promise.all(
-                filtered.map(async (uri) => {
-                    if (uri.fsPath.endsWith('.toml')) {
-                        const toml = await tomlParse(uri.fsPath);
-                        parsedTomls.set(uri.fsPath, toml);
-                    }
-                }),
-            );
-
-            const selectedTomls = new Map<string, Uri>();
-            const ambiguousProjectNames = new Set<string>();
-            if (options?.deduplicateProjectPackages) {
-                const tomlsByProjectName = new Map<string, Uri[]>();
-                for (const uri of filtered) {
-                    if (!uri.fsPath.endsWith('.toml')) {
-                        continue;
-                    }
-                    const toml = parsedTomls.get(uri.fsPath) ?? {};
-                    const projectName = getTomlProjectName(toml);
-                    if (!projectName || getTomlInstallable(toml, uri).length === 0) {
-                        continue;
-                    }
-                    const normalizedName = normalizePackageName(projectName);
-                    const candidates = tomlsByProjectName.get(normalizedName) ?? [];
-                    candidates.push(uri);
-                    tomlsByProjectName.set(normalizedName, candidates);
-                }
-
-                tomlsByProjectName.forEach((candidates, projectName) => {
-                    if (candidates.length === 1) {
-                        selectedTomls.set(projectName, candidates[0]);
-                        return;
-                    }
-
-                    const preferredRoot = options.preferredRoot?.fsPath;
-                    const preferredCandidates = preferredRoot
-                        ? candidates
-                              .filter((candidate) => {
-                                  const projectDir = path.dirname(candidate.fsPath);
-                                  const relative = path.relative(projectDir, preferredRoot);
-                                  return (
-                                      relative === '' ||
-                                      (relative !== '..' &&
-                                          !relative.startsWith(`..${path.sep}`) &&
-                                          !path.isAbsolute(relative))
-                                  );
-                              })
-                              .sort((a, b) => path.dirname(b.fsPath).length - path.dirname(a.fsPath).length)
-                        : [];
-
-                    if (preferredCandidates.length > 0) {
-                        selectedTomls.set(projectName, preferredCandidates[0]);
-                    } else {
-                        ambiguousProjectNames.add(projectName);
-                        traceInfo(
-                            `Skipping ambiguous editable installs for package "${projectName}" because no ` +
-                                'candidate contains the environment creation root.',
-                        );
-                    }
-                });
+        const fsPaths = projects.map((p) => p.uri.fsPath);
+        // Compute depth relative to the owning project root so ordering reflects
+        // "shallower within the project", independent of where the project lives on disk.
+        const depthFromProject = (uri: Uri): number => {
+            const projectRoot = api.getPythonProject(uri)?.uri.fsPath;
+            if (!projectRoot) {
+                return Number.MAX_SAFE_INTEGER;
             }
+            const rel = path.relative(projectRoot, uri.fsPath);
+            if (!rel) {
+                return 0;
+            }
+            return rel.split(path.sep).filter((segment) => segment.length > 0).length;
+        };
+        const filtered = uniqueResults
+            .filter((uri) => {
+                if (
+                    options?.runHeadless &&
+                    options.preferredRoot &&
+                    !isSameOrParentPath(options.preferredRoot.fsPath, uri.fsPath)
+                ) {
+                    return false;
+                }
+                const p = api.getPythonProject(uri)?.uri.fsPath;
+                return p && fsPaths.includes(p);
+            })
+            .sort((a, b) => {
+                // Sort by path depth relative to the project root (shallowest first) so
+                // top-level files like requirements.txt appear before deeply nested ones.
+                const depthA = depthFromProject(a);
+                const depthB = depthFromProject(b);
+                if (depthA !== depthB) {
+                    return depthA - depthB;
+                }
+                const pathA = normalizePath(a.fsPath);
+                const pathB = normalizePath(b.fsPath);
+                return pathA < pathB ? -1 : pathA > pathB ? 1 : 0;
+            });
 
-            for (const uri of filtered) {
+        // Parse all TOML files first (in parallel), keyed by fsPath, so the
+        // subsequent duplicate-detection pass can run sequentially and
+        // deterministically over the depth-sorted `filtered` list.
+        const parsedTomls = new Map<string, tomljs.JsonMap>();
+        await Promise.all(
+            filtered.map(async (uri) => {
                 if (uri.fsPath.endsWith('.toml')) {
-                    const toml = parsedTomls.get(uri.fsPath) ?? {};
-                    const tomlInstallables = getTomlInstallable(toml, uri);
-
-                    const projectName = getTomlProjectName(toml);
-                    if (options?.deduplicateProjectPackages && projectName && tomlInstallables.length > 0) {
-                        const normalizedName = normalizePackageName(projectName);
-                        const selected = selectedTomls.get(normalizedName);
-                        if (ambiguousProjectNames.has(normalizedName)) {
-                            continue;
-                        }
-                        if (selected && selected.fsPath !== uri.fsPath) {
-                            traceInfo(
-                                `Skipping duplicate project package "${projectName}" from ${uri.fsPath}; it is ` +
-                                    `already provided by ${selected.fsPath}.`,
-                            );
-                            continue;
-                        }
-                    }
-
-                    // Validate pyproject.toml (report only the first error found).
-                    if (!validationError) {
-                        const error = validatePyprojectToml(toml);
-                        if (error) {
-                            validationError = {
-                                message: error,
-                                fileUri: uri,
-                            };
-                        }
-                    }
-
-                    installable.push(...tomlInstallables);
-                } else {
-                    const name = path.basename(uri.fsPath);
-                    installable.push({
-                        name,
-                        uri,
-                        displayName: name,
-                        group: 'Requirements',
-                        args: ['-r', uri.fsPath],
-                    });
+                    const toml = await tomlParse(uri.fsPath, undefined, options?.runHeadless);
+                    parsedTomls.set(uri.fsPath, toml);
                 }
+            }),
+        );
+
+        const selectedTomls = new Map<string, Uri>();
+        const ambiguousProjectNames = new Set<string>();
+        if (options?.deduplicateProjectPackages) {
+            const tomlsByProjectName = new Map<string, Uri[]>();
+            for (const uri of filtered) {
+                if (!uri.fsPath.endsWith('.toml')) {
+                    continue;
+                }
+                const toml = parsedTomls.get(uri.fsPath) ?? {};
+                const projectName = getTomlProjectName(toml);
+                if (!projectName || getTomlInstallable(toml, uri).length === 0) {
+                    continue;
+                }
+                const normalizedName = normalizePackageName(projectName);
+                const candidates = tomlsByProjectName.get(normalizedName) ?? [];
+                candidates.push(uri);
+                tomlsByProjectName.set(normalizedName, candidates);
             }
-        },
-    );
+
+            tomlsByProjectName.forEach((candidates, projectName) => {
+                if (candidates.length === 1) {
+                    selectedTomls.set(projectName, candidates[0]);
+                    return;
+                }
+
+                const preferredRoot = options.preferredRoot?.fsPath;
+                const preferredCandidates = preferredRoot
+                    ? candidates
+                          .filter((candidate) => {
+                              const projectDir = path.dirname(candidate.fsPath);
+                              const relative = path.relative(projectDir, preferredRoot);
+                              return (
+                                  relative === '' ||
+                                  (relative !== '..' &&
+                                      !relative.startsWith(`..${path.sep}`) &&
+                                      !path.isAbsolute(relative))
+                              );
+                          })
+                          .sort((a, b) => path.dirname(b.fsPath).length - path.dirname(a.fsPath).length)
+                    : [];
+
+                if (preferredCandidates.length > 0) {
+                    selectedTomls.set(projectName, preferredCandidates[0]);
+                } else {
+                    ambiguousProjectNames.add(projectName);
+                    traceInfo(
+                        `Skipping ambiguous editable installs for package "${projectName}" because no ` +
+                            'candidate contains the environment creation root.',
+                    );
+                }
+            });
+        }
+
+        for (const uri of filtered) {
+            if (uri.fsPath.endsWith('.toml')) {
+                const toml = parsedTomls.get(uri.fsPath) ?? {};
+                const tomlInstallables = getTomlInstallable(toml, uri);
+
+                const projectName = getTomlProjectName(toml);
+                if (options?.deduplicateProjectPackages && projectName && tomlInstallables.length > 0) {
+                    const normalizedName = normalizePackageName(projectName);
+                    const selected = selectedTomls.get(normalizedName);
+                    if (ambiguousProjectNames.has(normalizedName)) {
+                        continue;
+                    }
+                    if (selected && selected.fsPath !== uri.fsPath) {
+                        traceInfo(
+                            `Skipping duplicate project package "${projectName}" from ${uri.fsPath}; it is ` +
+                                `already provided by ${selected.fsPath}.`,
+                        );
+                        continue;
+                    }
+                }
+
+                // Validate pyproject.toml (report only the first error found).
+                if (!validationError) {
+                    const error = validatePyprojectToml(toml);
+                    if (error) {
+                        validationError = {
+                            message: error,
+                            fileUri: uri,
+                        };
+                    }
+                }
+
+                installable.push(...tomlInstallables);
+            } else {
+                const name = path.basename(uri.fsPath);
+                installable.push({
+                    name,
+                    uri,
+                    displayName: name,
+                    group: 'Requirements',
+                    args: ['-r', uri.fsPath],
+                });
+            }
+        }
+        throwIfCancelled(options?.token);
+    };
+    if (options?.runHeadless) {
+        await search(options.token);
+    } else {
+        await withProgress(
+            { location: ProgressLocation.Notification, title: VenvManagerStrings.searchingDependencies },
+            (_progress, token) => search(token),
+        );
+    }
 
     return {
         installables: installable,

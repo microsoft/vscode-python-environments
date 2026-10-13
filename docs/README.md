@@ -734,9 +734,9 @@ const c: PackageManagementOptions = {
 #### `Pep440Version`
 
 Re-exported from `@renovatebot/pep440`. Represents a parsed PEP 440 version,
-returned by `getPackageAvailableVersions` and by a package manager's
-`getVersion`. Import it from `@vscode/python-environments` so your types match
-the API exactly.
+returned by `getPackageAvailableVersions` and by environment and package
+managers' `getVersion` methods. Import it from
+`@vscode/python-environments` so your types match the API exactly.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -1556,6 +1556,7 @@ trigger, as the specification.
 | `tooltip` | `string \| MarkdownString` | No | Hover text for the manager. |
 | `iconPath` | [`IconPath`](#iconpath) | No | Icon shown for the manager. |
 | `log` | `LogOutputChannel` | No | Output channel used for the manager's logs. |
+| `getVersion()` | `() => Promise<Pep440Version \| undefined>` | No | Returns the parsed PEP 440 version of the underlying environment management tool. Return `undefined` when the manager has no versioned tool or its version is unavailable. |
 | `getEnvironments(scope)` | `(scope: GetEnvironmentsScope) => Promise<PythonEnvironment[]>` | Yes | Returns the environments known for the scope. Called frequently by UI surfaces. |
 | `refresh(scope)` | `(scope: RefreshEnvironmentsScope) => Promise<void>` | Yes | Re-discovers environments for the scope. |
 | `set(scope, environment?)` | `(scope: SetEnvironmentScope, environment?: PythonEnvironment) => Promise<void>` | Yes | Sets or clears the active environment for the scope. Also called at startup to rehydrate persisted state. |
@@ -1575,6 +1576,10 @@ class MyEnvManager implements EnvironmentManager {
     readonly preferredPackageManagerId = 'ms-python.python:pip';
 
     constructor(private readonly api: PythonEnvironmentApi) {}
+
+    async getVersion(): Promise<Pep440Version | undefined> {
+        return getMyManagerVersion();
+    }
 
     async getEnvironments(
         scope: GetEnvironmentsScope,

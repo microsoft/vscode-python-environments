@@ -11,6 +11,13 @@ import { StopWatch } from '../../common/stopWatch';
 import { EventNames } from '../../common/telemetry/constants';
 import { classifyError, isTimeoutErrorType } from '../../common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import {
+    EnvironmentToolSupport,
+    PackageToolSupport,
+    pythonToolSupport,
+    supportsEnvironmentTools,
+    supportsPackageTools,
+} from '../../internal/pythonToolSupport';
 import type {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -48,6 +55,10 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         private readonly manager: EnvironmentManager,
     ) {}
 
+    public get tools(): EnvironmentToolSupport | undefined {
+        return supportsEnvironmentTools(this.manager) ? this.manager[pythonToolSupport] : undefined;
+    }
+
     public get name(): string {
         return this.manager.name;
     }
@@ -68,6 +79,10 @@ export class InternalEnvironmentManager implements EnvironmentManager {
     }
     public get log(): LogOutputChannel | undefined {
         return this.manager.log;
+    }
+
+    public getVersion(): Promise<Pep440Version | undefined> {
+        return this.manager.getVersion ? this.manager.getVersion() : Promise.resolve(undefined);
     }
 
     public get supportsCreate(): boolean {
@@ -249,6 +264,10 @@ export class InternalPackageManager implements PackageManager {
                 );
             };
         }
+    }
+
+    public get tools(): PackageToolSupport | undefined {
+        return supportsPackageTools(this.manager) ? this.manager[pythonToolSupport] : undefined;
     }
 
     public get name(): string {
