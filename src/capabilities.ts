@@ -12,35 +12,35 @@ import type {
     PythonProject,
 } from './types.js';
 
-/** Environment capability keys. Advertised maps must include a check for each key. */
+/** Capabilities that an environment manager can provide. */
 export const EnvironmentCapability = {
-    /** List/rediscover known environments for a scope. Required getEnvironments and refresh operations. */
+    /** Discover the environments available within a scope. */
     List: 'environments.list',
-    /** Resolve an interpreter or environment URI. Required resolve operation; pass the target URI as scope. */
+    /** Resolve a URI to its corresponding Python environment. */
     Resolve: 'environments.resolve',
-    /** Read the selected environment for a scope. Required get operation; no selection is valid. */
+    /** Get the Python environment selected for a scope. */
     GetSelected: 'environments.getSelected',
-    /** Set or clear the selected environment for a scope. Required set operation. */
+    /** Select or clear the Python environment for a scope. */
     SetSelected: 'environments.setSelected',
-    /** Create an environment. */
+    /** Create a new Python environment. */
     Create: 'environments.create',
-    /** Delete an environment. */
+    /** Remove an existing Python environment. */
     Remove: 'environments.remove',
 } as const;
 
-/** Package capability keys. Advertised maps must include a check for each key. */
+/** Capabilities that a package manager can provide. */
 export const PackageCapability = {
-    /** List/refresh installed packages in an environment. Required getPackages and refresh operations; an empty result is valid. */
+    /** List the packages installed in an environment. */
     List: 'packages.list',
-    /** Install the requested packages by honoring the install array. */
+    /** Install packages into an environment. */
     Install: 'packages.install',
-    /** Uninstall the requested packages by honoring the uninstall array. */
+    /** Uninstall packages from an environment. */
     Uninstall: 'packages.uninstall',
-    /** Honor upgrade for installation, without guaranteeing identical solver behavior. */
+    /** Upgrade packages in an environment. */
     Upgrade: 'packages.upgrade',
-    /** List direct package names on a best-effort basis, not exact user installation intent. */
+    /** List the packages that are direct dependencies of an environment. */
     ListDirect: 'packages.listDirect',
-    /** Look up available package versions. */
+    /** List the versions available for a package. */
     ListAvailableVersions: 'packages.listAvailableVersions',
 } as const;
 
