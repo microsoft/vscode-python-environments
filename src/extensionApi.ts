@@ -1,4 +1,5 @@
 import { Disposable, Event, EventEmitter, l10n, TaskExecution, Terminal, Uri } from 'vscode';
+import * as path from 'path';
 import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCapability, Support } from './capabilities';
 import { isKnownManagerCapability } from './capabilities';
 import { explain as parsePep440Version } from '@renovatebot/pep440';
@@ -203,7 +204,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         const registeredProject = project && this.projectManager.getProjects().find(
             ({ uri }) => uri.scheme === project.uri.scheme && (
                 uri.scheme === 'file'
-                    ? normalizePath(uri.fsPath) === normalizePath(project.uri.fsPath)
+                    ? normalizePath(path.resolve(uri.fsPath)) === normalizePath(path.resolve(project.uri.fsPath))
                     : uri.toString() === project.uri.toString()
             ),
         );

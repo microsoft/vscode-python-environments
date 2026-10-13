@@ -312,6 +312,17 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         await clock.tickAsync(0);
     });
 
+    test('file project matching resolves equivalent paths before routing', async () => {
+        const create = registerPackages(true);
+        for (const suffix of ['/', '/./']) {
+            const equivalentProject = { ...project, uri: project.uri.with({ path: `${project.uri.path}${suffix}` }) };
+            assert.strictEqual(await api.getPackageManagerCapability(environment, PackageCapability.List, equivalentProject), scopedSupport);
+        }
+        assert.ok(create?.calledOnceWithExactly(project));
+        assert.ok(scopedProbe.calledTwice);
+        assert.ok(scopedProbe.alwaysCalledWithExactly({ environment, project }));
+    });
+
     test('an untracked explicit project never probes a root or a containing project provider', async () => {
         projects = [];
         const create = registerPackages(true);
