@@ -98,12 +98,15 @@ suite('PipPackageManager', () => {
             manager.getPackageAvailableVersions(environment, 'requests'),
             isPackageVersionLookupNotSupportedError,
         );
-        const support = await manager.capabilities[PackageCapability.ListAvailableVersions]({ environment });
+        const support = await manager.capabilities[PackageCapability.FetchAvailableVersions]({ environment });
         assert.strictEqual(support.supported, false);
         if (!support.supported) {
-            assert.strictEqual(support.reason, 'Package version lookup requires pip 21.2 or newer; the environment has pip 20.3.4.');
+            assert.strictEqual(
+                support.reason,
+                'Package version lookup requires pip 21.2 or newer; the environment has pip 20.3.4.',
+            );
         }
-        assert.strictEqual((await manager.capabilities[PackageCapability.ListAvailableVersions]({})).supported, false);
+        assert.strictEqual((await manager.capabilities[PackageCapability.FetchAvailableVersions]({})).supported, false);
     });
 
     test('propagates version lookup command failures for supported pip', async () => {
@@ -119,7 +122,7 @@ suite('PipPackageManager', () => {
             manager.getPackageAvailableVersions(environment, 'requests'),
             (error: unknown) => error === lookupError,
         );
-        assert.deepStrictEqual(await manager.capabilities[PackageCapability.ListAvailableVersions]({ environment }), {
+        assert.deepStrictEqual(await manager.capabilities[PackageCapability.FetchAvailableVersions]({ environment }), {
             supported: true,
         });
     });
@@ -136,7 +139,7 @@ suite('PipPackageManager', () => {
             (error: unknown) => error === versionError,
         );
         await assert.rejects(
-            manager.capabilities[PackageCapability.ListAvailableVersions]({ environment }),
+            manager.capabilities[PackageCapability.FetchAvailableVersions]({ environment }),
             (error: unknown) => error === versionError,
         );
     });
@@ -211,9 +214,7 @@ suite('PipPackageManager', () => {
         const shouldUseUv = sinon.stub(helpers, 'shouldUseUv').resolves(true);
         const getUvExecutable = sinon.stub(helpers, 'getUvExecutable').resolves('workspace-uv');
         const runPython = sinon.stub(helpers, 'runPython');
-        const runUV = sinon
-            .stub(helpers, 'runUV')
-            .resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
+        const runUV = sinon.stub(helpers, 'runUV').resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
 
         const versions = await manager.getPackageAvailableVersions(environment, 'requests');
 
@@ -226,9 +227,7 @@ suite('PipPackageManager', () => {
                 undefined,
             ),
         );
-        assert.ok(
-            getUvExecutable.calledOnceWithExactly(manager.log, environment.environmentPath.fsPath, undefined),
-        );
+        assert.ok(getUvExecutable.calledOnceWithExactly(manager.log, environment.environmentPath.fsPath, undefined));
         assert.strictEqual(runUV.firstCall.args[5], 'workspace-uv');
         assert.deepStrictEqual(
             versions.map((version) => version.public),
@@ -243,26 +242,27 @@ suite('PipPackageManager', () => {
             version: '2.7.18',
             managerId: 'ms-python.python:venv',
         });
-        const manager = new PipPackageManager(
-            {} as PythonEnvironmentApi,
-            {} as LogOutputChannel,
-            {} as VenvManager,
-        );
+        const manager = new PipPackageManager({} as PythonEnvironmentApi, {} as LogOutputChannel, {} as VenvManager);
 
         for (const capability of [PackageCapability.Install, PackageCapability.Uninstall, PackageCapability.Upgrade]) {
             assert.deepStrictEqual(await manager.capabilities[capability]({ environment }), {
-                supported: false, reason: 'Python 2.* is not supported (deprecated)',
+                supported: false,
+                reason: 'Python 2.* is not supported (deprecated)',
             });
-            assert.deepStrictEqual(await manager.capabilities[capability]({
-                environment: { ...environment, version: '3.12.0' },
-            }), { supported: true });
+            assert.deepStrictEqual(
+                await manager.capabilities[capability]({
+                    environment: { ...environment, version: '3.12.0' },
+                }),
+                { supported: true },
+            );
             assert.deepStrictEqual(await manager.capabilities[capability]({}), { supported: true });
         }
-        for (const options of [{ install: ['flask'] }, { uninstall: ['flask'] }, { install: ['flask'], upgrade: true }]) {
-            await assert.rejects(
-                manager.manage(environment, options),
-                /Python 2\.\* is not supported \(deprecated\)/,
-            );
+        for (const options of [
+            { install: ['flask'] },
+            { uninstall: ['flask'] },
+            { install: ['flask'], upgrade: true },
+        ]) {
+            await assert.rejects(manager.manage(environment, options), /Python 2\.\* is not supported \(deprecated\)/);
         }
         assert.strictEqual(shouldUseUvStub.callCount, 0);
     });

@@ -9,10 +9,10 @@ import { EnvironmentManager, PythonEnvironmentApi, PythonProject } from '../../a
 import {
     CapabilityContext,
     resolveEnvironmentManagerCapability as environmentCapability,
-    resolvePackageManagerCapability as packageCapability,
-    Support,
     EnvironmentCapability,
+    resolvePackageManagerCapability as packageCapability,
     PackageCapability,
+    Support,
 } from '../../capabilities';
 import * as metadata from '../../common/inlineScript/metadata';
 import * as workspaceApis from '../../common/workspace.apis';
@@ -56,9 +56,13 @@ suite('Built-in manager capabilities', () => {
 
     test('system-owned local environments report manager-level removal support without classifying the installation', async () => {
         const manager = new SysPythonManager({} as NativePythonFinder, api, log);
-        const environment = createMockPythonEnvironment({ envPath: path.join(root, '.venv'), managerId: 'test:system' });
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(root, '.venv'),
+            managerId: 'test:system',
+        });
         assert.deepStrictEqual(await environmentCapability(manager, EnvironmentCapability.Remove, { environment }), {
-            supported: false, reason: l10n.t('This environment manager does not support removing environments.'),
+            supported: false,
+            reason: l10n.t('This environment manager does not support removing environments.'),
         });
     });
 
@@ -73,12 +77,18 @@ suite('Built-in manager capabilities', () => {
             sinon.stub(workspaceApis, 'onDidRenameFiles').returns(new Disposable(() => {}));
             stateUpdate = sinon.stub().resolves();
             manager = new InlineScriptEnvManager(
-                {} as NativePythonFinder, api, {} as EnvironmentManager, Uri.file(path.join(root, 'storage')), log,
+                {} as NativePythonFinder,
+                api,
+                {} as EnvironmentManager,
+                Uri.file(path.join(root, 'storage')),
+                log,
                 { get: sinon.stub().returns(undefined), update: stateUpdate, keys: () => [] } as Memento,
             );
             disposables.push(manager);
             readMetadata = sinon.stub(metadata, 'readInlineScriptMetadataFromFile').resolves({
-                requiresPython: '>=3.11', dependencies: ['requests'], range: { start: 0, end: 40 },
+                requiresPython: '>=3.11',
+                dependencies: ['requests'],
+                range: { start: 0, end: 40 },
             });
         });
 
@@ -100,7 +110,12 @@ suite('Built-in manager capabilities', () => {
 
         test('rejects unsupported scopes before reading metadata', async () => {
             const scopes: CapabilityContext['scope'][] = [
-                undefined, 'global', 'all', [], [script, script], Uri.parse('untitled:script.py'),
+                undefined,
+                'global',
+                'all',
+                [],
+                [script, script],
+                Uri.parse('untitled:script.py'),
             ];
             for (const scope of scopes) {
                 assertUnsupported(await environmentCapability(manager, EnvironmentCapability.Create, { scope }));
@@ -125,7 +140,12 @@ suite('Built-in manager capabilities', () => {
 
     suite('Poetry project context', () => {
         let manager: PoetryPackageManager;
-        const projectCapabilities = [PackageCapability.List, PackageCapability.ListDirect, PackageCapability.Install, PackageCapability.Uninstall] as const;
+        const projectCapabilities = [
+            PackageCapability.List,
+            PackageCapability.ListDirect,
+            PackageCapability.Install,
+            PackageCapability.Uninstall,
+        ] as const;
 
         setup(() => {
             manager = new PoetryPackageManager(api, log, {} as PoetryManager);

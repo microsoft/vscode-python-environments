@@ -23,11 +23,12 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { Capabilities, PackageManagerCapability, supportedCapability, PackageCapability } from '../../capabilities';
+import { Capabilities, PackageCapability, PackageManagerCapability, supportedCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
 
+import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import {
@@ -39,7 +40,6 @@ import {
     CondaVersionCommand,
 } from './commands/index';
 import { getCommonCondaPackagesToInstall } from './condaUtils';
-import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 
 export class CondaPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
@@ -47,7 +47,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
         [PackageCapability.Install]: supportedCapability,
         [PackageCapability.Uninstall]: supportedCapability,
         [PackageCapability.Upgrade]: supportedCapability,
-        [PackageCapability.ListAvailableVersions]: supportedCapability,
+        [PackageCapability.FetchAvailableVersions]: supportedCapability,
         [PackageCapability.ListDirect]: async () => ({
             supported: false,
             reason: l10n.t('Conda does not classify direct and transitive packages.'),
@@ -250,10 +250,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async getPackageAvailableVersions(
-        _environment: PythonEnvironment,
-        packageName: string,
-    ): Promise<Pep440Version[]> {
+    async getPackageAvailableVersions(_environment: PythonEnvironment, packageName: string): Promise<Pep440Version[]> {
         const availableVersionsCmd = new CondaAvailableVersionsCommand({
             pythonExecutable: 'conda',
             log: this.log,

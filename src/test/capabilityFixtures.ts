@@ -1,7 +1,14 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import { Capabilities, EnvironmentManagerCapability, PackageManagerCapability, supportedCapability, EnvironmentCapability, PackageCapability } from '../capabilities';
+import {
+    Capabilities,
+    EnvironmentCapability,
+    EnvironmentManagerCapability,
+    PackageCapability,
+    PackageManagerCapability,
+    supportedCapability,
+} from '../capabilities';
 
 export const allSupportedEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
     [EnvironmentCapability.List]: supportedCapability,
@@ -18,5 +25,5 @@ export const allSupportedPackageCapabilities: Capabilities<PackageManagerCapabil
     [PackageCapability.Uninstall]: supportedCapability,
     [PackageCapability.Upgrade]: supportedCapability,
     [PackageCapability.ListDirect]: supportedCapability,
-    [PackageCapability.ListAvailableVersions]: supportedCapability,
+    [PackageCapability.FetchAvailableVersions]: supportedCapability,
 };

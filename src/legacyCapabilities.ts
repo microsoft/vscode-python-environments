@@ -30,7 +30,7 @@ export async function getLegacyPackageManagerCapability(
             return getMethodSupport(packageManager.manage);
         case PackageCapability.ListDirect:
             return getMethodSupport(packageManager.getDirectPackageNames);
-        case PackageCapability.ListAvailableVersions:
+        case PackageCapability.FetchAvailableVersions:
             return getMethodSupport(packageManager.getPackageAvailableVersions);
         default:
             return getMethodSupport();

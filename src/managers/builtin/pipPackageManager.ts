@@ -17,15 +17,21 @@ import {
     DidChangePackagesEventArgs,
     GetPackagesOptions,
     IconPath,
+    isPackageVersionLookupNotSupportedError,
     Package,
     PackageManagementOptions,
     PackageManager,
-    isPackageVersionLookupNotSupportedError,
     PackageVersionLookupNotSupportedError,
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
-import { Capabilities, CapabilityCheck, PackageManagerCapability, supportedCapability, PackageCapability } from '../../capabilities';
+import {
+    Capabilities,
+    CapabilityCheck,
+    PackageCapability,
+    PackageManagerCapability,
+    supportedCapability,
+} from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -65,9 +71,12 @@ export class PipPackageManager implements PackageManager, Disposable {
         [PackageCapability.Install]: this.packageManagementCapability,
         [PackageCapability.Uninstall]: this.packageManagementCapability,
         [PackageCapability.Upgrade]: this.packageManagementCapability,
-        [PackageCapability.ListAvailableVersions]: async ({ environment }) => {
+        [PackageCapability.FetchAvailableVersions]: async ({ environment }) => {
             if (!environment) {
-                return { supported: false, reason: l10n.t('An environment is required to check package version lookup support.') };
+                return {
+                    supported: false,
+                    reason: l10n.t('An environment is required to check package version lookup support.'),
+                };
             }
             try {
                 await this.getPackageAvailableVersionsCommand(environment);
@@ -350,7 +359,10 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
         if (compare(version.public, '21.2.0') < 0) {
             throw new PackageVersionLookupNotSupportedError(
-                l10n.t('Package version lookup requires pip 21.2 or newer; the environment has pip {0}.', version.public),
+                l10n.t(
+                    'Package version lookup requires pip 21.2 or newer; the environment has pip {0}.',
+                    version.public,
+                ),
             );
         }
         if (compare(version.public, '25.1') >= 0) {

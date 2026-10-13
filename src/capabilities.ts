@@ -39,9 +39,9 @@ export const PackageCapability = {
     /** Upgrade packages in an environment. */
     Upgrade: 'packages.upgrade',
     /** List the packages that are direct dependencies of an environment. */
-    ListDirect: 'packages.listDirect',
+    ListDirect: 'packages.list.direct',
     /** List the versions available for a package. */
-    ListAvailableVersions: 'packages.listAvailableVersions',
+    FetchAvailableVersions: 'packages.fetchversions',
 } as const;
 
 /** Environment capability keys for manager advertisements. */
