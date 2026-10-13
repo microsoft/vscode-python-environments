@@ -81,6 +81,27 @@ Thank you for your interest in contributing to the Python Environments extension
 ### Testing
 Run unit tests with the different configurations in the "Run and Debug" panel
 
+#### Linux CI failure diagnostics
+
+Failed Linux smoke, E2E, and integration test launches upload a diagnostic artifact
+named for the suite, OS, Python version, and run attempt. Artifacts are retained for
+seven days and contain:
+
+- `launcher.log`: test-launcher output, including the downloaded VS Code version
+  and verbose VS Code startup output.
+- `xvfb.log`: X server stderr, kept separately from test failures.
+- `vscode/`: VS Code main, renderer, and extension-host logs, when startup reaches
+  those processes.
+- `test-runner-started.json`: written when the extension-host test runner reaches
+  its global setup, before loading test suites; includes the VS Code version and
+  extension-host arguments. If absent, the failure occurred before this marker
+  could be written, not necessarily inside a test.
+
+The shared [Linux test action](.github/actions/run-linux-tests/action.yml) enables
+these diagnostics via `VSCODE_TEST_DIAGNOSTICS_DIR`. Local runs remain unchanged
+unless that variable is set to an existing directory. Diagnostics do not add
+retries or suppress test failures.
+
 ## Contributor License Agreement (CLA)
 
 This project requires contributors to sign a Contributor License Agreement (CLA). When you submit a pull request, a CLA bot will automatically check if you need to provide a CLA and guide you through the process. You only need to do this once across all Microsoft repositories.

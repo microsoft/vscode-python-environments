@@ -412,6 +412,12 @@ export interface EnvironmentManager {
     readonly log?: LogOutputChannel;
 
     /**
+     * Returns the version of the underlying environment management tool.
+     * @returns A promise that resolves to a {@link Pep440Version} object, or `undefined` if not available.
+     */
+    getVersion?(): Promise<Pep440Version | undefined>;
+
+    /**
      * The quick create details for the environment manager. Having this method also enables the quick create feature
      * for the environment manager. Should Implement {@link EnvironmentManager.create} to support quick create.
      */

@@ -1,7 +1,7 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { explain as parsePep440Version } from '@renovatebot/pep440';
 import { VersionCommand, type BaseExecuteArgs } from '../../base/commands/index';
-import { runCondaExecutable } from '../condaUtils';
+import { runConda } from '../condaUtils';
 
 /**
  * Conda version command.
@@ -14,7 +14,7 @@ export class CondaVersionCommand extends VersionCommand {
     }
 
     async execute(executeArgs?: BaseExecuteArgs): Promise<Pep440Version | undefined> {
-        const output = await runCondaExecutable(this.buildCommand(), this.log, executeArgs?.cancellationToken);
+        const output = await runConda(this.buildCommand(), this.log, executeArgs?.cancellationToken);
 
         // "conda X.Y.Z"
         const match = output.match(/conda\s+(\d+\.\d+(?:\.\d+)*)/i);

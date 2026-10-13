@@ -1740,6 +1740,95 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
         disposable.dispose();
     });
 
+    test('should apply corrected defaultInterpreterPath while the initial warning remains unresolved', async () => {
+        let configChangeCallback: ((e: ConfigurationChangeEvent) => void) | undefined;
+        sandbox.stub(workspaceApis, 'onDidChangeConfiguration').callsFake((callback) => {
+            configChangeCallback = callback;
+            return { dispose: () => {} };
+        });
+
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+
+        const missingInterpreter = path.join(testUri.fsPath, 'missing', 'python');
+        const correctedInterpreter = path.join(testUri.fsPath, 'environment-b', 'python');
+        let configuredInterpreter = missingInterpreter;
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake(
+            (section: string, key: string, scope?: Uri) => {
+                if (
+                    scope?.fsPath === testUri.fsPath &&
+                    section === 'python' &&
+                    key === 'defaultInterpreterPath'
+                ) {
+                    return configuredInterpreter;
+                }
+                return undefined;
+            },
+        );
+
+        mockNativeFinder.resolve.callsFake(async (interpreterPath: string) => {
+            if (interpreterPath === correctedInterpreter) {
+                return {
+                    executable: correctedInterpreter,
+                    version: '3.12.0',
+                    prefix: path.dirname(correctedInterpreter),
+                };
+            }
+            throw new Error('Interpreter not found');
+        });
+        mockApi.resolveEnvironment.resolves({
+            ...mockVenvEnv,
+            envId: { id: 'environment-b', managerId: 'ms-python.python:system' },
+            execInfo: { run: { executable: correctedInterpreter } },
+        });
+
+        const warningPending = new Promise<undefined>(() => {});
+        const showWarnStub = sandbox.stub(windowApis, 'showWarningMessage').returns(warningPending);
+        const clock = sandbox.useFakeTimers();
+
+        const setupCompletion = Promise.race([
+            applyInitialEnvironmentSelection(
+                mockEnvManagers as unknown as EnvironmentManagers,
+                mockProjectManager as unknown as PythonProjectManager,
+                mockNativeFinder as unknown as NativePythonFinder,
+                mockApi as unknown as PythonEnvironmentApi,
+            ).then(() => true),
+            new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1_000)),
+        ]);
+        await clock.tickAsync(1_000);
+        const setupCompleted = await setupCompletion;
+
+        assert.strictEqual(setupCompleted, true, 'Initial selection should not wait for the warning response');
+        assert.ok(showWarnStub.calledOnce, 'The unresolved interpreter warning should still be shown');
+
+        const disposable = registerInterpreterSettingsChangeListener(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+        assert.ok(configChangeCallback, 'Config change callback should be registered after initial selection');
+
+        configuredInterpreter = correctedInterpreter;
+        mockEnvManagers.setEnvironment.resetHistory();
+
+        await configChangeCallback({
+            affectsConfiguration: (section: string) => section === 'python.defaultInterpreterPath',
+        });
+
+        assert.ok(mockEnvManagers.setEnvironment.calledOnce, 'The corrected interpreter should be selected');
+        const selectedScope = mockEnvManagers.setEnvironment.firstCall.args[0];
+        assert.ok(selectedScope && !Array.isArray(selectedScope), 'The workspace folder should be selected');
+        assert.strictEqual(selectedScope.fsPath, testUri.fsPath);
+        assert.strictEqual(
+            mockEnvManagers.setEnvironment.firstCall.args[1]?.execInfo?.run.executable,
+            correctedInterpreter,
+        );
+        assert.ok(showWarnStub.calledOnce, 'The pending warning should not be duplicated');
+
+        disposable.dispose();
+    });
+
     test('should re-run priority chain when python-envs.defaultEnvManager changes', async () => {
         let configChangeCallback: ((e: ConfigurationChangeEvent) => void) | undefined;
         sandbox.stub(workspaceApis, 'onDidChangeConfiguration').callsFake((callback) => {
