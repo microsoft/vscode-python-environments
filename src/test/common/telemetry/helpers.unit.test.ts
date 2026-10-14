@@ -2,47 +2,28 @@ import assert from 'node:assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../../api';
-import {
-    CONDA_MANAGER_ID,
-    DEFAULT_PACKAGE_MANAGER_ID,
-    HATCH_MANAGER_ID,
-    INLINE_SCRIPT_MANAGER_ID,
-    PIPENV_MANAGER_ID,
-    PIXI_MANAGER_ID,
-    POETRY_MANAGER_ID,
-    PYENV_MANAGER_ID,
-    SYSTEM_MANAGER_ID,
-    VENV_MANAGER_ID,
-} from '../../../common/constants';
 import { EventNames } from '../../../common/telemetry/constants';
-import { getKnownManagerId, sendProjectStructureTelemetry } from '../../../common/telemetry/helpers';
+import { getTelemetryManagerId, sendProjectStructureTelemetry } from '../../../common/telemetry/helpers';
 import * as sender from '../../../common/telemetry/sender';
 import * as workspaceApis from '../../../common/workspace.apis';
 import type { EnvironmentManagers } from '../../../features/envManagers';
 import type { PythonProjectManager } from '../../../features/projectManager';
 
 suite('Telemetry Helpers', () => {
-    suite('getKnownManagerId', () => {
-        test('returns known manager IDs unchanged', () => {
-            for (const managerId of [
-                CONDA_MANAGER_ID,
-                DEFAULT_PACKAGE_MANAGER_ID,
-                HATCH_MANAGER_ID,
-                INLINE_SCRIPT_MANAGER_ID,
-                PIPENV_MANAGER_ID,
-                PIXI_MANAGER_ID,
-                POETRY_MANAGER_ID,
-                PYENV_MANAGER_ID,
-                SYSTEM_MANAGER_ID,
-                VENV_MANAGER_ID,
-            ]) {
-                assert.strictEqual(getKnownManagerId(managerId), managerId);
-            }
+    suite('getTelemetryManagerId', () => {
+        test('returns the full deterministic SHA-256 digest for every manager ID', () => {
+            assert.strictEqual(
+                getTelemetryManagerId('ms-python.python:venv'),
+                'c3ac61f81b7983a1b2d9f68d1758093845e42254531824ce6e008aab743284de',
+            );
+            assert.strictEqual(
+                getTelemetryManagerId('third-party:manager'),
+                '02c9232e62766f581e69792f5853a77b9bae634b9f4f1c428bc93c6df5b96a5c',
+            );
         });
 
-        test('returns undefined sentinel for missing and unknown manager IDs', () => {
-            assert.strictEqual(getKnownManagerId(undefined), 'undefined');
-            assert.strictEqual(getKnownManagerId('third-party:manager'), 'undefined');
+        test('returns undefined sentinel only when the manager ID is missing', () => {
+            assert.strictEqual(getTelemetryManagerId(undefined), 'undefined');
         });
     });
 

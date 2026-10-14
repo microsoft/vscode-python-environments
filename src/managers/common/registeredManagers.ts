@@ -15,7 +15,7 @@ import { traceWarn } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
 import { EventNames } from '../../common/telemetry/constants';
 import { classifyError, isTimeoutErrorType } from '../../common/telemetry/errorClassifier';
-import { getKnownManagerId } from '../../common/telemetry/helpers';
+import { getTelemetryManagerId } from '../../common/telemetry/helpers';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import {
     EnvironmentToolSupport,
@@ -144,7 +144,7 @@ export class InternalEnvironmentManager implements EnvironmentManager {
             const envs = await this.manager.getEnvironments('all').catch(() => []);
             const duration = sw.elapsedTime;
             sendTelemetryEvent(EventNames.ENVIRONMENT_DISCOVERY, duration, {
-                managerId: getKnownManagerId(this.id),
+                managerId: getTelemetryManagerId(this.id),
                 result: 'success',
                 envCount: envs.length,
             });
@@ -163,7 +163,7 @@ export class InternalEnvironmentManager implements EnvironmentManager {
                 EventNames.ENVIRONMENT_DISCOVERY,
                 duration,
                 {
-                    managerId: getKnownManagerId(this.id),
+                    managerId: getTelemetryManagerId(this.id),
                     result: errorType === 'canceled' || isTimeoutErrorType(errorType) ? 'timeout' : 'error',
                     errorType,
                 },
@@ -324,21 +324,21 @@ export class InternalPackageManager implements PackageManager {
         try {
             await this.manager.manage(environment, options);
             sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, stopWatch.elapsedTime, {
-                managerId: getKnownManagerId(this.id),
+                managerId: getTelemetryManagerId(this.id),
                 result: 'success',
                 triggerSource,
             });
         } catch (error) {
             if (error instanceof CancellationError) {
                 sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, stopWatch.elapsedTime, {
-                    managerId: getKnownManagerId(this.id),
+                    managerId: getTelemetryManagerId(this.id),
                     result: 'cancelled',
                     triggerSource,
                 });
                 throw error;
             }
             sendTelemetryEvent(EventNames.PACKAGE_MANAGEMENT, stopWatch.elapsedTime, {
-                managerId: getKnownManagerId(this.id),
+                managerId: getTelemetryManagerId(this.id),
                 result: 'error',
                 errorType: error instanceof Error ? error.name : 'unknown',
                 triggerSource,

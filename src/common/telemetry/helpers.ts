@@ -1,45 +1,21 @@
+import { createHash } from 'crypto';
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../../features/settings/settingHelpers';
 import type { EnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import { getUvEnvironments } from '../../managers/builtin/uvEnvironments';
-import {
-    CONDA_MANAGER_ID,
-    DEFAULT_PACKAGE_MANAGER_ID,
-    HATCH_MANAGER_ID,
-    INLINE_SCRIPT_MANAGER_ID,
-    ISSUES_URL,
-    PIPENV_MANAGER_ID,
-    PIXI_MANAGER_ID,
-    POETRY_MANAGER_ID,
-    PYENV_MANAGER_ID,
-    SYSTEM_MANAGER_ID,
-    VENV_MANAGER_ID,
-} from '../constants';
+import { ISSUES_URL } from '../constants';
 import { traceInfo, traceVerbose, traceWarn } from '../logging';
 import { getWorkspaceFolders } from '../workspace.apis';
 import { EventNames } from './constants';
 import { sendTelemetryEvent } from './sender';
 
-const knownManagerIds = new Set<string>([
-    CONDA_MANAGER_ID,
-    DEFAULT_PACKAGE_MANAGER_ID,
-    HATCH_MANAGER_ID,
-    INLINE_SCRIPT_MANAGER_ID,
-    PIPENV_MANAGER_ID,
-    PIXI_MANAGER_ID,
-    POETRY_MANAGER_ID,
-    PYENV_MANAGER_ID,
-    SYSTEM_MANAGER_ID,
-    VENV_MANAGER_ID,
-]);
-
 /**
- * Returns an allowlisted manager ID for telemetry, or the "undefined" sentinel.
- * @param managerId Manager ID to validate.
- * @returns The manager ID when known; otherwise "undefined".
+ * Returns a deterministic SHA-256 manager ID for telemetry, or the "undefined" sentinel.
+ * @param managerId Manager ID to hash.
+ * @returns The full lowercase hexadecimal SHA-256 digest, or "undefined" when no ID is available.
  */
-export function getKnownManagerId(managerId: string | undefined): string {
-    return managerId !== undefined && knownManagerIds.has(managerId) ? managerId : 'undefined';
+export function getTelemetryManagerId(managerId: string | undefined): string {
+    return managerId === undefined ? 'undefined' : createHash('sha256').update(managerId, 'utf8').digest('hex');
 }
 
 /**
@@ -70,13 +46,13 @@ export function sendManagerSelectionTelemetry(pm: PythonProjectManager) {
 
     ems.forEach((em) => {
         sendTelemetryEvent(EventNames.ENVIRONMENT_MANAGER_SELECTED, undefined, {
-            managerId: getKnownManagerId(em),
+            managerId: getTelemetryManagerId(em),
         });
     });
 
     ps.forEach((pkg) => {
         sendTelemetryEvent(EventNames.PACKAGE_MANAGER_SELECTED, undefined, {
-            managerId: getKnownManagerId(pkg),
+            managerId: getTelemetryManagerId(pkg),
         });
     });
 }

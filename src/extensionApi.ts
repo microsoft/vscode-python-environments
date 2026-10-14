@@ -4,7 +4,7 @@ import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCap
 import { isKnownManagerCapability } from './capabilities';
 import { explain as parsePep440Version } from '@renovatebot/pep440';
 import { EventNames } from './common/telemetry/constants';
-import { getKnownManagerId } from './common/telemetry/helpers';
+import { getTelemetryManagerId } from './common/telemetry/helpers';
 import { sendTelemetryEvent } from './common/telemetry/sender';
 import type {
     CreateEnvironmentOptions,
@@ -248,7 +248,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             void this.getManagerVersionForTelemetryWithTimeout(query, CAPABILITY_TELEMETRY_VERSION_TIMEOUT_MS)
                 .then((managerVersion) => {
                     sendTelemetryEvent(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
-                        managerId: getKnownManagerId(manager?.id),
+                        managerId: getTelemetryManagerId(manager?.id),
                         managerKind: query.kind,
                         managerVersion,
                         capability: isKnownManagerCapability(capability) ? capability : 'unknown',

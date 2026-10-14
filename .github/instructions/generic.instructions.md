@@ -16,8 +16,8 @@ Provide project context and coding guidelines that AI should follow when generat
 
 ## Telemetry
 
-- Always pass environment-manager and package-manager IDs through `getKnownManagerId()` from `src/common/telemetry/helpers.ts` when adding them to telemetry properties, including properties named `manager` or `managerId`.
-- Normalize IDs only at the telemetry boundary. Preserve exact manager IDs for registration, routing, settings, environment identity, logs, and user-facing output.
+- Always pass environment-manager and package-manager IDs through `getTelemetryManagerId()` from `src/common/telemetry/helpers.ts` when adding them to telemetry properties, including properties named `manager` or `managerId`.
+- Hash IDs only at the telemetry boundary. Preserve exact manager IDs for registration, routing, settings, environment identity, logs, and user-facing output.
 
 ## Settings Precedence
 
