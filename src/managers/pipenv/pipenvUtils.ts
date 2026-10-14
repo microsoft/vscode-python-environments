@@ -14,7 +14,7 @@ import {
     PythonEnvironmentInfo,
 } from '../../api';
 import { execProcess } from '../../common/childProcess.apis';
-import { PIPENV_MANAGER_ID } from '../../common/constants';
+import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
 import { untildify } from '../../common/utils/pathUtils';
@@ -28,9 +28,9 @@ import {
 } from '../common/nativePythonFinder';
 import { getShellActivationCommands, shortenVersionString } from '../common/utils';
 
-export const PIPENV_PATH_KEY = `${PIPENV_MANAGER_ID}:PIPENV_PATH`;
-export const PIPENV_WORKSPACE_KEY = `${PIPENV_MANAGER_ID}:WORKSPACE_SELECTED`;
-export const PIPENV_GLOBAL_KEY = `${PIPENV_MANAGER_ID}:GLOBAL_SELECTED`;
+export const PIPENV_PATH_KEY = `${ENVS_EXTENSION_ID}:pipenv:PIPENV_PATH`;
+export const PIPENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:pipenv:WORKSPACE_SELECTED`;
+export const PIPENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:pipenv:GLOBAL_SELECTED`;
 
 let pipenvPath: string | undefined;
 
