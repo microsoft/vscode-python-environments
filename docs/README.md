@@ -1862,17 +1862,19 @@ invoke operations, validate requests, or guarantee success.
 | `environments.resolve` | `packages.install` |
 | `environments.getSelected` | `packages.uninstall` |
 | `environments.setSelected` | `packages.upgrade` |
-| `environments.create` | `packages.listDirect` |
-| `environments.remove` | `packages.listAvailableVersions` |
+| `environments.create` | `packages.list.direct` |
+| `environments.remove` | `packages.fetchversions` |
 
 Listing includes refresh. Package installation, uninstallation, and upgrades
-use the existing `manage()` method. `packages.listDirect` is best-effort
+use the existing `manage()` method. `packages.list.direct` is best-effort
 classification, not exact installation intent. Selection is scoped environment
 selection, not shell activation.
 Pip reports installation, uninstallation, and upgrades as unsupported for Python 2 environments.
 
 Use the exported `EnvironmentCapability` and `PackageCapability` constants or
 their literal string values.
+`PackageCapability.ListDirect` is `packages.list.direct`;
+`PackageCapability.FetchAvailableVersions` is `packages.fetchversions`.
 
 ### Querying support
 
@@ -1926,7 +1928,7 @@ import { l10n } from 'vscode';
 readonly capabilities: Capabilities<PackageManagerCapability> = {
     [PackageCapability.List]: supportedCapability,
     [PackageCapability.ListDirect]: supportedCapability,
-    [PackageCapability.ListAvailableVersions]: unsupportedCapability,
+    [PackageCapability.FetchAvailableVersions]: unsupportedCapability,
     [PackageCapability.Install]: supportedCapability,
     [PackageCapability.Uninstall]: supportedCapability,
     [PackageCapability.Upgrade]: async (_context) => ({

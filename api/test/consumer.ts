@@ -56,13 +56,15 @@ if (isPackageVersionLookupNotSupportedError(maybeError)) {
 }
 
 // Legacy providers may omit advertisements; advertised maps must include every key without defaults.
+true satisfies Equal<typeof PackageCapability.ListDirect, 'packages.list.direct'>;
+true satisfies Equal<typeof PackageCapability.FetchAvailableVersions, 'packages.fetchversions'>;
 const fullPackageCapabilities: Capabilities<PackageManagerCapability> = {
     [PackageCapability.List]: supportedCapability,
     [PackageCapability.Install]: supportedCapability,
     [PackageCapability.Uninstall]: supportedCapability,
     [PackageCapability.Upgrade]: supportedCapability,
     [PackageCapability.ListDirect]: supportedCapability,
-    [PackageCapability.ListAvailableVersions]: supportedCapability,
+    [PackageCapability.FetchAvailableVersions]: supportedCapability,
 };
 const fullEnvironmentCapabilities: Capabilities<EnvironmentManagerCapability> = {
     [EnvironmentCapability.List]: supportedCapability,
