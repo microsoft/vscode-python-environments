@@ -440,13 +440,16 @@ export interface EnvironmentManager {
     /**
      * Creates a new Python environment within the specified scope. Create should support adding a .gitignore file if it creates a folder within the workspace. If a manager does not support environment creation, do not implement this method; the UI disables "create" options when `this.manager.create === undefined`.
      * @param scope - The scope within which to create the environment.
-     * @param options - Optional parameters for creating the Python environment.
+     * @param options - Optional parameters for creating the Python environment, including its name.
      * @returns A promise that resolves to the created Python environment, or undefined if creation failed.
      *
      * @remarks
      * Invoked when an environment of this manager's type should be created for the given
      * scope. Typical triggers include user-initiated environment-creation flows and
-     * programmatic creation via the API.
+     * programmatic creation via the API. Managers advertising
+     * `environment.create.named` must use a supplied {@link CreateEnvironmentOptions.name}
+     * exactly or reject it. The API rejects named creation before invoking managers that do
+     * not advertise this capability.
      */
     create?(scope: CreateEnvironmentScope, options?: CreateEnvironmentOptions): Promise<PythonEnvironment | undefined>;
 
@@ -1010,6 +1013,14 @@ export type PackageManagementOptions = PackageManagementInteractionOptions &
  * Options for creating a Python environment.
  */
 export interface CreateEnvironmentOptions {
+    /**
+     * Portable path segment to use as the new environment's name. Directory separators,
+     * control characters, Windows-reserved characters and device names, trailing periods
+     * or spaces, `.` and `..` are not allowed. The selected manager must advertise
+     * `environment.create.named` in its capabilities map; otherwise creation rejects. When
+     * omitted, the environment manager may prompt for a name or choose a default.
+     */
+    name?: string;
     /**
      * Provides some context about quick create based on user input.
      *   - if true, the environment should be created without any user input or prompts.

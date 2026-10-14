@@ -156,6 +156,28 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.strictEqual(clock.countTimers(), 0);
     });
 
+    test('queries advertised named creation support through the public API', async () => {
+        registerOwner({
+            capabilities: {
+                ...allSupportedEnvironmentCapabilities,
+                [EnvironmentCapability.CreateNamed]: envProbe,
+            },
+        });
+        const context = { scope: project.uri };
+        assert.deepStrictEqual(
+            await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.CreateNamed, context),
+            { supported: true },
+        );
+        assert.ok(envProbe.calledOnceWithExactly(context));
+        await clock.tickAsync(0);
+        assert.ok(
+            sendTelemetry.calledWithMatch(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
+                capability: 'environment.create.named',
+                outcome: 'supported',
+            }),
+        );
+    });
+
     test('registered legacy providers infer supported and unsupported capabilities without advertised checks', async () => {
         registerOwner({ capabilities: undefined });
         api.registerPackageManager({ ...packageProvider(), capabilities: undefined }, { extensionId });

@@ -277,11 +277,13 @@ applies to.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `quickCreate` | `boolean` | No | `true` creates without any prompts. `false` means the user explicitly declined quick create, so prompts are allowed. `undefined` leaves the decision to the manager, which may offer quick create. |
-| `additionalPackages` | `string[]` | No | Packages to install in addition to whatever the manager installs by default. |
+| `name` | `string` | `false` | Portable path segment to use as the new environment's name. Directory separators, control characters, Windows-reserved filename characters (such as `:` and `?`) and device names (such as `CON` and `NUL`), trailing periods or spaces, `.` and `..` are rejected. The selected manager must advertise `EnvironmentCapability.CreateNamed` (`environment.create.named`); otherwise creation rejects. When omitted, the manager may prompt for a name or choose a default. |
+| `quickCreate` | `boolean` | `false` | `true` creates without any prompts. `false` means the user explicitly declined quick create, so prompts are allowed. `undefined` leaves the decision to the manager, which may offer quick create. |
+| `additionalPackages` | `string[]` | `false` | Packages to install in addition to whatever the manager installs by default. |
 
 ```typescript
 const env = await api.createEnvironment(projectUri, {
+    name: 'analysis-env',
     quickCreate: true,
     additionalPackages: ['requests', 'pytest'],
 });
@@ -509,16 +511,17 @@ createEnvironment(
 | Parameter | Type | Required | Description |
 | --- | --- | --- | --- |
 | `scope` | [`CreateEnvironmentScope`](#scope-types) | Yes | `Uri` or `Uri[]` for the projects the environment is created for; `'global'` creates one outside any project. |
-| `options` | [`CreateEnvironmentOptions`](#createenvironmentoptions) | No | Controls prompting (`quickCreate`) and extra packages (`additionalPackages`). |
+| `options` | [`CreateEnvironmentOptions`](#createenvironmentoptions) | No | Controls the environment name (`name`), prompting (`quickCreate`), and extra packages (`additionalPackages`). |
 
 **Returns** `Promise<PythonEnvironment | undefined>` - `undefined` when no
 environment was created, for example because the user cancelled the flow.
 Rejects when no environment manager is registered for the scope, when the
-manager does not support creation, or when creation itself fails - so handle
-errors as well as `undefined`.
+manager does not support creation, when a supplied name is unsupported, or when
+creation itself fails - so handle errors as well as `undefined`.
 
 ```typescript
 const created = await api.createEnvironment(projectUri, {
+    name: 'analysis-env',
     quickCreate: true,
     additionalPackages: ['requests'],
 });
@@ -1864,12 +1867,18 @@ invoke operations, validate requests, or guarantee success.
 | `environments.setSelected` | `packages.upgrade` |
 | `environments.create` | `packages.list.direct` |
 | `environments.remove` | `packages.fetchversions` |
+| `environment.create.named` | |
 
 Listing includes refresh. Package installation, uninstallation, and upgrades
 use the existing `manage()` method. `packages.list.direct` is best-effort
 classification, not exact installation intent. Selection is scoped environment
 selection, not shell activation.
 Pip reports installation, uninstallation, and upgrades as unsupported for Python 2 environments.
+`EnvironmentCapability.CreateNamed` (`environment.create.named`) requires explicit
+advertisement and is unsupported by default, including for legacy managers with a
+`create()` method. Supporting managers must use a supplied `CreateEnvironmentOptions.name`
+exactly or reject it. The built-in venv and Conda managers advertise this capability;
+system Python, inline-script, Poetry, Pipenv, and Pyenv managers do not support it.
 
 Use the exported `EnvironmentCapability` and `PackageCapability` constants or
 their literal string values.
@@ -1909,7 +1918,8 @@ Legacy inference uses `getLegacyPackageManagerCapability(manager, capability)`
 or `getLegacyEnvironmentManagerCapability(manager, capability)`. They inspect method
 presence without executing methods or reading advertisements. Listing requires both
 listing and refresh methods; package install, uninstall, and upgrade require `manage`.
-Other capabilities require their corresponding methods. This does not verify tool
+Named creation is always unsupported under legacy inference; other capabilities
+require their corresponding methods. This does not verify tool
 versions or option behavior. Regular queries use this fallback only when the map is omitted.
 Legacy helper results include `isLegacy: true`; other `Support` results may omit
 the field, which means false.

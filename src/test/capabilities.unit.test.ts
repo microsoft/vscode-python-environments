@@ -51,6 +51,28 @@ function packageManager(capabilities: Partial<Capabilities<PackageManagerCapabil
 
 suite('Manager capabilities', () => {
     suite('Optional advertisements with legacy fallback', () => {
+        test('named creation requires an explicit advertisement, not just a create method', async () => {
+            const manager = environmentManager();
+            manager.create = unexpectedOperation;
+            for (const capabilities of [undefined, {}]) {
+                Reflect.set(manager, 'capabilities', capabilities);
+                assert.deepStrictEqual(
+                    await environmentCapability(manager, EnvironmentCapability.CreateNamed),
+                    capabilities === undefined ? { ...notImplemented, isLegacy: true } : notImplemented,
+                );
+            }
+            const context: CapabilityContext = { scope: Uri.file('.') };
+            Reflect.set(manager, 'capabilities', {
+                [EnvironmentCapability.CreateNamed]: async (received: CapabilityContext) => {
+                    assert.strictEqual(received, context);
+                    return supported;
+                },
+            });
+            assert.strictEqual(
+                await environmentCapability(manager, EnvironmentCapability.CreateNamed, context),
+                supported,
+            );
+        });
         test('advertised checks are honored in either direction', async () => {
             const env = environmentManager({ [EnvironmentCapability.List]: async () => denied, [EnvironmentCapability.Create]: async () => supported });
             assert.strictEqual(await environmentCapability(env, EnvironmentCapability.List), denied);

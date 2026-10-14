@@ -76,6 +76,7 @@ export class VenvManager implements EnvironmentManager {
         [EnvironmentCapability.GetSelected]: supportedCapability,
         [EnvironmentCapability.SetSelected]: supportedCapability,
         [EnvironmentCapability.Create]: supportedCapability,
+        [EnvironmentCapability.CreateNamed]: supportedCapability,
         [EnvironmentCapability.Remove]: supportedCapability,
     };
 
@@ -334,6 +335,8 @@ export class VenvManager implements EnvironmentManager {
                         this.globalEnv,
                         venvRoot,
                         options?.additionalPackages,
+                        undefined,
+                        options?.name,
                     );
                 }
             } else {
@@ -341,6 +344,10 @@ export class VenvManager implements EnvironmentManager {
                 // environment manager View, by selecting the venv manager.
                 result = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot, {
                     showQuickAndCustomOptions: options?.quickCreate === undefined,
+                    ...(options?.name === undefined ? {} : { name: options.name }),
+                    ...(options?.additionalPackages === undefined
+                        ? {}
+                        : { additionalPackages: options.additionalPackages }),
                 });
             }
 

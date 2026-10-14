@@ -598,6 +598,7 @@ export async function quickCreateVenv(
     venvRoot: Uri,
     additionalPackages?: string[],
     operation?: PythonToolOperation,
+    name?: string,
 ): Promise<CreateEnvironmentResult | undefined> {
     const project = api.getPythonProject(venvRoot);
 
@@ -631,8 +632,8 @@ export async function quickCreateVenv(
         return undefined;
     }
 
-    // Check if .venv already exists
-    let venvPath = path.join(venvRoot.fsPath, '.venv');
+    const requestedName = name ?? '.venv';
+    let venvPath = path.join(venvRoot.fsPath, requestedName);
     if (await fsapi.pathExists(venvPath)) {
         if (operation) {
             throw new PythonToolError(
@@ -642,6 +643,9 @@ export async function quickCreateVenv(
                     venvPath,
                 ),
             );
+        }
+        if (name !== undefined) {
+            return { envCreationErr: VenvManagerStrings.venvNameErrorExists };
         }
         // increment to create a unique name, e.g. .venv-1
         let i = 1;
@@ -677,7 +681,7 @@ export async function createPythonVenv(
     manager: EnvironmentManager,
     basePythons: PythonEnvironment[],
     venvRoot: Uri,
-    options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[] },
+    options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[]; name?: string },
 ): Promise<CreateEnvironmentResult | undefined> {
     return createStepBasedVenvFlow(nativeFinder, api, log, manager, basePythons, venvRoot, options);
 }

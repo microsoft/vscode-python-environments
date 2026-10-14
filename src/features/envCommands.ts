@@ -13,6 +13,7 @@ import {
 } from 'vscode';
 import {
     CreateEnvironmentOptions,
+    CreateEnvironmentScope,
     Pep440Version,
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -209,13 +210,21 @@ export async function createAnyEnvironmentCommand(
     },
 ): Promise<PythonEnvironment | undefined> {
     const select = options?.selectEnvironment;
+    const getCompatibleManagers = async (scope: CreateEnvironmentScope): Promise<InternalEnvironmentManager[]> => {
+        const managers = em.managers.filter((manager) => manager.supportsCreate);
+        if (options?.name === undefined) {
+            return managers;
+        }
+        const support = await Promise.all(managers.map((manager) => manager.supportsCustomName(scope)));
+        return managers.filter((_, index) => support[index]);
+    };
     const projects = pm.getProjects(options?.uri ? [options?.uri] : undefined);
     if (projects.length === 0) {
         const managerId = await pickEnvironmentManager(
-            em.managers.filter((m) => m.supportsCreate),
+            await getCompatibleManagers('global'),
             undefined,
             undefined,
-            true, // showEnterInterpreterPath
+            options?.name === undefined,
         );
 
         // Handle "Enter Interpreter Path" selection
@@ -239,11 +248,12 @@ export async function createAnyEnvironmentCommand(
         const selected = await pickProjectMany(projects, options?.showBackButton);
 
         if (selected && selected.length > 0) {
+            const compatibleManagers = await getCompatibleManagers(selected.map((p) => p.uri));
             const defaultManagers: InternalEnvironmentManager[] = [];
 
             selected.forEach((p) => {
                 const manager = em.getEnvironmentManager(p.uri);
-                if (manager && manager.supportsCreate && !defaultManagers.includes(manager)) {
+                if (manager && compatibleManagers.includes(manager) && !defaultManagers.includes(manager)) {
                     defaultManagers.push(manager);
                 }
             });
@@ -255,10 +265,10 @@ export async function createAnyEnvironmentCommand(
                 manager = defaultManagers[0];
             } else {
                 let managerId = await pickEnvironmentManager(
-                    em.managers.filter((m) => m.supportsCreate),
+                    compatibleManagers,
                     defaultManagers,
                     options?.showBackButton,
-                    true, // showEnterInterpreterPath
+                    options?.name === undefined,
                 );
 
                 // Handle "Enter Interpreter Path" selection

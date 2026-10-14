@@ -34,7 +34,13 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
-import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../../capabilities';
+import {
+    Capabilities,
+    EnvironmentManagerCapability,
+    supportedCapability,
+    unsupportedCapability,
+    EnvironmentCapability,
+} from '../../../capabilities';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -301,6 +307,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         [EnvironmentCapability.GetSelected]: supportedCapability,
         [EnvironmentCapability.SetSelected]: supportedCapability,
         [EnvironmentCapability.Remove]: supportedCapability,
+        [EnvironmentCapability.CreateNamed]: unsupportedCapability,
         [EnvironmentCapability.Create]: async ({ scope }) => {
             const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
             if (!scriptUri) {

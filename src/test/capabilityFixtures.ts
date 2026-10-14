@@ -16,6 +16,7 @@ export const allSupportedEnvironmentCapabilities: Capabilities<EnvironmentManage
     [EnvironmentCapability.GetSelected]: supportedCapability,
     [EnvironmentCapability.SetSelected]: supportedCapability,
     [EnvironmentCapability.Create]: supportedCapability,
+    [EnvironmentCapability.CreateNamed]: supportedCapability,
     [EnvironmentCapability.Remove]: supportedCapability,
 };
 
