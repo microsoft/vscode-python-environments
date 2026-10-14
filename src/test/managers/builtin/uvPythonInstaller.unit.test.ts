@@ -1,23 +1,31 @@
 import assert from 'assert';
+import os from 'os';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import { CancellationToken, LogOutputChannel, ShellExecution, TaskExecution, TaskProcessEndEvent } from 'vscode';
 import * as childProcessApis from '../../../common/childProcess.apis';
+import * as envApis from '../../../common/env.apis';
 import { Common, UvInstallStrings } from '../../../common/localize';
 import * as persistentState from '../../../common/persistentState';
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
 import * as taskApis from '../../../common/tasks.apis';
 import * as windowApis from '../../../common/window.apis';
+import * as platformUtils from '../../../common/utils/platformUtils';
 import * as helpers from '../../../managers/builtin/helpers';
 import {
     clearDontAskAgain,
     ensureUvForInlineScriptVersionLookupDetailed,
     ensureUvForInlineScriptVersionLookup,
+    ensureUvForPythonVersionLookup,
     getAvailablePythonVersions,
     getUvPythonPath,
     isDontAskAgainSet,
+    installPythonWithUv,
+    installUv,
     promptInstallPythonViaUvDetailed,
     promptInstallPythonViaUv,
+    selectPythonVersionToInstall,
     UV_INSTALL_PYTHON_DONT_ASK_KEY,
     UvPythonVersion,
 } from '../../../managers/builtin/uvPythonInstaller';
@@ -29,10 +37,12 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
     let isUvInstalledStub: sinon.SinonStub;
     let showErrorMessageStub: sinon.SinonStub;
     let showInformationMessageStub: sinon.SinonStub;
+    let launchBrowserStub: sinon.SinonStub;
     let sendTelemetryEventStub: sinon.SinonStub;
     let mockState: { get: sinon.SinonStub; set: sinon.SinonStub; clear: sinon.SinonStub };
 
     setup(() => {
+        helpers.setUvExecutable('uv');
         mockLog = createMockLogOutputChannel();
 
         mockState = {
@@ -42,13 +52,16 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         };
         sinon.stub(persistentState, 'getGlobalPersistentState').resolves(mockState);
         isUvInstalledStub = sinon.stub(helpers, 'isUvInstalled');
+        sinon.stub(helpers, 'getUvExecutable').resolves('uv');
         showErrorMessageStub = sinon.stub(windowApis, 'showErrorMessage');
         showInformationMessageStub = sinon.stub(windowApis, 'showInformationMessage');
+        launchBrowserStub = sinon.stub(envApis, 'launchBrowser').resolves(true);
         sendTelemetryEventStub = sinon.stub(telemetrySender, 'sendTelemetryEvent');
     });
 
     teardown(() => {
         sinon.restore();
+        helpers.setUvExecutable('uv');
     });
 
     function stubUvInstallTask(exitCode: number | undefined): sinon.SinonStub {
@@ -269,6 +282,109 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         assert(showInformationMessageStub.calledOnce, 'Should offer the requested prerelease');
     });
 
+    test('should cancel global Python version lookup without installing uv', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(undefined);
+
+        assert.strictEqual(await ensureUvForPythonVersionLookup(mockLog), false);
+        sinon.assert.calledOnceWithExactly(
+            showInformationMessageStub,
+            UvInstallStrings.installUvForVersionLookupPrompt,
+            { modal: true },
+            UvInstallStrings.installUv,
+            UvInstallStrings.otherPythonInstallationOptions,
+        );
+        sinon.assert.notCalled(launchBrowserStub);
+        assert.strictEqual(showErrorMessageStub.callCount, 0);
+    });
+
+    test('should open alternate Python installation guidance', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(UvInstallStrings.otherPythonInstallationOptions);
+
+        assert.strictEqual(await ensureUvForPythonVersionLookup(mockLog), false);
+        sinon.assert.calledOnceWithExactly(
+            launchBrowserStub,
+            'https://code.visualstudio.com/docs/python/python-tutorial#_install-a-python-interpreter',
+        );
+    });
+
+    test('should install uv for global Python version lookup after consent', async () => {
+        isUvInstalledStub.onFirstCall().resolves(false);
+        isUvInstalledStub.onSecondCall().resolves(true);
+        showInformationMessageStub.resolves(UvInstallStrings.installUv);
+        const executeTaskStub = stubUvInstallTask(0);
+
+        assert.strictEqual(await ensureUvForPythonVersionLookup(mockLog), true);
+        assert.strictEqual(isUvInstalledStub.callCount, 2);
+        assert.strictEqual(executeTaskStub.callCount, 1);
+    });
+
+    test('should report a failed uv installation for global Python version lookup', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(UvInstallStrings.installUv);
+        showErrorMessageStub.resolves(Common.viewLogs);
+        stubUvInstallTask(1);
+
+        assert.strictEqual(await ensureUvForPythonVersionLookup(mockLog), false);
+        sinon.assert.calledOnceWithExactly(showErrorMessageStub, UvInstallStrings.uvInstallFailed, Common.viewLogs);
+        sinon.assert.calledOnce(mockLog.show as sinon.SinonStub);
+    });
+
+    test('should install uv before fetching versions and selecting Python', async () => {
+        const order: string[] = [];
+        isUvInstalledStub.onFirstCall().resolves(false);
+        isUvInstalledStub.onSecondCall().resolves(true);
+        showInformationMessageStub.resolves(UvInstallStrings.installUv);
+        sinon
+            .stub(windowApis, 'withProgress')
+            .callsFake(async (_options, task) => task({ report: () => undefined }, {} as CancellationToken));
+        sinon.stub(windowApis, 'showQuickPick').callsFake(async (items) => {
+            order.push('quickPick');
+            return Array.isArray(items) ? items[0] : undefined;
+        });
+
+        let taskEndListener: ((event: TaskProcessEndEvent) => unknown) | undefined;
+        sinon.stub(taskApis, 'onDidEndTaskProcess').callsFake((listener) => {
+            taskEndListener = listener;
+            return { dispose: () => undefined };
+        });
+        sinon.stub(taskApis, 'executeTask').callsFake(async (task) => {
+            const execution = { task, terminate: () => undefined } as TaskExecution;
+            setImmediate(() => {
+                order.push('install');
+                taskEndListener?.({ execution, exitCode: 0 } as TaskProcessEndEvent);
+            });
+            return execution;
+        });
+        sinon.stub(childProcessApis, 'spawnProcess').callsFake((command, args) => {
+            const process = new MockChildProcess(command, args);
+            if (command === 'uv') {
+                order.push('list');
+                setImmediate(() => {
+                    process.stdout?.emit('data', JSON.stringify([makeUvPythonVersion({ version: '3.13.1' })]));
+                    process.emit('exit', 0, null);
+                });
+            } else {
+                setImmediate(() => process.emit('exit', 0, null));
+            }
+            return process as unknown as ReturnType<typeof childProcessApis.spawnProcess>;
+        });
+
+        assert.strictEqual(await selectPythonVersionToInstall(mockLog), '3.13.1');
+        assert.deepStrictEqual(order, ['install', 'list', 'quickPick']);
+    });
+
+    test('should not fetch versions when uv installation is declined', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(undefined);
+        const spawnStub = sinon.stub(childProcessApis, 'spawnProcess');
+
+        assert.strictEqual(await selectPythonVersionToInstall(mockLog), undefined);
+        assert.strictEqual(spawnStub.callCount, 0);
+        assert.strictEqual(showErrorMessageStub.callCount, 0);
+    });
+
     test('should request consent before installing uv for version lookup', async () => {
         isUvInstalledStub.resolves(false);
         showInformationMessageStub.resolves(undefined);
@@ -419,13 +535,10 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         const installAction = UvInstallStrings.installPythonVersion('3.13');
         showInformationMessageStub.onFirstCall().resolves(installAction);
         sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) =>
-            task(
-                { report: () => undefined },
-                {
-                    isCancellationRequested: false,
-                    onCancellationRequested: () => ({ dispose: () => undefined }),
-                } as CancellationToken,
-            ),
+            task({ report: () => undefined }, {
+                isCancellationRequested: false,
+                onCancellationRequested: () => ({ dispose: () => undefined }),
+            } as CancellationToken),
         );
 
         let taskEndListener: ((event: TaskProcessEndEvent) => unknown) | undefined;
@@ -440,9 +553,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
             return { task, terminate: () => undefined } as TaskExecution;
         });
 
-        const versions: UvPythonVersion[] = [
-            makeUvPythonVersion({ version: '3.13.1', path: '/usr/bin/python3.13' }),
-        ];
+        const versions: UvPythonVersion[] = [makeUvPythonVersion({ version: '3.13.1', path: '/usr/bin/python3.13' })];
         const mockProcess = new MockChildProcess('uv', [
             'python',
             'list',
@@ -469,6 +580,197 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         assert.strictEqual(execution.command, 'uv');
         assert.deepStrictEqual(execution.args, ['python', 'install', '3.13']);
     });
+});
+
+suite('uvPythonInstaller - executable handoff', () => {
+    const home = path.resolve('bootstrap home');
+    const installDir = path.join(home, 'custom uv bin');
+    let savedEnv: NodeJS.ProcessEnv;
+    let installed: boolean;
+    let taskExitCode: number | undefined;
+    let spawnStub: sinon.SinonStub;
+    let executeTaskStub: sinon.SinonStub;
+    let telemetryStub: sinon.SinonStub;
+    let showInformationMessageStub: sinon.SinonStub;
+    let expectedExecutable: string;
+    const pythonPath = path.join(home, 'managed-python', 'python');
+
+    setup(() => {
+        savedEnv = process.env;
+        process.env = { ...savedEnv };
+        for (const key of [
+            'UV_INSTALL_DIR',
+            'CARGO_DIST_FORCE_INSTALL_DIR',
+            'UV_UNMANAGED_INSTALL',
+            'CARGO_HOME',
+            'XDG_BIN_HOME',
+            'XDG_DATA_HOME',
+        ]) {
+            delete process.env[key];
+        }
+        process.env.UV_INSTALL_DIR = installDir;
+        helpers.setUvExecutable('uv');
+        sinon.stub(os, 'homedir').returns(home);
+        sinon.stub(platformUtils, 'isWindows').returns(false);
+        installed = false;
+        taskExitCode = 0;
+        expectedExecutable = path.join(installDir, 'uv');
+        telemetryStub = sinon.stub(telemetrySender, 'sendTelemetryEvent');
+        sinon.stub(windowApis, 'showErrorMessage');
+        showInformationMessageStub = sinon.stub(windowApis, 'showInformationMessage');
+        sinon
+            .stub(windowApis, 'withProgress')
+            .callsFake(async (_options, task) =>
+                task(
+                    { report: () => undefined },
+                    { isCancellationRequested: false, onCancellationRequested: () => ({ dispose: () => undefined }) },
+                ),
+            );
+        let taskEndListener: ((event: TaskProcessEndEvent) => unknown) | undefined;
+        sinon.stub(taskApis, 'onDidEndTaskProcess').callsFake((listener) => {
+            taskEndListener = listener;
+            return { dispose: () => undefined };
+        });
+        executeTaskStub = sinon.stub(taskApis, 'executeTask').callsFake(async (task) => {
+            const execution = { task, terminate: () => undefined } as TaskExecution;
+            setImmediate(() => {
+                if (task.name === UvInstallStrings.installingUv && taskExitCode === 0) {
+                    installed = true;
+                }
+                taskEndListener?.({ execution, exitCode: taskExitCode });
+            });
+            return execution;
+        });
+        spawnStub = sinon.stub(childProcessApis, 'spawnProcess');
+        spawnStub.callsFake((command: string, args: string[]) => {
+            const proc = new MockChildProcess(command, args);
+            setImmediate(() => {
+                if (command === 'curl' || command === 'wget') {
+                    proc.emit('exit', 0, null);
+                } else if (installed && command === expectedExecutable) {
+                    if (args[0] === 'python') {
+                        proc.stdout?.emit(
+                            'data',
+                            JSON.stringify([makeUvPythonVersion({ version: '3.11.15', path: pythonPath })]),
+                        );
+                    }
+                    proc.emit('exit', 0, null);
+                } else {
+                    proc.emit('error', new Error(`spawn ${command} ENOENT`));
+                }
+            });
+            return proc;
+        });
+    });
+
+    teardown(() => {
+        process.env = savedEnv;
+        sinon.restore();
+        helpers.setUvExecutable('uv');
+    });
+
+    test('installs Python and lists versions with the installed executable when PATH is unchanged', async () => {
+        const originalPath = process.env.PATH;
+        assert.strictEqual(await installPythonWithUv(undefined, '3.11'), pythonPath);
+        assert.strictEqual(process.env.PATH, originalPath);
+        const execution = executeTaskStub.secondCall.args[0].execution as ShellExecution;
+        assert.strictEqual(execution.command, expectedExecutable);
+        assert.deepStrictEqual(execution.args, ['python', 'install', '3.11']);
+        sinon.assert.calledWith(spawnStub, expectedExecutable, [
+            'python',
+            'list',
+            '--only-installed',
+            '--managed-python',
+            '--output-format',
+            'json',
+        ]);
+        assert.strictEqual((await getAvailablePythonVersions()).length, 1);
+        sinon.assert.calledWith(spawnStub, expectedExecutable, ['python', 'list', '--output-format', 'json']);
+        assert.strictEqual(await helpers.getUvExecutable(), expectedExecutable);
+        sinon.assert.calledWith(telemetryStub, EventNames.UV_PYTHON_INSTALL_COMPLETED);
+        assert(!telemetryStub.calledWith(EventNames.UV_PYTHON_INSTALL_FAILED));
+    });
+
+    test('uses the installed executable to populate the Global version picker when PATH is unchanged', async () => {
+        const originalPath = process.env.PATH;
+        showInformationMessageStub.resolves(UvInstallStrings.installUv);
+        sinon.stub(windowApis, 'showQuickPick').callsFake(async (items) => (Array.isArray(items) ? items[0] : undefined));
+
+        assert.strictEqual(await selectPythonVersionToInstall(), '3.11.15');
+
+        assert.strictEqual(process.env.PATH, originalPath);
+        sinon.assert.calledWith(spawnStub, expectedExecutable, ['--version']);
+        sinon.assert.calledWith(spawnStub, expectedExecutable, ['python', 'list', '--output-format', 'json']);
+        assert.strictEqual(await helpers.getUvExecutable(), expectedExecutable);
+    });
+
+    test('does not replace executable resolution after an installer failure', async () => {
+        taskExitCode = 1;
+        assert.strictEqual(await installPythonWithUv(), undefined);
+        assert.strictEqual(await helpers.getUvExecutable(), undefined);
+        assert(!spawnStub.calledWith(expectedExecutable));
+        sinon.assert.calledWith(telemetryStub, EventNames.UV_PYTHON_INSTALL_FAILED, undefined, { stage: 'uvInstall' });
+    });
+
+    test('reports failure when a successful installer does not leave a runnable executable', async () => {
+        expectedExecutable = path.join(home, 'not-the-installed-binary');
+        assert.strictEqual(await installPythonWithUv(), undefined);
+        sinon.assert.calledOnce(executeTaskStub);
+        sinon.assert.calledWith(telemetryStub, EventNames.UV_PYTHON_INSTALL_FAILED, undefined, {
+            stage: 'uvNotOnPath',
+        });
+    });
+
+    test('uses the installed executable after consenting to inline-script version lookup', async () => {
+        (windowApis.showInformationMessage as sinon.SinonStub).resolves(UvInstallStrings.installUv);
+        assert.strictEqual(await ensureUvForInlineScriptVersionLookup('>=3.11'), true);
+        assert.strictEqual((await getAvailablePythonVersions()).length, 1);
+        sinon.assert.calledWith(spawnStub, expectedExecutable, ['python', 'list', '--output-format', 'json']);
+    });
+
+    const destinations: { name: string; env: NodeJS.ProcessEnv; directory: string }[] = [
+        { name: 'default home', env: {}, directory: path.join(home, '.local', 'bin') },
+        {
+            name: 'explicit override',
+            env: { UV_INSTALL_DIR: installDir, XDG_BIN_HOME: path.join(home, 'ignored') },
+            directory: installDir,
+        },
+        { name: 'legacy override', env: { CARGO_DIST_FORCE_INSTALL_DIR: installDir }, directory: installDir },
+        { name: 'unmanaged install', env: { UV_UNMANAGED_INSTALL: installDir }, directory: installDir },
+        {
+            name: 'XDG bin',
+            env: { XDG_BIN_HOME: installDir, XDG_DATA_HOME: path.join(home, 'ignored') },
+            directory: installDir,
+        },
+        {
+            name: 'XDG data',
+            env: { XDG_DATA_HOME: path.join(home, 'data', 'share') },
+            directory: path.join(home, 'data', 'bin'),
+        },
+        {
+            name: 'legacy default Cargo home',
+            env: { UV_INSTALL_DIR: path.join(home, '.cargo') },
+            directory: path.join(home, '.cargo', 'bin'),
+        },
+        {
+            name: 'custom Cargo home',
+            env: { UV_INSTALL_DIR: installDir, CARGO_HOME: installDir },
+            directory: path.join(installDir, 'bin'),
+        },
+    ];
+    for (const windows of [false, true]) {
+        for (const { name, env, directory } of destinations) {
+            test(`resolves ${name} with ${windows ? 'Windows' : 'POSIX'} executable naming`, async () => {
+                delete process.env.UV_INSTALL_DIR;
+                Object.assign(process.env, env);
+                (platformUtils.isWindows as sinon.SinonStub).returns(windows);
+                expectedExecutable = path.join(directory, windows ? 'uv.exe' : 'uv');
+                assert.strictEqual(await installUv(), true);
+                assert.strictEqual(await helpers.getUvExecutable(), expectedExecutable);
+                sinon.assert.calledWith(spawnStub, expectedExecutable, ['--version']);
+            });
+        }
+    }
 });
 
 suite('uvPythonInstaller - isDontAskAgainSet and clearDontAskAgain', () => {
@@ -541,6 +843,7 @@ suite('uvPythonInstaller - getUvPythonPath', () => {
 
     setup(() => {
         spawnStub = sinon.stub(childProcessApis, 'spawnProcess');
+        sinon.stub(helpers, 'getUvExecutable').resolves('uv');
     });
 
     teardown(() => {
@@ -834,6 +1137,7 @@ suite('uvPythonInstaller - getAvailablePythonVersions', () => {
 
     setup(() => {
         spawnStub = sinon.stub(childProcessApis, 'spawnProcess');
+        sinon.stub(helpers, 'getUvExecutable').resolves('uv');
     });
 
     teardown(() => {

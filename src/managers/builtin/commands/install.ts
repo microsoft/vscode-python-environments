@@ -22,10 +22,11 @@ export class PipInstallCommand extends InstallCommand {
         await runPython(
             this.pythonExecutable,
             this.buildCommand(executeArgs),
-            undefined,
+            executeArgs.toolExecution ? this.cwd : undefined,
             this.log,
             executeArgs.cancellationToken,
-            this.timeout,
+            this.timeout ?? (executeArgs.toolExecution ? 300_000 : undefined),
+            executeArgs.toolExecution,
         );
     }
 }
@@ -47,6 +48,14 @@ export class UvInstallCommand extends InstallCommand {
     }
 
     async execute(executeArgs: InstallExecuteArgs): Promise<void> {
-        await runUV(this.buildCommand(executeArgs), undefined, this.log, executeArgs.cancellationToken, this.timeout, this.uvExecutable);
+        await runUV(
+            this.buildCommand(executeArgs),
+            executeArgs.toolExecution ? this.cwd : undefined,
+            this.log,
+            executeArgs.cancellationToken,
+            this.timeout ?? (executeArgs.toolExecution ? 300_000 : undefined),
+            this.uvExecutable,
+            executeArgs.toolExecution,
+        );
     }
 }
