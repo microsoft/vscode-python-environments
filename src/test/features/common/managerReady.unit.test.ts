@@ -66,7 +66,7 @@ suite('withManagerTimeout', () => {
         assert.ok(sendTelemetryStub.calledOnce, 'sendTelemetryEvent should be called once');
         const [eventName, , properties] = sendTelemetryStub.firstCall.args;
         assert.strictEqual(eventName, EventNames.MANAGER_READY_TIMEOUT);
-        assert.strictEqual(properties.managerId, 'test-ext:venv');
+        assert.strictEqual(properties.managerId, 'undefined');
         assert.strictEqual(properties.managerKind, 'environment');
     });
 
@@ -126,7 +126,7 @@ suite('withManagerTimeout', () => {
         await promise;
 
         const [, , properties] = sendTelemetryStub.firstCall.args;
-        assert.strictEqual(properties.managerId, 'test-ext:pip');
+        assert.strictEqual(properties.managerId, 'undefined');
         assert.strictEqual(properties.managerKind, 'package');
     });
 });

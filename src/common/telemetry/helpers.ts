@@ -69,11 +69,15 @@ export function sendManagerSelectionTelemetry(pm: PythonProjectManager) {
     });
 
     ems.forEach((em) => {
-        sendTelemetryEvent(EventNames.ENVIRONMENT_MANAGER_SELECTED, undefined, { managerId: em });
+        sendTelemetryEvent(EventNames.ENVIRONMENT_MANAGER_SELECTED, undefined, {
+            managerId: getKnownManagerId(em),
+        });
     });
 
     ps.forEach((pkg) => {
-        sendTelemetryEvent(EventNames.PACKAGE_MANAGER_SELECTED, undefined, { managerId: pkg });
+        sendTelemetryEvent(EventNames.PACKAGE_MANAGER_SELECTED, undefined, {
+            managerId: getKnownManagerId(pkg),
+        });
     });
 }
 
