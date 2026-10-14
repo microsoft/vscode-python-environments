@@ -71,11 +71,15 @@ suite('Legacy manager capabilities', () => {
             [EnvironmentCapability.GetSelected]: ['get'],
             [EnvironmentCapability.SetSelected]: ['set'],
             [EnvironmentCapability.Create]: ['create'],
+            [EnvironmentCapability.CreateNamed]: [],
             [EnvironmentCapability.Remove]: ['remove'],
         };
 
         for (const capability of Object.values(EnvironmentCapability)) {
-            assert.deepStrictEqual(await getLegacyEnvironmentManagerCapability(manager, capability), legacySupported);
+            assert.deepStrictEqual(
+                await getLegacyEnvironmentManagerCapability(manager, capability),
+                capability === EnvironmentCapability.CreateNamed ? legacyUnsupported : legacySupported,
+            );
             for (const method of methods[capability]) {
                 for (const value of [undefined, false]) {
                     Reflect.set(manager, method, value);

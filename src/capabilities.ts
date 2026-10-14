@@ -24,6 +24,8 @@ export const EnvironmentCapability = {
     SetSelected: 'environments.setSelected',
     /** Create a new Python environment. */
     Create: 'environments.create',
+    /** Create an environment with an exact caller-supplied name; unsupported unless explicitly advertised. */
+    CreateNamed: 'environment.create.named',
     /** Remove an existing Python environment. */
     Remove: 'environments.remove',
 } as const;

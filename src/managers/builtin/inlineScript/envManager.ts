@@ -34,7 +34,13 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
-import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../../capabilities';
+import {
+    Capabilities,
+    EnvironmentManagerCapability,
+    supportedCapability,
+    unsupportedCapability,
+    EnvironmentCapability,
+} from '../../../capabilities';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -301,6 +307,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         [EnvironmentCapability.GetSelected]: supportedCapability,
         [EnvironmentCapability.SetSelected]: supportedCapability,
         [EnvironmentCapability.Remove]: supportedCapability,
+        [EnvironmentCapability.CreateNamed]: unsupportedCapability,
         [EnvironmentCapability.Create]: async ({ scope }) => {
             const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
             if (!scriptUri) {
@@ -364,7 +371,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     public readonly displayName = l10n.t('Inline scripts');
     public readonly preferredPackageManagerId = 'ms-python.python:pip';
     public readonly description: string | undefined = undefined;
-    public readonly createCapabilities = { customName: false } as const;
     public readonly tooltip: string | MarkdownString = new MarkdownString(
         l10n.t('Environments built from PEP 723 inline script metadata.'),
         true,

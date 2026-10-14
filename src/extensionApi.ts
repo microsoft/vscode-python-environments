@@ -320,7 +320,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             if (!manager.supportsCreate) {
                 throw new Error(`Environment manager does not support creating environments: ${manager.id}`);
             }
-            if (options?.name !== undefined && !manager.supportsCustomName) {
+            if (options?.name !== undefined && !(await manager.supportsCustomName(scope))) {
                 throw new CreateEnvironmentOptionNotSupportedError(
                     'name',
                     `Environment manager does not support named environment creation: ${manager.id}`,
@@ -343,8 +343,11 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
                 throw new Error('No environment managers found');
             }
 
-            const compatibleManagers =
-                options?.name === undefined ? managers : managers.filter((manager) => manager.supportsCustomName);
+            const namedSupport =
+                options?.name === undefined
+                    ? undefined
+                    : await Promise.all(managers.map((manager) => manager.supportsCustomName(scope)));
+            const compatibleManagers = managers.filter((_, index) => namedSupport?.[index] ?? true);
             if (compatibleManagers.length === 0) {
                 throw new CreateEnvironmentOptionNotSupportedError(
                     'name',

@@ -85,7 +85,7 @@ suite('PythonEnvironmentApiImpl - createEnvironment', () => {
             getEnvironmentManager: sinon.stub().returns({
                 id: 'ms-python.python:venv',
                 supportsCreate: true,
-                supportsCustomName,
+                supportsCustomName: sinon.stub().resolves(supportsCustomName),
                 create,
             }),
         } as unknown as ApiArgs[0];
@@ -157,13 +157,13 @@ suite('PythonEnvironmentApiImpl - createEnvironment', () => {
         const unsupportedManager = {
             id: 'example:immutable',
             supportsCreate: true,
-            supportsCustomName: false,
+            supportsCustomName: sinon.stub().resolves(false),
             create: unsupportedCreate,
         };
         const supportedManager = {
             id: 'example:venv',
             supportsCreate: true,
-            supportsCustomName: true,
+            supportsCustomName: sinon.stub().resolves(true),
             create: supportedCreate,
         };
         const firstScope = Uri.file('first');
@@ -191,6 +191,8 @@ suite('PythonEnvironmentApiImpl - createEnvironment', () => {
         assert.deepStrictEqual(pickManager.firstCall.args[0], [supportedManager]);
         assert.ok(supportedCreate.calledOnceWithExactly([firstScope, secondScope], options));
         assert.ok(unsupportedCreate.notCalled);
+        assert.ok(supportedManager.supportsCustomName.calledOnceWithExactly([firstScope, secondScope]));
+        assert.ok(unsupportedManager.supportsCustomName.calledOnceWithExactly([firstScope, secondScope]));
     });
 });
 

@@ -10,6 +10,8 @@ import {
     PythonEnvironment,
 } from '../../../api';
 import { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
+import { EnvironmentCapability, supportedCapability, unsupportedCapability } from '../../../capabilities';
+import { allSupportedEnvironmentCapabilities } from '../../capabilityFixtures';
 
 function createManager(
     create: sinon.SinonStub,
@@ -18,7 +20,13 @@ function createManager(
     return new InternalEnvironmentManager('example:manager', {
         name: 'manager',
         preferredPackageManagerId: 'example:pip',
-        createCapabilities: customName === undefined ? undefined : { customName },
+        capabilities:
+            customName === undefined
+                ? undefined
+                : {
+                      ...allSupportedEnvironmentCapabilities,
+                      [EnvironmentCapability.CreateNamed]: customName ? supportedCapability : unsupportedCapability,
+                  },
         create,
     } as unknown as EnvironmentManager);
 }
@@ -56,5 +64,30 @@ suite('InternalEnvironmentManager.create', () => {
 
         assert.strictEqual(await manager.create(scope, undefined), environment);
         assert.ok(create.calledOnceWithExactly(scope, undefined));
+    });
+
+    test('passes the scope to contextual named-creation checks and propagates probe failures', async () => {
+        const create = sinon.stub().resolves(undefined);
+        const scope = Uri.file('workspace');
+        const check = sinon.stub().resolves({ supported: true });
+        const manager = new InternalEnvironmentManager('example:manager', {
+            name: 'manager',
+            preferredPackageManagerId: 'example:pip',
+            refresh: async () => {},
+            getEnvironments: async () => [],
+            get: async () => undefined,
+            set: async () => {},
+            resolve: async () => undefined,
+            create,
+            capabilities: { ...allSupportedEnvironmentCapabilities, [EnvironmentCapability.CreateNamed]: check },
+        });
+        await manager.create(scope, { name: 'analysis-env' });
+        assert.ok(check.calledOnceWithExactly({ scope }));
+
+        const failure = new Error('Capability probe failed');
+        check.rejects(failure);
+        create.resetHistory();
+        await assert.rejects(manager.create(scope, { name: 'analysis-env' }), (error) => error === failure);
+        assert.ok(create.notCalled);
     });
 });

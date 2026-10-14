@@ -100,6 +100,29 @@ suite('Manager capabilities integration', function () {
         );
     });
 
+    test('named creation is unsupported by default and honors explicit advertisements', async () => {
+        const scope = Uri.file('.');
+        const initial = await api.getEnvironmentManagerCapability(
+            environment.envId.managerId,
+            EnvironmentCapability.CreateNamed,
+            { scope },
+        );
+        assert.strictEqual(initial.supported, false);
+        environmentCapabilities = {
+            ...noEnvironmentCapabilities,
+            [EnvironmentCapability.CreateNamed]: async (context) => {
+                assert.strictEqual(context.scope, scope);
+                return { supported: true };
+            },
+        };
+        assert.deepStrictEqual(
+            await api.getEnvironmentManagerCapability(environment.envId.managerId, EnvironmentCapability.CreateNamed, {
+                scope,
+            }),
+            { supported: true },
+        );
+    });
+
     test('package queries reach the configured project-bound provider, not its root', async () => {
         const folder = workspace.workspaceFolders?.[0];
         assert.ok(folder, 'The integration workspace must be open');

@@ -4,6 +4,7 @@
 import type { Pep440Version } from '@renovatebot/pep440';
 import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
 import {
+    EnvironmentCapability,
     resolveEnvironmentManagerCapability,
     resolvePackageManagerCapability,
 } from '../../capabilities';
@@ -88,10 +89,6 @@ export class InternalEnvironmentManager implements EnvironmentManager {
     public get log(): LogOutputChannel | undefined {
         return this.manager.log;
     }
-    public get createCapabilities() {
-        return this.manager.createCapabilities;
-    }
-
     public getVersion(): Promise<Pep440Version | undefined> {
         return this.manager.getVersion ? this.manager.getVersion() : Promise.resolve(undefined);
     }
@@ -109,20 +106,19 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         return resolveEnvironmentManagerCapability(this.manager, capability, context);
     }
 
-    public get supportsCustomName(): boolean {
-        return this.createCapabilities?.customName === true;
+    /** Checks advertised support for exact caller-supplied names within the creation scope. */
+    public async supportsCustomName(scope: CreateEnvironmentScope): Promise<boolean> {
+        return (await this.getCapability(EnvironmentCapability.CreateNamed, { scope })).supported;
     }
 
-    create(
+    async create(
         scope: CreateEnvironmentScope,
         options: CreateEnvironmentOptions | undefined,
     ): Promise<PythonEnvironment | undefined> {
-        if (options?.name !== undefined && !this.supportsCustomName) {
-            return Promise.reject(
-                new CreateEnvironmentOptionNotSupportedError(
-                    'name',
-                    `Environment manager does not support named environment creation: ${this.id}`,
-                ),
+        if (options?.name !== undefined && !(await this.supportsCustomName(scope))) {
+            throw new CreateEnvironmentOptionNotSupportedError(
+                'name',
+                `Environment manager does not support named environment creation: ${this.id}`,
             );
         }
         if (this.manager.create) {

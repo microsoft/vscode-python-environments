@@ -59,6 +59,8 @@ export async function getLegacyEnvironmentManagerCapability(
             return getMethodSupport(environmentManager.set);
         case EnvironmentCapability.Create:
             return getMethodSupport(environmentManager.create);
+        case EnvironmentCapability.CreateNamed:
+            return getMethodSupport();
         case EnvironmentCapability.Remove:
             return getMethodSupport(environmentManager.remove);
         default:

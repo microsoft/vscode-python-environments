@@ -17,7 +17,13 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
+import {
+    Capabilities,
+    EnvironmentManagerCapability,
+    supportedCapability,
+    unsupportedCapability,
+    EnvironmentCapability,
+} from '../../capabilities';
 import { SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -43,6 +49,7 @@ export class SysPythonManager implements EnvironmentManager {
         [EnvironmentCapability.GetSelected]: supportedCapability,
         [EnvironmentCapability.SetSelected]: supportedCapability,
         [EnvironmentCapability.Create]: supportedCapability,
+        [EnvironmentCapability.CreateNamed]: unsupportedCapability,
         [EnvironmentCapability.Remove]: async () => ({
             supported: false,
             reason: l10n.t('This environment manager does not support removing environments.'),
@@ -65,7 +72,6 @@ export class SysPythonManager implements EnvironmentManager {
     public readonly description: string | undefined;
     public readonly tooltip: string | MarkdownString;
     public readonly iconPath: IconPath;
-    public readonly createCapabilities = { customName: false } as const;
 
     constructor(
         private readonly nativeFinder: NativePythonFinder,

@@ -16,7 +16,13 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
+import {
+    Capabilities,
+    EnvironmentManagerCapability,
+    supportedCapability,
+    unsupportedCapability,
+    EnvironmentCapability,
+} from '../../capabilities';
 import { PoetryStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -55,6 +61,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         [EnvironmentCapability.Resolve]: supportedCapability,
         [EnvironmentCapability.GetSelected]: supportedCapability,
         [EnvironmentCapability.SetSelected]: supportedCapability,
+        [EnvironmentCapability.CreateNamed]: unsupportedCapability,
         [EnvironmentCapability.Create]: async () => ({
             supported: false,
             reason: l10n.t('{0} does not support creating environments.', 'Poetry'),

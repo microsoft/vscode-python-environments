@@ -228,8 +228,8 @@ suite('Create Any Environment Command Tests', () => {
     test('Named creation only offers managers that support custom names', async () => {
         const unsupportedManager = typeMoq.Mock.ofType<InternalEnvironmentManager>();
         unsupportedManager.setup((m) => m.supportsCreate).returns(() => true);
-        unsupportedManager.setup((m) => m.supportsCustomName).returns(() => false);
-        manager.setup((m) => m.supportsCustomName).returns(() => true);
+        unsupportedManager.setup((m) => m.supportsCustomName('global')).returns(() => Promise.resolve(false));
+        manager.setup((m) => m.supportsCustomName('global')).returns(() => Promise.resolve(true));
         em.setup((e) => e.managers).returns(() => [unsupportedManager.object, manager.object]);
         pm.setup((p) => p.getProjects(typeMoq.It.isAny())).returns(() => []);
         manager

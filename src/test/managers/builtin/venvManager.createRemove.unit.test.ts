@@ -159,7 +159,8 @@ suite('VenvManager.create - orchestration', () => {
             quickCreate: true,
         });
 
-        assert.strictEqual(quickCreateVenvStub.firstCall.args[7], 'analysis-env');
+        assert.strictEqual(quickCreateVenvStub.firstCall.args[7], undefined);
+        assert.strictEqual(quickCreateVenvStub.firstCall.args[8], 'analysis-env');
     });
 
     test('custom create forwards an explicit environment name', async () => {

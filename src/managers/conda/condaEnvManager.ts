@@ -78,6 +78,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
         [EnvironmentCapability.GetSelected]: supportedCapability,
         [EnvironmentCapability.SetSelected]: supportedCapability,
         [EnvironmentCapability.Create]: supportedCapability,
+        [EnvironmentCapability.CreateNamed]: supportedCapability,
         [EnvironmentCapability.Remove]: supportedCapability,
     };
 
@@ -111,7 +112,6 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     description?: string;
     tooltip: string | MarkdownString;
     iconPath?: IconPath;
-    readonly createCapabilities = { customName: true } as const;
 
     public dispose() {
         this.collection = [];

@@ -18,9 +18,13 @@ import * as metadata from '../../common/inlineScript/metadata';
 import * as workspaceApis from '../../common/workspace.apis';
 import { InlineScriptEnvManager } from '../../managers/builtin/inlineScript/envManager';
 import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
+import { VenvManager } from '../../managers/builtin/venvManager';
+import { CondaEnvManager } from '../../managers/conda/condaEnvManager';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
+import { PipenvManager } from '../../managers/pipenv/pipenvManager';
 import { PoetryManager } from '../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../managers/poetry/poetryPackageManager';
+import { PyEnvManager } from '../../managers/pyenv/pyenvManager';
 import { createMockLogOutputChannel } from '../mocks/helper';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
@@ -66,6 +70,29 @@ suite('Built-in manager capabilities', () => {
         });
     });
 
+    test('only venv and Conda advertise named creation without invoking operations', async () => {
+        const finder = {} as NativePythonFinder;
+        const system = new SysPythonManager(finder, api, log);
+        const conda = new CondaEnvManager(finder, api, log);
+        const supported = [new VenvManager(finder, api, system, log), conda];
+        const otherManagers = [
+            new PipenvManager(finder, api),
+            new PoetryManager(finder, api),
+            new PyEnvManager(finder, api),
+        ];
+        disposables.push(conda, ...otherManagers);
+        for (const manager of supported) {
+            const create = sinon.stub(manager, 'create').throws(new Error('Unexpected creation'));
+            assert.deepStrictEqual(await environmentCapability(manager, EnvironmentCapability.CreateNamed), {
+                supported: true,
+            });
+            assert.ok(create.notCalled);
+        }
+        for (const manager of [system, ...otherManagers]) {
+            assertUnsupported(await environmentCapability(manager, EnvironmentCapability.CreateNamed));
+        }
+    });
+
     suite('Inline-script creation', () => {
         let manager: InlineScriptEnvManager;
         let readMetadata: sinon.SinonStub;
@@ -106,6 +133,13 @@ suite('Built-in manager capabilities', () => {
             }
             assert.ok(readMetadata.alwaysCalledWithExactly(script));
             assert.ok(create.notCalled);
+        });
+
+        test('does not support caller-supplied names even for scripts with valid metadata', async () => {
+            assertUnsupported(
+                await environmentCapability(manager, EnvironmentCapability.CreateNamed, { scope: script }),
+            );
+            assert.ok(readMetadata.notCalled);
         });
 
         test('rejects unsupported scopes before reading metadata', async () => {
