@@ -28,6 +28,7 @@ import {
 } from '../../../features/projectManager';
 import type { PythonProjectManager } from '../../../features/projectManager';
 import { MockWorkspaceConfiguration } from '../../mocks/mockWorkspaceConfig';
+import { VENV_MANAGER_ID as VENV_MANAGER_ID_CONSTANT, DEFAULT_PACKAGE_MANAGER_ID, SYSTEM_MANAGER_ID as SYSTEM_MANAGER_ID_CONSTANT, CONDA_MANAGER_ID as CONDA_MANAGER_ID_CONSTANT, INLINE_SCRIPT_MANAGER_ID } from '../../../common/constants';
 
 /**
  * Returns a platform-appropriate workspace path for testing.
@@ -38,8 +39,8 @@ function getTestWorkspacePath(): string {
 }
 
 suite('Setting Helpers - Optional Project Managers', () => {
-    const VENV_MANAGER_ID = 'ms-python.python:venv';
-    const PIP_MANAGER_ID = 'ms-python.python:pip';
+    const VENV_MANAGER_ID = VENV_MANAGER_ID_CONSTANT;
+    const PIP_MANAGER_ID = DEFAULT_PACKAGE_MANAGER_ID;
     const workspacePath = getTestWorkspacePath();
     const workspaceUri = Uri.file(workspacePath);
     const projectUri = Uri.joinPath(workspaceUri, 'backend');
@@ -101,10 +102,10 @@ suite('Setting Helpers - Optional Project Managers', () => {
  * and are logged explicitly as ignored global edits.
  */
 suite('Setting Helpers - Settings Write Behavior', () => {
-    const SYSTEM_MANAGER_ID = 'ms-python.python:system';
-    const VENV_MANAGER_ID = 'ms-python.python:venv';
-    const PIP_MANAGER_ID = 'ms-python.python:pip';
-    const CONDA_MANAGER_ID = 'ms-python.python:conda';
+    const SYSTEM_MANAGER_ID = SYSTEM_MANAGER_ID_CONSTANT;
+    const VENV_MANAGER_ID = VENV_MANAGER_ID_CONSTANT;
+    const PIP_MANAGER_ID = DEFAULT_PACKAGE_MANAGER_ID;
+    const CONDA_MANAGER_ID = CONDA_MANAGER_ID_CONSTANT;
 
     let updateCalls: Array<{ key: string; value: unknown; target: boolean | ConfigurationTarget | undefined }>;
 
@@ -282,8 +283,8 @@ suite('Setting Helpers - Settings Write Behavior', () => {
  * Instead, we should use defaultEnvManager/defaultPackageManager settings.
  */
 suite('Setting Helpers - Empty Path Bug Fix', () => {
-    const VENV_MANAGER_ID = 'ms-python.python:venv';
-    const PIP_MANAGER_ID = 'ms-python.python:pip';
+    const VENV_MANAGER_ID = VENV_MANAGER_ID_CONSTANT;
+    const PIP_MANAGER_ID = DEFAULT_PACKAGE_MANAGER_ID;
 
     const workspacePath = getTestWorkspacePath();
     const workspaceUri = Uri.file(workspacePath);
@@ -505,9 +506,9 @@ suite('Setting Helpers - Empty Path Bug Fix', () => {
  * When there's an existing entry with "path": "", it should be fixed or removed.
  */
 suite('Setting Helpers - Empty Path Migration', () => {
-    const VENV_MANAGER_ID = 'ms-python.python:venv';
-    const PIP_MANAGER_ID = 'ms-python.python:pip';
-    const CONDA_MANAGER_ID = 'ms-python.python:conda';
+    const VENV_MANAGER_ID = VENV_MANAGER_ID_CONSTANT;
+    const PIP_MANAGER_ID = DEFAULT_PACKAGE_MANAGER_ID;
+    const CONDA_MANAGER_ID = CONDA_MANAGER_ID_CONSTANT;
 
     const workspacePath = getTestWorkspacePath();
     const workspaceUri = Uri.file(workspacePath);
@@ -719,9 +720,9 @@ suite('Setting Helpers - Empty Path Migration', () => {
 });
 
 suite('Setting Helpers - Project Removal', () => {
-    const INLINE_MANAGER_ID = 'ms-python.python:inline-script';
-    const VENV_MANAGER_ID = 'ms-python.python:venv';
-    const PIP_MANAGER_ID = 'ms-python.python:pip';
+    const INLINE_MANAGER_ID = INLINE_SCRIPT_MANAGER_ID;
+    const VENV_MANAGER_ID = VENV_MANAGER_ID_CONSTANT;
+    const PIP_MANAGER_ID = DEFAULT_PACKAGE_MANAGER_ID;
     const firstWorkspacePath = getTestWorkspacePath();
     const firstWorkspaceUri = Uri.file(firstWorkspacePath);
     const firstWorkspace: WorkspaceFolder = {
@@ -1066,7 +1067,7 @@ suite('Setting Helpers - Project Removal', () => {
             await setAllManagerSettings([
                 {
                     project,
-                    envManager: 'ms-python.python:conda',
+                    envManager: CONDA_MANAGER_ID_CONSTANT,
                     packageManager: PIP_MANAGER_ID,
                 },
             ]);
@@ -1075,7 +1076,7 @@ suite('Setting Helpers - Project Removal', () => {
                 firstSetting,
                 {
                     path: 'script.py',
-                    envManager: 'ms-python.python:conda',
+                    envManager: CONDA_MANAGER_ID_CONSTANT,
                     packageManager: PIP_MANAGER_ID,
                     workspace: secondWorkspace.name,
                 },
@@ -1097,14 +1098,14 @@ suite('Setting Helpers - Project Removal', () => {
             await setEnvironmentManager([
                 {
                     project,
-                    envManager: 'ms-python.python:conda',
+                    envManager: CONDA_MANAGER_ID_CONSTANT,
                 },
             ]);
 
             assert.deepStrictEqual(getWorkspaceValue(), [
                 {
                     path: 'script.py',
-                    envManager: 'ms-python.python:conda',
+                    envManager: CONDA_MANAGER_ID_CONSTANT,
                     packageManager: PIP_MANAGER_ID,
                     workspace: undefined,
                 },
@@ -1475,8 +1476,8 @@ suite('Setting Helpers - Project Removal', () => {
 });
 
 suite('Setting Helpers - migrateGlobalDefaultEnvManagerSetting', () => {
-    const SYSTEM_MANAGER_ID = 'ms-python.python:system';
-    const VENV_MANAGER_ID = 'ms-python.python:venv';
+    const SYSTEM_MANAGER_ID = SYSTEM_MANAGER_ID_CONSTANT;
+    const VENV_MANAGER_ID = VENV_MANAGER_ID_CONSTANT;
     const MIGRATION_FLAG_KEY = 'globalSettingsMigration.systemEnvManagerRemoved';
     const TELEMETRY_EVENT = 'MIGRATION.SYSTEM_ENV_MANAGER';
 

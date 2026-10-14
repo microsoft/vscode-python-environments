@@ -9,6 +9,7 @@ import { PythonProjectManagerImpl } from '../../features/projectManager';
 import * as settingHelpers from '../../features/settings/settingHelpers';
 import type { PythonProjectSettings } from '../../features/projectManager';
 import { MockWorkspaceConfiguration } from '../mocks/mockWorkspaceConfig';
+import { VENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, CONDA_MANAGER_ID, POETRY_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 
 /**
  * Returns a platform-appropriate workspace path for testing.
@@ -124,17 +125,17 @@ suite('Project Manager Initialization - Settings Preservation', () => {
             if (key === 'pythonProjects') {
                 // These are existing project settings that should NOT be overwritten
                 return [
-                    { path: 'alice', envManager: 'ms-python.python:venv', packageManager: 'ms-python.python:pip' },
-                    { path: 'alice/bob', envManager: 'ms-python.python:venv', packageManager: 'ms-python.python:pip' },
-                    { path: 'ada', envManager: 'ms-python.python:venv', packageManager: 'ms-python.python:pip' },
+                    { path: 'alice', envManager: VENV_MANAGER_ID, packageManager: DEFAULT_PACKAGE_MANAGER_ID },
+                    { path: 'alice/bob', envManager: VENV_MANAGER_ID, packageManager: DEFAULT_PACKAGE_MANAGER_ID },
+                    { path: 'ada', envManager: VENV_MANAGER_ID, packageManager: DEFAULT_PACKAGE_MANAGER_ID },
                 ] as unknown as T;
             }
             if (key === 'defaultEnvManager') {
                 // User changed this to conda
-                return 'ms-python.python:conda' as T;
+                return CONDA_MANAGER_ID as T;
             }
             if (key === 'defaultPackageManager') {
-                return 'ms-python.python:conda' as T;
+                return CONDA_MANAGER_ID as T;
             }
             return defaultValue;
         };
@@ -266,15 +267,15 @@ suite('Project Manager Initialization - Settings Preservation', () => {
 
         test('changing defaultEnvManager externally should NOT rewrite all project settings', async () => {
             // Start with venv as default
-            let currentDefaultEnvManager = 'ms-python.python:venv';
+            let currentDefaultEnvManager = VENV_MANAGER_ID;
             const mockConfig = new MockWorkspaceConfiguration();
             (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
                 if (key === 'pythonProjects') {
                     return [
                         {
                             path: 'project-a',
-                            envManager: 'ms-python.python:poetry',
-                            packageManager: 'ms-python.python:pip',
+                            envManager: POETRY_MANAGER_ID,
+                            packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                         },
                     ] as unknown as T;
                 }
@@ -294,7 +295,7 @@ suite('Project Manager Initialization - Settings Preservation', () => {
             addPythonProjectSettingStub.resetHistory();
 
             // Simulate user changes defaultEnvManager to conda in settings.json
-            currentDefaultEnvManager = 'ms-python.python:conda';
+            currentDefaultEnvManager = CONDA_MANAGER_ID;
             configChangeEmitter.fire({
                 affectsConfiguration: (section: string) => section === 'python-envs.defaultEnvManager',
             });
@@ -311,16 +312,16 @@ suite('Project Manager Initialization - Settings Preservation', () => {
             let workspaceValueProjects: PythonProjectSettings[] = [
                 {
                     path: 'script.py',
-                    envManager: 'ms-python.python:inline-script',
-                    packageManager: 'ms-python.python:pip',
+                    envManager: INLINE_SCRIPT_MANAGER_ID,
+                    packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                     workspace: workspaceFolder.name,
                 },
             ];
             let workspaceFolderProjects: PythonProjectSettings[] = [
                 {
                     path: 'keep.py',
-                    envManager: 'ms-python.python:venv',
-                    packageManager: 'ms-python.python:pip',
+                    envManager: VENV_MANAGER_ID,
+                    packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                 },
             ];
             const mockConfig = new MockWorkspaceConfiguration();
@@ -329,10 +330,10 @@ suite('Project Manager Initialization - Settings Preservation', () => {
                     return [...workspaceValueProjects, ...workspaceFolderProjects] as unknown as T;
                 }
                 if (key === 'defaultEnvManager') {
-                    return 'ms-python.python:venv' as T;
+                    return VENV_MANAGER_ID as T;
                 }
                 if (key === 'defaultPackageManager') {
-                    return 'ms-python.python:pip' as T;
+                    return DEFAULT_PACKAGE_MANAGER_ID as T;
                 }
                 return defaultValue;
             };
@@ -392,14 +393,14 @@ suite('Project Manager Initialization - Settings Preservation', () => {
             let sharedWorkspaceProjects: PythonProjectSettings[] = [
                 {
                     path: 'first',
-                    envManager: 'ms-python.python:inline-script',
-                    packageManager: 'ms-python.python:pip',
+                    envManager: INLINE_SCRIPT_MANAGER_ID,
+                    packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                     workspace: workspaceFolder.name,
                 },
                 {
                     path: 'second',
-                    envManager: 'ms-python.python:inline-script',
-                    packageManager: 'ms-python.python:pip',
+                    envManager: INLINE_SCRIPT_MANAGER_ID,
+                    packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                     workspace: secondWorkspaceFolder.name,
                 },
             ];
@@ -410,10 +411,10 @@ suite('Project Manager Initialization - Settings Preservation', () => {
                     return sharedWorkspaceProjects as unknown as T;
                 }
                 if (key === 'defaultEnvManager') {
-                    return 'ms-python.python:venv' as T;
+                    return VENV_MANAGER_ID as T;
                 }
                 if (key === 'defaultPackageManager') {
-                    return 'ms-python.python:pip' as T;
+                    return DEFAULT_PACKAGE_MANAGER_ID as T;
                 }
                 return defaultValue;
             };
@@ -470,7 +471,7 @@ suite('Project Manager Initialization - Settings Preservation', () => {
             const mockConfig = new MockWorkspaceConfiguration();
             (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
                 if (key === 'pythonProjects') {return [] as unknown as T;}
-                if (key === 'defaultEnvManager') {return 'ms-python.python:venv' as T;}
+                if (key === 'defaultEnvManager') {return VENV_MANAGER_ID as T;}
                 return defaultValue;
             };
             mockConfig.update = () => Promise.resolve();
@@ -507,7 +508,7 @@ suite('Project Manager Initialization - Settings Preservation', () => {
             const mockConfig = new MockWorkspaceConfiguration();
             (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
                 if (key === 'pythonProjects') {return [] as unknown as T;}
-                if (key === 'defaultEnvManager') {return 'ms-python.python:venv' as T;}
+                if (key === 'defaultEnvManager') {return VENV_MANAGER_ID as T;}
                 return defaultValue;
             };
             mockConfig.update = () => Promise.resolve();
@@ -650,10 +651,10 @@ suite('Project Manager Initialization - Settings Preservation', () => {
                     return [] as unknown as T;
                 }
                 if (key === 'defaultEnvManager') {
-                    return 'ms-python.python:venv' as T;
+                    return VENV_MANAGER_ID as T;
                 }
                 if (key === 'defaultPackageManager') {
-                    return 'ms-python.python:pip' as T;
+                    return DEFAULT_PACKAGE_MANAGER_ID as T;
                 }
                 return defaultValue;
             };
@@ -683,8 +684,8 @@ suite('Project Manager Initialization - Settings Preservation', () => {
             const pythonProjects: PythonProjectSettings[] = [
                 {
                     path: 'existing-project',
-                    envManager: 'ms-python.python:poetry',
-                    packageManager: 'ms-python.python:pip',
+                    envManager: POETRY_MANAGER_ID,
+                    packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                 },
             ];
 
@@ -694,10 +695,10 @@ suite('Project Manager Initialization - Settings Preservation', () => {
                     return pythonProjects as unknown as T;
                 }
                 if (key === 'defaultEnvManager') {
-                    return 'ms-python.python:venv' as T;
+                    return VENV_MANAGER_ID as T;
                 }
                 if (key === 'defaultPackageManager') {
-                    return 'ms-python.python:pip' as T;
+                    return DEFAULT_PACKAGE_MANAGER_ID as T;
                 }
                 return defaultValue;
             };
@@ -797,16 +798,16 @@ suite('Project-Specific Settings Preservation on Reload', () => {
         (mockConfig as any).get = <T>(key: string, defaultValue?: T): T | undefined => {
             if (key === 'pythonProjects') {
                 return [
-                    { path: 'alice/bob', envManager: 'ms-python.python:venv', packageManager: 'ms-python.python:pip' },
-                    { path: 'ada', envManager: 'ms-python.python:venv', packageManager: 'ms-python.python:pip' },
-                    { path: 'alice', envManager: 'ms-python.python:venv', packageManager: 'ms-python.python:pip' },
+                    { path: 'alice/bob', envManager: VENV_MANAGER_ID, packageManager: DEFAULT_PACKAGE_MANAGER_ID },
+                    { path: 'ada', envManager: VENV_MANAGER_ID, packageManager: DEFAULT_PACKAGE_MANAGER_ID },
+                    { path: 'alice', envManager: VENV_MANAGER_ID, packageManager: DEFAULT_PACKAGE_MANAGER_ID },
                 ] as unknown as T;
             }
             if (key === 'defaultEnvManager') {
-                return 'ms-python.python:conda' as T;
+                return CONDA_MANAGER_ID as T;
             }
             if (key === 'defaultPackageManager') {
-                return 'ms-python.python:conda' as T;
+                return CONDA_MANAGER_ID as T;
             }
             return defaultValue;
         };

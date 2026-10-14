@@ -42,6 +42,7 @@ import { PoetryManager } from '../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../managers/poetry/poetryPackageManager';
 import * as poetryUtils from '../../managers/poetry/poetryUtils';
 import { createMockLogOutputChannel } from '../mocks/helper';
+import { VENV_MANAGER_ID } from '../../common/constants';
 
 suite('Python tool manager capabilities', () => {
     let source: CancellationTokenSource;
@@ -58,7 +59,7 @@ suite('Python tool manager capabilities', () => {
         scope = Uri.file(path.join(process.cwd(), 'project with spaces'));
         const executable = path.join(scope.fsPath, '.venv', 'python.exe');
         environment = {
-            envId: { id: 'test', managerId: 'ms-python.python:venv' },
+            envId: { id: 'test', managerId: VENV_MANAGER_ID },
             name: 'test',
             displayName: 'test',
             displayPath: executable,

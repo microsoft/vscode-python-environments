@@ -12,6 +12,7 @@ import * as frameUtils from '../../common/utils/frameUtils';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { SYSTEM_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, CONDA_MANAGER_ID } from '../../common/constants';
 
 suite('PythonEnvironmentManagers - getEnvironment', () => {
     let sandbox: sinon.SinonSandbox;
@@ -19,7 +20,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
 
     const env311: PythonEnvironment = {
-        envId: { id: 'system-311', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-311', managerId: SYSTEM_MANAGER_ID },
         name: 'Python 3.11',
         displayName: 'Python 3.11.15',
         version: '3.11.15',
@@ -30,7 +31,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     };
 
     const env314: PythonEnvironment = {
-        envId: { id: 'system-314', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-314', managerId: SYSTEM_MANAGER_ID },
         name: 'Python 3.14',
         displayName: 'Python 3.14.4',
         version: '3.14.4',
@@ -50,7 +51,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
         sandbox.stub(workspaceApis, 'getConfiguration').returns({
             get: (key: string, defaultValue?: unknown) => {
                 if (key === 'defaultEnvManager') {
-                    return 'ms-python.python:system';
+                    return SYSTEM_MANAGER_ID;
                 }
                 if (key === 'pythonProjects') {
                     return [];
@@ -85,7 +86,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
         const fakeManager = {
             name: managerId.split(':')[1],
             displayName: managerId,
-            preferredPackageManagerId: 'ms-python.python:pip',
+            preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
             getVersion,
             get: getStub,
             set: sandbox.stub().resolves(),
@@ -101,7 +102,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     test('should NOT update cache when manager.get() returns a different env than what was set', async () => {
         // Register a system manager whose get() returns env314 (the "latest")
         const getStub = sandbox.stub().resolves(env314);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         // Simulate that initial selection set env311 via setEnvironment
         await envManagers.setEnvironment(undefined, env311, false);
@@ -128,7 +129,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
 
     test('should NOT fire change events on read', async () => {
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         const changeEvents: any[] = [];
         envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
@@ -144,7 +145,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
 
     test('should still return the correct env from manager.get()', async () => {
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         const result = await envManagers.getEnvironment(undefined);
         assert.strictEqual(result?.envId.id, 'system-311');
@@ -154,18 +155,18 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     test('should delegate getVersion to the registered manager', async () => {
         const version = parsePep440Version('1.2.3');
         const getVersion = sandbox.stub().resolves(version);
-        registerFakeManager('ms-python.python:system', sandbox.stub().resolves(env311), getVersion);
+        registerFakeManager(SYSTEM_MANAGER_ID, sandbox.stub().resolves(env311), getVersion);
 
-        const result = await envManagers.getEnvironmentManager('ms-python.python:system')?.getVersion();
+        const result = await envManagers.getEnvironmentManager(SYSTEM_MANAGER_ID)?.getVersion();
 
         assert.deepStrictEqual(result, version);
         assert.ok(getVersion.calledOnce, 'Should delegate to manager.getVersion()');
     });
 
     test('should return undefined when the registered manager does not provide getVersion', async () => {
-        registerFakeManager('ms-python.python:system', sandbox.stub().resolves(env311));
+        registerFakeManager(SYSTEM_MANAGER_ID, sandbox.stub().resolves(env311));
 
-        const result = await envManagers.getEnvironmentManager('ms-python.python:system')?.getVersion();
+        const result = await envManagers.getEnvironmentManager(SYSTEM_MANAGER_ID)?.getVersion();
 
         assert.strictEqual(result, undefined);
     });
@@ -182,7 +183,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
         // in the map, find nothing, check the cache (empty), and return undefined.
         // This exercises the fallback path in getEnvironmentManager beyond the size === 0 guard.
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:conda', getStub);
+        registerFakeManager(CONDA_MANAGER_ID, getStub);
 
         const result = await envManagers.getEnvironment(Uri.file('/some/unrelated/path'));
         assert.strictEqual(
@@ -194,7 +195,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
 
     test('setEnvironment should still fire change events and update cache', async () => {
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         const changeEvents: any[] = [];
         envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
@@ -214,7 +215,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
         // 3. The selection should NOT flip to env314
 
         const getStub = sandbox.stub().resolves(env314);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         // Step 1: Initial selection picks env311
         await envManagers.setEnvironment(undefined, env311, false);
@@ -246,7 +247,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
     let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
 
     const env311: PythonEnvironment = {
-        envId: { id: 'system-311', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-311', managerId: SYSTEM_MANAGER_ID },
         name: 'Python 3.11',
         displayName: 'Python 3.11.15',
         version: '3.11.15',
@@ -257,7 +258,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
     };
 
     const env314: PythonEnvironment = {
-        envId: { id: 'system-314', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-314', managerId: SYSTEM_MANAGER_ID },
         name: 'Python 3.14',
         displayName: 'Python 3.14.4',
         version: '3.14.4',
@@ -273,7 +274,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
         sandbox.stub(workspaceApis, 'getConfiguration').returns({
             get: (key: string, defaultValue?: unknown) => {
                 if (key === 'defaultEnvManager') {
-                    return 'ms-python.python:system';
+                    return SYSTEM_MANAGER_ID;
                 }
                 if (key === 'pythonProjects') {
                     return [];
@@ -301,7 +302,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
         const fakeManager = {
             name: managerId.split(':')[1],
             displayName: managerId,
-            preferredPackageManagerId: 'ms-python.python:pip',
+            preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
             get: getStub,
             set: sandbox.stub().resolves(),
             resolve: sandbox.stub().resolves(undefined),
@@ -315,7 +316,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
 
     test('should fire change event when manager reports a new environment', async () => {
         const getStub = sandbox.stub().resolves(env314);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         // Set initial env
         await envManagers.setEnvironment(undefined, env311, false);
@@ -340,7 +341,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
 
     test('should NOT fire change event when manager reports same environment', async () => {
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         // Set initial env to env311
         await envManagers.setEnvironment(undefined, env311, false);
@@ -384,7 +385,7 @@ suite('PythonEnvironmentManagers - clearCache', () => {
             {
                 name,
                 displayName: name,
-                preferredPackageManagerId: 'ms-python.python:pip',
+                preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
                 get: sandbox.stub().resolves(undefined),
                 set: sandbox.stub().resolves(),
                 resolve: sandbox.stub().resolves(undefined),
