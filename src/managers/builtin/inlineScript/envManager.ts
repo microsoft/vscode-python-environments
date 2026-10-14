@@ -34,6 +34,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../../capabilities';
 import {
     CONDA_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
@@ -291,6 +292,30 @@ interface SavedMetadataSnapshot {
 
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        [EnvironmentCapability.List]: supportedCapability,
+        [EnvironmentCapability.Resolve]: async () => ({
+            supported: false,
+            reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),
+        }),
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
+        [EnvironmentCapability.Remove]: supportedCapability,
+        [EnvironmentCapability.Create]: async ({ scope }) => {
+            const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
+            if (!scriptUri) {
+                return {
+                    supported: false,
+                    reason: l10n.t('Inline-script creation requires exactly one local file URI.'),
+                };
+            }
+            // Read the bounded header afresh so saved metadata edits affect the next query.
+            return (await readInlineScriptMetadataFromFile(scriptUri))
+                ? { supported: true }
+                : { supported: false, reason: l10n.t('The script must contain valid PEP 723 metadata.') };
+        },
+    };
+
     private readonly pendingSetups = new Map<string, Promise<PythonEnvironment | undefined>>();
     private readonly pendingCreations = new Map<string, PendingCreationContext>();
     private readonly directlyResolvedBaseInterpreters = new Map<string, PythonEnvironment>();

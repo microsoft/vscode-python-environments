@@ -29,6 +29,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
 import { executeCommand } from '../../common/command.api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
 import { VenvManagerStrings } from '../../common/localize';
@@ -69,6 +70,15 @@ import {
 } from './venvUtils';
 
 export class VenvManager implements EnvironmentManager {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        [EnvironmentCapability.List]: supportedCapability,
+        [EnvironmentCapability.Resolve]: supportedCapability,
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
+        [EnvironmentCapability.Create]: supportedCapability,
+        [EnvironmentCapability.Remove]: supportedCapability,
+    };
+
     private collection: PythonEnvironment[] = [];
     private environmentFolders: { collection: PythonEnvironment[]; length: number; folders: Set<string> } | undefined;
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();

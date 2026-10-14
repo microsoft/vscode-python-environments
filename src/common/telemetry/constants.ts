@@ -6,6 +6,7 @@ export enum EventNames {
     PACKAGE_MANAGER_REGISTERED = 'PACKAGE_MANAGER.REGISTERED',
     ENVIRONMENT_MANAGER_SELECTED = 'ENVIRONMENT_MANAGER.SELECTED',
     PACKAGE_MANAGER_SELECTED = 'PACKAGE_MANAGER.SELECTED',
+    MANAGER_CAPABILITY_QUERY = 'MANAGER.CAPABILITY_QUERY',
 
     VENV_USING_UV = 'VENV.USING_UV',
     VENV_CREATION = 'VENV.CREATION',
@@ -326,6 +327,25 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.PACKAGE_MANAGER_REGISTERED]: {
         managerId: string;
+    };
+
+    /* __GDPR__
+        "manager.capability_query": {
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "managerKind": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "managerVersion": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "capability": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "isLegacy": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" }
+        }
+    */
+    [EventNames.MANAGER_CAPABILITY_QUERY]: {
+        managerId: string;
+        managerKind: 'environment' | 'package';
+        managerVersion: string;
+        capability: string;
+        outcome: 'supported' | 'unsupported' | 'unavailable' | 'error';
+        isLegacy: boolean;
     };
 
     /* __GDPR__
