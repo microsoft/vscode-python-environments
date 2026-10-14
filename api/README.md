@@ -44,7 +44,7 @@ import { PackageCapability, PythonEnvironments } from '@vscode/python-environmen
 
 const api = await PythonEnvironments.api();
 const environment = await api.getEnvironment(undefined);
-if (environment && typeof api.getPackageManagerCapability === 'function') {
+if (environment) {
     const support = await api.getPackageManagerCapability(environment, PackageCapability.ListDirect);
     if (support.supported) {
         // Best-effort direct/transitive package classification is available.
