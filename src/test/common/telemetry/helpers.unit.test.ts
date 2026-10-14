@@ -2,14 +2,50 @@ import assert from 'node:assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../../api';
-import { sendProjectStructureTelemetry } from '../../../common/telemetry/helpers';
+import {
+    CONDA_MANAGER_ID,
+    DEFAULT_PACKAGE_MANAGER_ID,
+    HATCH_MANAGER_ID,
+    INLINE_SCRIPT_MANAGER_ID,
+    PIPENV_MANAGER_ID,
+    PIXI_MANAGER_ID,
+    POETRY_MANAGER_ID,
+    PYENV_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+    VENV_MANAGER_ID,
+} from '../../../common/constants';
 import { EventNames } from '../../../common/telemetry/constants';
+import { getKnownManagerId, sendProjectStructureTelemetry } from '../../../common/telemetry/helpers';
 import * as sender from '../../../common/telemetry/sender';
 import * as workspaceApis from '../../../common/workspace.apis';
 import type { EnvironmentManagers } from '../../../features/envManagers';
 import type { PythonProjectManager } from '../../../features/projectManager';
 
 suite('Telemetry Helpers', () => {
+    suite('getKnownManagerId', () => {
+        test('returns known manager IDs unchanged', () => {
+            for (const managerId of [
+                CONDA_MANAGER_ID,
+                DEFAULT_PACKAGE_MANAGER_ID,
+                HATCH_MANAGER_ID,
+                INLINE_SCRIPT_MANAGER_ID,
+                PIPENV_MANAGER_ID,
+                PIXI_MANAGER_ID,
+                POETRY_MANAGER_ID,
+                PYENV_MANAGER_ID,
+                SYSTEM_MANAGER_ID,
+                VENV_MANAGER_ID,
+            ]) {
+                assert.strictEqual(getKnownManagerId(managerId), managerId);
+            }
+        });
+
+        test('returns undefined sentinel for missing and unknown manager IDs', () => {
+            assert.strictEqual(getKnownManagerId(undefined), 'undefined');
+            assert.strictEqual(getKnownManagerId('third-party:manager'), 'undefined');
+        });
+    });
+
     suite('sendProjectStructureTelemetry', () => {
         let sendTelemetryEventStub: sinon.SinonStub;
         let getWorkspaceFoldersStub: sinon.SinonStub;

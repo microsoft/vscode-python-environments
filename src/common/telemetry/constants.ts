@@ -339,6 +339,7 @@ export interface IEventNamePropertyMapping {
             "isLegacy": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" }
         }
     */
+    /** Manager IDs outside the built-in allowlist are reported as "undefined". */
     [EventNames.MANAGER_CAPABILITY_QUERY]: {
         managerId: string;
         managerKind: 'environment' | 'package';

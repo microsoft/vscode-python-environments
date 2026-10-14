@@ -2,11 +2,45 @@ import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../../
 import type { EnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import { getUvEnvironments } from '../../managers/builtin/uvEnvironments';
-import { ISSUES_URL } from '../constants';
+import {
+    CONDA_MANAGER_ID,
+    DEFAULT_PACKAGE_MANAGER_ID,
+    HATCH_MANAGER_ID,
+    INLINE_SCRIPT_MANAGER_ID,
+    ISSUES_URL,
+    PIPENV_MANAGER_ID,
+    PIXI_MANAGER_ID,
+    POETRY_MANAGER_ID,
+    PYENV_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+    VENV_MANAGER_ID,
+} from '../constants';
 import { traceInfo, traceVerbose, traceWarn } from '../logging';
 import { getWorkspaceFolders } from '../workspace.apis';
 import { EventNames } from './constants';
 import { sendTelemetryEvent } from './sender';
+
+const knownManagerIds = new Set<string>([
+    CONDA_MANAGER_ID,
+    DEFAULT_PACKAGE_MANAGER_ID,
+    HATCH_MANAGER_ID,
+    INLINE_SCRIPT_MANAGER_ID,
+    PIPENV_MANAGER_ID,
+    PIXI_MANAGER_ID,
+    POETRY_MANAGER_ID,
+    PYENV_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+    VENV_MANAGER_ID,
+]);
+
+/**
+ * Returns an allowlisted manager ID for telemetry, or the "undefined" sentinel.
+ * @param managerId Manager ID to validate.
+ * @returns The manager ID when known; otherwise "undefined".
+ */
+export function getKnownManagerId(managerId: string | undefined): string {
+    return managerId !== undefined && knownManagerIds.has(managerId) ? managerId : 'undefined';
+}
 
 /**
  * Extracts the base tool name from a manager ID.
