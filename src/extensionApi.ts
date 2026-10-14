@@ -302,6 +302,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable {
         return this.envManagers.registerPackageManager(manager, options);
     }
+
     async managePackages(context: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);

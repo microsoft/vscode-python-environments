@@ -80,6 +80,7 @@ suite('Public package API execution policy', () => {
         sinon.stub(poetryUtils, 'getPoetry').resolves(path.join(temp, 'poetry'));
         sinon.stub(workspaceFs, 'stat').resolves({ type: FileType.Directory, ctime: 0, mtime: 0, size: 0 });
         sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
+        sinon.stub(managerReady, 'waitForAllEnvManagers').resolves();
         sinon.stub(packageChanges, 'updatePackagesAndNotify').resolves([]);
         progress = sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) =>
             task({ report: () => {} }, source.token),
@@ -122,6 +123,7 @@ suite('Public package API execution policy', () => {
         type Args = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
         return new PythonEnvironmentApiImpl(
             {
+                managers: [],
                 onDidChangeActiveEnvironment: event(),
                 onDidChangePackageProviderPackages: event(),
                 getPackageManager: () => manager,

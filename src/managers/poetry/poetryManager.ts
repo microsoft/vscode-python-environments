@@ -194,9 +194,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         }
 
         if (scope === 'global') {
-            return this.collection.filter((env) => {
-                return env.group === POETRY_GLOBAL;
-            });
+            return [];
         }
 
         if (scope instanceof Uri) {

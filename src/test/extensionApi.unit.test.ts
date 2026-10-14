@@ -1,10 +1,7 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { EventEmitter, Uri } from 'vscode';
-import {
-    PythonEnvironment,
-    PythonProject,
-} from '../api';
+import { PythonEnvironment, PythonProject } from '../api';
 import * as managerReady from '../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
 import type { PythonProjectManager } from '../features/projectManager';
@@ -173,8 +170,10 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
 });
 
 suite('PythonEnvironmentApiImpl - package resolution', () => {
+    let waitForEnvManagerId: sinon.SinonStub;
+
     setup(() => {
-        sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
+        waitForEnvManagerId = sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
     });
 
     teardown(() => {
@@ -241,5 +240,6 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
 
         assert.ok(getPackageManager.calledWithExactly(environment));
         assert.ok(manage.calledOnceWithExactly(environment, { install: ['example'] }));
+        assert.ok(waitForEnvManagerId.calledOnceWithExactly(['environment-manager']));
     });
 });

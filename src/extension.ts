@@ -347,7 +347,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 return;
             }
             try {
-                await resolved.packageManager.manage(resolved.environment, { install: [] });
+                await api.managePackages(resolved.environment, { install: [] });
             } catch (err) {
                 traceError('Error when running command python-envs.packages', err);
             }
@@ -356,7 +356,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await handlePackageUninstall(context);
         }),
         commands.registerCommand('python-envs.managePackageVersion', async (context: unknown) => {
-            await managePackageVersion(context);
+            await managePackageVersion(context, envManagers);
         }),
         commands.registerCommand('python-envs.set', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);

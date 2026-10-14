@@ -49,5 +49,14 @@
     "python-envs.runPetInTerminal.title": "Run Python Environment Tool (PET) in Terminal...",
     "python-envs.managePackageVersion.title": "Manage Package Version",
     "python-envs.alwaysUseUv.description": "When set to true, uv will be used to manage all virtual environments if available. When set to false, uv will only manage virtual environments explicitly created by uv.",
+    "python-envs.globalPackageInstallationAction.description": "Controls what happens when installing packages into a global Python environment.",
+    "python-envs.globalPackageInstallationAction.ask.label": "Ask",
+    "python-envs.globalPackageInstallationAction.ask.description": "Ask where to install packages each time.",
+    "python-envs.globalPackageInstallationAction.continueGlobally.label": "Continue Globally",
+    "python-envs.globalPackageInstallationAction.continueGlobally.description": "Install packages into the selected global Python environment.",
+    "python-envs.globalPackageInstallationAction.useExisting.label": "Use Existing",
+    "python-envs.globalPackageInstallationAction.useExisting.description": "Ask which existing virtual environment should receive the packages.",
+    "python-envs.globalPackageInstallationAction.createNew.label": "Create New",
+    "python-envs.globalPackageInstallationAction.createNew.description": "Create a new virtual environment for the packages.",
     "python-envs.packageWatchers.description": "When enabled, file system watchers monitor site-packages for install/uninstall changes and automatically refresh the package list. Disable this if you experience performance issues in large workspaces."
 }
