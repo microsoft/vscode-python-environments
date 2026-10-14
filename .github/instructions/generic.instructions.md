@@ -14,6 +14,11 @@ Provide project context and coding guidelines that AI should follow when generat
 - Use the extension’s logging utilities (`traceLog`, `traceVerbose`) for internal logs.
 - Do not use `console.log` or `console.warn` for logging.
 
+## Telemetry
+
+- Always pass environment-manager and package-manager IDs through `getKnownManagerId()` from `src/common/telemetry/helpers.ts` when adding them to telemetry properties, including properties named `manager` or `managerId`.
+- Normalize IDs only at the telemetry boundary. Preserve exact manager IDs for registration, routing, settings, environment identity, logs, and user-facing output.
+
 ## Settings Precedence
 
 - Always consider VS Code settings precedence:
