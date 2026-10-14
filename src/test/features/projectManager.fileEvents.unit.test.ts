@@ -7,6 +7,7 @@ import { PythonProjectManagerImpl } from '../../features/projectManager';
 import * as settingHelpers from '../../features/settings/settingHelpers';
 import { PythonProjectsImpl } from '../../features/projectManager';
 import { MockWorkspaceConfiguration } from '../mocks/mockWorkspaceConfig';
+import { VENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, PYENV_MANAGER_ID, CONDA_MANAGER_ID } from '../../common/constants';
 
 /**
  * Returns a platform-appropriate workspace path for testing.
@@ -76,10 +77,10 @@ suite('Project Manager File Event Handling', () => {
                 return [] as unknown as T;
             }
             if (key === 'defaultEnvManager') {
-                return 'ms-python.python:venv' as T;
+                return VENV_MANAGER_ID as T;
             }
             if (key === 'defaultPackageManager') {
-                return 'ms-python.python:pip' as T;
+                return DEFAULT_PACKAGE_MANAGER_ID as T;
             }
             return defaultValue;
         };
@@ -311,8 +312,8 @@ suite('updatePythonProjectSettingPath', () => {
                 return [
                     {
                         path: 'old-project',
-                        envManager: 'ms-python.python:venv',
-                        packageManager: 'ms-python.python:pip',
+                        envManager: VENV_MANAGER_ID,
+                        packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                     },
                 ] as unknown as T;
             }
@@ -352,8 +353,8 @@ suite('updatePythonProjectSettingPath', () => {
                 return [
                     {
                         path: 'other-project',
-                        envManager: 'ms-python.python:venv',
-                        packageManager: 'ms-python.python:pip',
+                        envManager: VENV_MANAGER_ID,
+                        packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                     },
                 ] as unknown as T;
             }
@@ -390,8 +391,8 @@ suite('updatePythonProjectSettingPath', () => {
                 return [
                     {
                         path: 'pyenv-project',
-                        envManager: 'ms-python.python:pyenv',
-                        packageManager: 'ms-python.python:conda',
+                        envManager: PYENV_MANAGER_ID,
+                        packageManager: CONDA_MANAGER_ID,
                     },
                 ] as unknown as T;
             }
@@ -417,12 +418,12 @@ suite('updatePythonProjectSettingPath', () => {
         assert.strictEqual(updatedProjects[0].path, 'pyenv-project-renamed', 'Path should be updated');
         assert.strictEqual(
             updatedProjects[0].envManager,
-            'ms-python.python:pyenv',
+            PYENV_MANAGER_ID,
             'envManager should be preserved (not reset to default)',
         );
         assert.strictEqual(
             updatedProjects[0].packageManager,
-            'ms-python.python:conda',
+            CONDA_MANAGER_ID,
             'packageManager should be preserved (not reset to default)',
         );
     });

@@ -14,7 +14,7 @@ import {
     PythonEnvironmentApi,
     PythonProject,
 } from '../../../api';
-import { VENV_MANAGER_ID } from '../../../common/constants';
+import { VENV_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../../common/constants';
 import * as windowApis from '../../../common/window.apis';
 import { VenvManager } from '../../../managers/builtin/venvManager';
 import * as venvUtils from '../../../managers/builtin/venvUtils';
@@ -119,7 +119,7 @@ suite('VenvManager - manual path resolution', () => {
                     ? undefined
                     : createMockPythonEnvironment({
                           envPath: selected.environmentPath.fsPath,
-                          managerId: 'ms-python.python:system',
+                          managerId: SYSTEM_MANAGER_ID,
                       }),
             );
             const onChanged = sandbox.spy();

@@ -15,7 +15,7 @@ import {
     WorkspaceConfiguration,
 } from 'vscode';
 import { PackageManager, PythonEnvironment } from '../../api';
-import { PYTHON_EXTENSION_ID, SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
+import { PYTHON_EXTENSION_ID, SYSTEM_MANAGER_ID, VENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import * as persistentState from '../../common/persistentState';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import * as frameUtils from '../../common/utils/frameUtils';
@@ -159,7 +159,7 @@ suite('Python tools stateless startup selection', () => {
         sinon.stub(workspaceApis, 'getConfiguration').callsFake((section) => {
             const defaults = new Map<string, unknown>([
                 ['python-envs.defaultEnvManager', VENV_MANAGER_ID],
-                ['python-envs.defaultPackageManager', 'ms-python.python:pip'],
+                ['python-envs.defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID],
                 ['python-envs.pythonProjects', []],
             ]);
             const configuration: WorkspaceConfiguration = {
@@ -307,7 +307,7 @@ suite('Python tools stateless startup selection', () => {
             {
                 path: 'New Service',
                 envManager: VENV_MANAGER_ID,
-                packageManager: 'ms-python.python:pip',
+                packageManager: DEFAULT_PACKAGE_MANAGER_ID,
             },
         ]);
         assert.strictEqual(workspaceSettings.get('python-envs.defaultEnvManager'), undefined);

@@ -35,6 +35,7 @@ import {
 } from './cache';
 import { getDefaultGlobalPython, refreshPythons, resolveSystemPythonEnvironmentPath } from './utils';
 import { installPythonWithUv, promptInstallPythonViaUv, selectPythonVersionToInstall } from './uvPythonInstaller';
+import { DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 
 export class SysPythonManager implements EnvironmentManager {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
@@ -73,7 +74,7 @@ export class SysPythonManager implements EnvironmentManager {
     ) {
         this.name = 'system';
         this.displayName = 'Global';
-        this.preferredPackageManagerId = 'ms-python.python:pip';
+        this.preferredPackageManagerId = DEFAULT_PACKAGE_MANAGER_ID;
         this.description = undefined;
         this.tooltip = new MarkdownString(SysManagerStrings.sysManagerDescription, true);
         this.iconPath = new ThemeIcon('globe');

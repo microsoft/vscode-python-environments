@@ -9,6 +9,7 @@ import * as managerReady from '../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
 import type { PythonProjectManager } from '../features/projectManager';
 import type { InternalPackageManager } from '../managers/common/registeredManagers';
+import { VENV_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 
 suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
     test('fires event with correct added and removed projects', () => {
@@ -81,7 +82,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
     test('returns the last-known environment while a slower lookup continues in the background', async () => {
         const scope = Uri.file('/workspace/script.py');
         const lastKnown: PythonEnvironment = {
-            envId: { id: 'default', managerId: 'ms-python.python:venv' },
+            envId: { id: 'default', managerId: VENV_MANAGER_ID },
             name: 'default',
             displayName: 'default',
             displayPath: '/env/default',
@@ -107,7 +108,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
                 }),
             ),
             getLastKnownEnvironment: sinon.stub().withArgs(scope).returns(lastKnown),
-            getEnvironmentManager: sinon.stub().returns({ id: 'ms-python.python:venv' }),
+            getEnvironmentManager: sinon.stub().returns({ id: VENV_MANAGER_ID }),
         } as unknown as ApiArgs[0];
         const mockProjectCreators = {} as unknown as ApiArgs[2];
         const mockTerminalManager = {} as unknown as ApiArgs[3];
@@ -151,7 +152,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
                 }),
             ),
             getLastKnownEnvironment: sinon.stub().returns(lastKnown),
-            getEnvironmentManager: sinon.stub().returns({ id: 'ms-python.python:inline-script' }),
+            getEnvironmentManager: sinon.stub().returns({ id: INLINE_SCRIPT_MANAGER_ID }),
         } as unknown as ApiArgs[0];
 
         const api = new PythonEnvironmentApiImpl(

@@ -23,6 +23,7 @@ import type { EnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
+import { VENV_MANAGER_ID, SYSTEM_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, CONDA_MANAGER_ID } from '../../common/constants';
 
 /**
  * Creates a mock WorkspaceConfiguration for testing.
@@ -49,7 +50,7 @@ suite('Interpreter Selection - Priority Chain', () => {
 
     const testUri = Uri.file('/test/workspace');
     const mockVenvEnv: PythonEnvironment = {
-        envId: { id: 'venv-env-1', managerId: 'ms-python.python:venv' },
+        envId: { id: 'venv-env-1', managerId: VENV_MANAGER_ID },
         name: 'Test Venv',
         displayName: 'Test Venv',
         version: '3.11.0',
@@ -59,7 +60,7 @@ suite('Interpreter Selection - Priority Chain', () => {
         execInfo: { run: { executable: '/test/workspace/.venv/bin/python' } },
     };
     const mockSystemEnv: PythonEnvironment = {
-        envId: { id: 'system-env-1', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-env-1', managerId: SYSTEM_MANAGER_ID },
         name: 'System Python',
         displayName: 'System Python 3.11',
         version: '3.11.0',
@@ -74,7 +75,7 @@ suite('Interpreter Selection - Priority Chain', () => {
 
         // Create mock managers
         mockVenvManager = {
-            id: 'ms-python.python:venv',
+            id: VENV_MANAGER_ID,
             name: 'venv',
             displayName: 'Venv',
             get: sandbox.stub(),
@@ -82,7 +83,7 @@ suite('Interpreter Selection - Priority Chain', () => {
         } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
-            id: 'ms-python.python:system',
+            id: SYSTEM_MANAGER_ID,
             name: 'system',
             displayName: 'System',
             get: sandbox.stub(),
@@ -110,10 +111,10 @@ suite('Interpreter Selection - Priority Chain', () => {
         // Default: getEnvironmentManager returns the manager for a given ID
         mockEnvManagers.getEnvironmentManager.callsFake((scope: unknown) => {
             const id = typeof scope === 'string' ? scope : undefined;
-            if (id === 'ms-python.python:venv') {
+            if (id === VENV_MANAGER_ID) {
                 return mockVenvManager;
             }
-            if (id === 'ms-python.python:system') {
+            if (id === SYSTEM_MANAGER_ID) {
                 return mockSystemManager;
             }
             return undefined;
@@ -131,8 +132,8 @@ suite('Interpreter Selection - Priority Chain', () => {
                 createMockConfig([
                     {
                         path: '.',
-                        envManager: 'ms-python.python:venv',
-                        packageManager: 'ms-python.python:pip',
+                        envManager: VENV_MANAGER_ID,
+                        packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                     },
                 ]) as WorkspaceConfiguration,
             );
@@ -151,7 +152,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             );
 
             assert.strictEqual(result.source, 'pythonProjects');
-            assert.strictEqual(result.manager.id, 'ms-python.python:venv');
+            assert.strictEqual(result.manager.id, VENV_MANAGER_ID);
         });
     });
 
@@ -161,7 +162,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
             sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
                 if (section === 'python-envs' && key === 'defaultEnvManager') {
-                    return 'ms-python.python:venv';
+                    return VENV_MANAGER_ID;
                 }
                 return undefined;
             });
@@ -175,7 +176,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             );
 
             assert.strictEqual(result.source, 'defaultEnvManager');
-            assert.strictEqual(result.manager.id, 'ms-python.python:venv');
+            assert.strictEqual(result.manager.id, VENV_MANAGER_ID);
         });
 
         test('should skip to Priority 3 when defaultEnvManager is not user-configured (only fallback)', async () => {
@@ -657,7 +658,7 @@ suite('Interpreter Selection - Priority Chain', () => {
 
             // API resolves the homebrew path to a homebrew environment
             const homebrewEnv: PythonEnvironment = {
-                envId: { id: 'homebrew-env', managerId: 'ms-python.python:system' },
+                envId: { id: 'homebrew-env', managerId: SYSTEM_MANAGER_ID },
                 name: 'Homebrew Python',
                 displayName: 'Python 3.14.2 (homebrew)',
                 version: '3.14.2',
@@ -714,7 +715,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             );
 
             assert.strictEqual(result.source, 'autoDiscovery');
-            assert.strictEqual(result.manager.id, 'ms-python.python:venv');
+            assert.strictEqual(result.manager.id, VENV_MANAGER_ID);
             assert.strictEqual(result.environment, mockVenvEnv);
         });
 
@@ -732,7 +733,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             );
 
             assert.strictEqual(result.source, 'autoDiscovery');
-            assert.strictEqual(result.manager.id, 'ms-python.python:system');
+            assert.strictEqual(result.manager.id, SYSTEM_MANAGER_ID);
         });
 
         test('should throw error when no managers are available', async () => {
@@ -816,7 +817,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             sandbox.stub(helpers, 'getUserConfiguredSetting').returns(undefined);
 
             const mockCondaManager = {
-                id: 'ms-python.python:conda',
+                id: CONDA_MANAGER_ID,
                 name: 'conda',
                 displayName: 'Conda',
                 get: sandbox.stub().resolves(undefined),
@@ -839,7 +840,7 @@ suite('Interpreter Selection - Priority Chain', () => {
             );
 
             assert.strictEqual(result.source, 'autoDiscovery');
-            assert.strictEqual(result.manager.id, 'ms-python.python:conda');
+            assert.strictEqual(result.manager.id, CONDA_MANAGER_ID);
         });
     });
 });
@@ -855,7 +856,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
 
     const testUri = Uri.file('/test/workspace');
     const mockVenvEnv: PythonEnvironment = {
-        envId: { id: 'venv-env-1', managerId: 'ms-python.python:venv' },
+        envId: { id: 'venv-env-1', managerId: VENV_MANAGER_ID },
         name: 'Test Venv',
         displayName: 'Test Venv',
         version: '3.11.0',
@@ -870,7 +871,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         resetSettingWarnings();
 
         mockVenvManager = {
-            id: 'ms-python.python:venv',
+            id: VENV_MANAGER_ID,
             name: 'venv',
             displayName: 'Venv',
             get: sandbox.stub().resolves(mockVenvEnv),
@@ -878,7 +879,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
         } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
-            id: 'ms-python.python:system',
+            id: SYSTEM_MANAGER_ID,
             name: 'system',
             displayName: 'System',
             get: sandbox.stub(),
@@ -906,10 +907,10 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
 
         mockEnvManagers.getEnvironmentManager.callsFake((scope: unknown) => {
             const id = typeof scope === 'string' ? scope : undefined;
-            if (id === 'ms-python.python:venv') {
+            if (id === VENV_MANAGER_ID) {
                 return mockVenvManager;
             }
-            if (id === 'ms-python.python:system') {
+            if (id === SYSTEM_MANAGER_ID) {
                 return mockSystemManager;
             }
             return undefined;
@@ -1003,7 +1004,7 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             prefix: path.join(testUri.fsPath, 'python-embedded'),
         });
         const mockResolvedEnv: PythonEnvironment = {
-            envId: { id: 'embedded-env', managerId: 'ms-python.python:system' },
+            envId: { id: 'embedded-env', managerId: SYSTEM_MANAGER_ID },
             name: 'Embedded Python',
             displayName: 'Python 3.12.10',
             version: '3.12.10',
@@ -1316,10 +1317,10 @@ suite('Interpreter Selection - applyInitialEnvironmentSelection', () => {
             if (id === hatchManagerId && hatchRegistered) {
                 return mockHatchManager;
             }
-            if (id === 'ms-python.python:venv') {
+            if (id === VENV_MANAGER_ID) {
                 return mockVenvManager;
             }
-            if (id === 'ms-python.python:system') {
+            if (id === SYSTEM_MANAGER_ID) {
                 return mockSystemManager;
             }
             return undefined;
@@ -1384,7 +1385,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
     let mockSystemManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
     const mockSystemEnv: PythonEnvironment = {
-        envId: { id: 'system-env-1', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-env-1', managerId: SYSTEM_MANAGER_ID },
         name: 'System Python',
         displayName: 'System Python 3.11',
         version: '3.11.0',
@@ -1398,7 +1399,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
         sandbox = sinon.createSandbox();
 
         mockVenvManager = {
-            id: 'ms-python.python:venv',
+            id: VENV_MANAGER_ID,
             name: 'venv',
             displayName: 'Venv',
             get: sandbox.stub(),
@@ -1406,7 +1407,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
         } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
-            id: 'ms-python.python:system',
+            id: SYSTEM_MANAGER_ID,
             name: 'system',
             displayName: 'System',
             get: sandbox.stub(),
@@ -1430,10 +1431,10 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
 
         mockEnvManagers.getEnvironmentManager.callsFake((scope: unknown) => {
             const id = typeof scope === 'string' ? scope : undefined;
-            if (id === 'ms-python.python:venv') {
+            if (id === VENV_MANAGER_ID) {
                 return mockVenvManager;
             }
-            if (id === 'ms-python.python:system') {
+            if (id === SYSTEM_MANAGER_ID) {
                 return mockSystemManager;
             }
             if (id === undefined) {
@@ -1450,7 +1451,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
     test('should use user-configured defaultEnvManager for global scope', async () => {
         sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
             if (section === 'python-envs' && key === 'defaultEnvManager') {
-                return 'ms-python.python:venv';
+                return VENV_MANAGER_ID;
             }
             return undefined;
         });
@@ -1462,7 +1463,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
         );
 
         assert.strictEqual(result.source, 'defaultEnvManager');
-        assert.strictEqual(result.manager.id, 'ms-python.python:venv');
+        assert.strictEqual(result.manager.id, VENV_MANAGER_ID);
     });
 
     test('should use defaultInterpreterPath for global scope when configured', async () => {
@@ -1547,7 +1548,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
 
         // API resolves the homebrew path to a homebrew environment
         const homebrewEnv: PythonEnvironment = {
-            envId: { id: 'homebrew-env', managerId: 'ms-python.python:system' },
+            envId: { id: 'homebrew-env', managerId: SYSTEM_MANAGER_ID },
             name: 'Homebrew Python',
             displayName: 'Python 3.14.2 (homebrew)',
             version: '3.14.2',
@@ -1591,7 +1592,7 @@ suite('Interpreter Selection - resolveGlobalEnvironmentByPriority', () => {
         );
 
         assert.strictEqual(result.source, 'autoDiscovery');
-        assert.strictEqual(result.manager.id, 'ms-python.python:system');
+        assert.strictEqual(result.manager.id, SYSTEM_MANAGER_ID);
     });
 
     test('should silently skip ${workspaceFolder} in defaultInterpreterPath for global scope (issue #1316)', async () => {
@@ -1633,7 +1634,7 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
 
     const testUri = Uri.file('/test/workspace');
     const mockVenvEnv: PythonEnvironment = {
-        envId: { id: 'venv-env-1', managerId: 'ms-python.python:venv' },
+        envId: { id: 'venv-env-1', managerId: VENV_MANAGER_ID },
         name: 'Test Venv',
         displayName: 'Test Venv',
         version: '3.11.0',
@@ -1647,7 +1648,7 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
         sandbox = sinon.createSandbox();
 
         mockVenvManager = {
-            id: 'ms-python.python:venv',
+            id: VENV_MANAGER_ID,
             name: 'venv',
             displayName: 'Venv',
             get: sandbox.stub().resolves(mockVenvEnv),
@@ -1655,7 +1656,7 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
         } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
-            id: 'ms-python.python:system',
+            id: SYSTEM_MANAGER_ID,
             name: 'system',
             displayName: 'System',
             get: sandbox.stub(),
@@ -1683,10 +1684,10 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
 
         mockEnvManagers.getEnvironmentManager.callsFake((scope: unknown) => {
             const id = typeof scope === 'string' ? scope : undefined;
-            if (id === 'ms-python.python:venv') {
+            if (id === VENV_MANAGER_ID) {
                 return mockVenvManager;
             }
-            if (id === 'ms-python.python:system') {
+            if (id === SYSTEM_MANAGER_ID) {
                 return mockSystemManager;
             }
             return undefined;
@@ -1778,7 +1779,7 @@ suite('Interpreter Selection - registerInterpreterSettingsChangeListener', () =>
         });
         mockApi.resolveEnvironment.resolves({
             ...mockVenvEnv,
-            envId: { id: 'environment-b', managerId: 'ms-python.python:system' },
+            envId: { id: 'environment-b', managerId: SYSTEM_MANAGER_ID },
             execInfo: { run: { executable: correctedInterpreter } },
         });
 
@@ -1954,7 +1955,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
 
     const testUri = Uri.file('/test/workspace');
     const mockVenvEnv: PythonEnvironment = {
-        envId: { id: 'venv-env-1', managerId: 'ms-python.python:venv' },
+        envId: { id: 'venv-env-1', managerId: VENV_MANAGER_ID },
         name: 'Test Venv',
         displayName: 'Test Venv',
         version: '3.11.0',
@@ -1968,7 +1969,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
         sandbox = sinon.createSandbox();
 
         mockVenvManager = {
-            id: 'ms-python.python:venv',
+            id: VENV_MANAGER_ID,
             name: 'venv',
             displayName: 'Venv',
             get: sandbox.stub().resolves(mockVenvEnv),
@@ -1976,7 +1977,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
         } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
-            id: 'ms-python.python:system',
+            id: SYSTEM_MANAGER_ID,
             name: 'system',
             displayName: 'System',
             get: sandbox.stub(),
@@ -1984,7 +1985,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
         } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockCondaManager = {
-            id: 'ms-python.python:conda',
+            id: CONDA_MANAGER_ID,
             name: 'conda',
             displayName: 'Conda',
             get: sandbox.stub(),
@@ -2012,13 +2013,13 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
 
         mockEnvManagers.getEnvironmentManager.callsFake((scope: unknown) => {
             const id = typeof scope === 'string' ? scope : undefined;
-            if (id === 'ms-python.python:venv') {
+            if (id === VENV_MANAGER_ID) {
                 return mockVenvManager;
             }
-            if (id === 'ms-python.python:system') {
+            if (id === SYSTEM_MANAGER_ID) {
                 return mockSystemManager;
             }
-            if (id === 'ms-python.python:conda') {
+            if (id === CONDA_MANAGER_ID) {
                 return mockCondaManager;
             }
             return undefined;
@@ -2035,7 +2036,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
         sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
         sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
             if (section === 'python-envs' && key === 'defaultEnvManager') {
-                return 'ms-python.python:conda'; // User wants conda
+                return CONDA_MANAGER_ID; // User wants conda
             }
             return undefined;
         });
@@ -2051,7 +2052,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
 
         // The result should use the user's configured manager (conda), not the cached one
         assert.strictEqual(result.source, 'defaultEnvManager');
-        assert.strictEqual(result.manager.id, 'ms-python.python:conda');
+        assert.strictEqual(result.manager.id, CONDA_MANAGER_ID);
     });
 
     test('should use pythonProjects manager even when defaultEnvManager is set', async () => {
@@ -2061,8 +2062,8 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
             createMockConfig([
                 {
                     path: '.',
-                    envManager: 'ms-python.python:venv', // Project says venv
-                    packageManager: 'ms-python.python:pip',
+                    envManager: VENV_MANAGER_ID, // Project says venv
+                    packageManager: DEFAULT_PACKAGE_MANAGER_ID,
                 },
             ]) as WorkspaceConfiguration,
         );
@@ -2073,7 +2074,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
 
         sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
             if (section === 'python-envs' && key === 'defaultEnvManager') {
-                return 'ms-python.python:conda'; // User's default is conda
+                return CONDA_MANAGER_ID; // User's default is conda
             }
             return undefined;
         });
@@ -2088,7 +2089,7 @@ suite('Interpreter Selection - Settings over Cache Priority', () => {
 
         // pythonProjects[] (venv) should take priority over defaultEnvManager (conda)
         assert.strictEqual(result.source, 'pythonProjects');
-        assert.strictEqual(result.manager.id, 'ms-python.python:venv');
+        assert.strictEqual(result.manager.id, VENV_MANAGER_ID);
     });
 
     test('should fall back to auto-discovery when no user settings configured', async () => {
@@ -2122,7 +2123,7 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
     const folder2Uri = Uri.file('/workspace/folder2');
 
     const mockVenvEnv1: PythonEnvironment = {
-        envId: { id: 'venv-env-folder1', managerId: 'ms-python.python:venv' },
+        envId: { id: 'venv-env-folder1', managerId: VENV_MANAGER_ID },
         name: 'Folder1 Venv',
         displayName: 'Folder1 Venv 3.11',
         version: '3.11.0',
@@ -2133,7 +2134,7 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
     };
 
     const mockVenvEnv2: PythonEnvironment = {
-        envId: { id: 'venv-env-folder2', managerId: 'ms-python.python:venv' },
+        envId: { id: 'venv-env-folder2', managerId: VENV_MANAGER_ID },
         name: 'Folder2 Venv',
         displayName: 'Folder2 Venv 3.12',
         version: '3.12.0',
@@ -2147,7 +2148,7 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
         sandbox = sinon.createSandbox();
 
         mockVenvManager = {
-            id: 'ms-python.python:venv',
+            id: VENV_MANAGER_ID,
             name: 'venv',
             displayName: 'Venv',
             get: sandbox.stub(),
@@ -2155,7 +2156,7 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
         } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
 
         mockSystemManager = {
-            id: 'ms-python.python:system',
+            id: SYSTEM_MANAGER_ID,
             name: 'system',
             displayName: 'System',
             get: sandbox.stub(),
@@ -2183,10 +2184,10 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
 
         mockEnvManagers.getEnvironmentManager.callsFake((scope: unknown) => {
             const id = typeof scope === 'string' ? scope : undefined;
-            if (id === 'ms-python.python:venv') {
+            if (id === VENV_MANAGER_ID) {
                 return mockVenvManager;
             }
-            if (id === 'ms-python.python:system') {
+            if (id === SYSTEM_MANAGER_ID) {
                 return mockSystemManager;
             }
             return undefined;
@@ -2301,11 +2302,11 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
         sandbox.stub(workspaceApis, 'getConfiguration').callsFake((_section?: string, scope?: unknown) => {
             const scopeUri = scope as Uri | undefined;
             if (scopeUri?.fsPath === folder1Uri.fsPath) {
-                return createMockConfig([{ path: '.', envManager: 'ms-python.python:venv' }]) as WorkspaceConfiguration;
+                return createMockConfig([{ path: '.', envManager: VENV_MANAGER_ID }]) as WorkspaceConfiguration;
             }
             if (scopeUri?.fsPath === folder2Uri.fsPath) {
                 return createMockConfig([
-                    { path: '.', envManager: 'ms-python.python:system' },
+                    { path: '.', envManager: SYSTEM_MANAGER_ID },
                 ]) as WorkspaceConfiguration;
             }
             return createMockConfig([]) as WorkspaceConfiguration;

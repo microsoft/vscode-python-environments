@@ -16,6 +16,7 @@ import { EnvironmentCapability, PackageCapability } from '../capabilities';
 import type { CapabilityContext, Support } from '../capabilities';
 import * as logging from '../common/logging';
 import { EventNames } from '../common/telemetry/constants';
+import { getTelemetryManagerId } from '../common/telemetry/helpers';
 import * as telemetry from '../common/telemetry/sender';
 import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from './capabilityFixtures';
 import * as extensionApis from '../common/extension.apis';
@@ -148,7 +149,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         await clock.tickAsync(0);
         assert.ok(envProbe.calledOnceWithExactly(context));
         assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
-            managerId: ownerId, managerKind: 'environment', managerVersion: '2.0.0',
+            managerId: getTelemetryManagerId(ownerId), managerKind: 'environment', managerVersion: '2.0.0',
             capability: EnvironmentCapability.List, outcome: 'supported',
             isLegacy: false,
         }));
@@ -238,7 +239,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         const support = await api.getEnvironmentManagerCapability(ownerId, EnvironmentCapability.List);
         assert.ok(!support.supported && support.reason.includes(ownerId));
         assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
-            managerId: 'none', managerKind: 'environment', managerVersion: 'unknown',
+            managerId: 'undefined', managerKind: 'environment', managerVersion: 'unknown',
             capability: EnvironmentCapability.List, outcome: 'unavailable',
             isLegacy: false,
         }));
@@ -283,7 +284,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(pkgProbe.notCalled);
         assert.ok(configuredPackage.calledWithExactly(projectManager, project.uri));
         assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
-            managerId: `${extensionId}:configured`, managerKind: 'package', managerVersion: '2.1.0',
+            managerId: getTelemetryManagerId(`${extensionId}:configured`), managerKind: 'package', managerVersion: '2.1.0',
             capability: PackageCapability.List, outcome: 'unsupported',
             isLegacy: false,
         }));

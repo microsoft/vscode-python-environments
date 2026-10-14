@@ -26,6 +26,7 @@ import {
 import { traceError, traceVerbose } from '../common/logging';
 import { StopWatch } from '../common/stopWatch';
 import { EventNames } from '../common/telemetry/constants';
+import { getTelemetryManagerId } from '../common/telemetry/helpers';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { getCallingExtension } from '../common/utils/frameUtils';
 import { normalizePath } from '../common/utils/pathUtils';
@@ -307,7 +308,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         if (!managerId.toLowerCase().startsWith('undefined_publisher.')) {
             sendTelemetryEvent(EventNames.ENVIRONMENT_MANAGER_REGISTERED, registrationStopWatch.elapsedTime, {
-                managerId,
+                managerId: getTelemetryManagerId(managerId),
             });
         }
 
@@ -336,7 +337,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
         if (!managerId.toLowerCase().startsWith('undefined_publisher.')) {
             sendTelemetryEvent(EventNames.PACKAGE_MANAGER_REGISTERED, undefined, {
-                managerId,
+                managerId: getTelemetryManagerId(managerId),
             });
         }
 

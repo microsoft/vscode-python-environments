@@ -4,12 +4,7 @@ import * as childProcessApis from '../../../common/childProcess.apis';
 import * as logging from '../../../common/logging';
 import * as persistentState from '../../../common/persistentState';
 import * as settingHelpers from '../../../features/settings/settingHelpers';
-import {
-    clearPipenvCache,
-    getPipenv,
-    getPipenvVersion,
-    PIPENV_PATH_KEY,
-} from '../../../managers/pipenv/pipenvUtils';
+import { clearPipenvCache, getPipenv, getPipenvVersion, PIPENV_PATH_KEY } from '../../../managers/pipenv/pipenvUtils';
 
 /**
  * Tests for getPipenv prioritization.

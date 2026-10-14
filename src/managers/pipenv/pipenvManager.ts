@@ -16,7 +16,13 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
-import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
+import {
+    Capabilities,
+    EnvironmentCapability,
+    EnvironmentManagerCapability,
+    supportedCapability,
+} from '../../capabilities';
+import { PIPENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { PipenvStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -28,14 +34,14 @@ import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
 import { getConfiguration } from '../../common/workspace.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
-import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
-import { NativePythonEnvironmentKind, NativePythonFinder } from '../common/nativePythonFinder';
-import { notifyMissingManagerIfDefault } from '../common/utils';
 import {
     EnvironmentToolSupport,
     pythonToolSupport,
     resolveToolProjectEnvironment,
 } from '../../internal/pythonToolSupport';
+import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
+import { NativePythonEnvironmentKind, NativePythonFinder } from '../common/nativePythonFinder';
+import { notifyMissingManagerIfDefault } from '../common/utils';
 import {
     clearPipenvCache,
     getPipenv,
@@ -91,7 +97,7 @@ export class PipenvManager implements EnvironmentManager, Disposable {
     ) {
         this.name = 'pipenv';
         this.displayName = 'Pipenv';
-        this.preferredPackageManagerId = 'ms-python.python:pip';
+        this.preferredPackageManagerId = DEFAULT_PACKAGE_MANAGER_ID;
         this.tooltip = new MarkdownString(PipenvStrings.pipenvManager, true);
     }
 
@@ -161,7 +167,7 @@ export class PipenvManager implements EnvironmentManager, Disposable {
             if (toolSource === 'none') {
                 result = 'tool_not_found';
                 if (this.projectManager) {
-                    await notifyMissingManagerIfDefault('ms-python.python:pipenv', this.projectManager, this.api);
+                    await notifyMissingManagerIfDefault(PIPENV_MANAGER_ID, this.projectManager, this.api);
                 }
             }
         } catch (ex) {
@@ -369,18 +375,20 @@ export class PipenvManager implements EnvironmentManager, Disposable {
     }
 
     async get(scope: GetEnvironmentScope, toolExecution = false): Promise<PythonEnvironment | undefined> {
-        const fastResult = toolExecution ? undefined : await tryFastPathGet({
-            initialized: this._initialized,
-            setInitialized: (deferred) => {
-                this._initialized = deferred;
-            },
-            scope,
-            label: 'pipenv',
-            getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
-            getPersistedPath: (fsPath) => getPipenvForWorkspace(fsPath),
-            resolve: (p) => resolvePipenvPath(p, this.nativeFinder, this.api, this),
-            startBackgroundInit: () => this.initializeDiscovery(),
-        });
+        const fastResult = toolExecution
+            ? undefined
+            : await tryFastPathGet({
+                  initialized: this._initialized,
+                  setInitialized: (deferred) => {
+                      this._initialized = deferred;
+                  },
+                  scope,
+                  label: 'pipenv',
+                  getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
+                  getPersistedPath: (fsPath) => getPipenvForWorkspace(fsPath),
+                  resolve: (p) => resolvePipenvPath(p, this.nativeFinder, this.api, this),
+                  startBackgroundInit: () => this.initializeDiscovery(),
+              });
         if (fastResult) {
             return fastResult.env;
         }

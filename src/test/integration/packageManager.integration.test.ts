@@ -8,7 +8,7 @@ import {
     PythonEnvironmentApi,
     isPackageVersionLookupNotSupportedError,
 } from '../../api';
-import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
+import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, POETRY_MANAGER_ID } from '../../common/constants';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 import {
@@ -50,7 +50,7 @@ const profiles: PackageManagerProfile[] = [
 ];
 
 const deferredPackageManagers: Readonly<Record<PackageManagerId, string>> = {
-    'ms-python.python:poetry': 'Poetry lifecycle coverage requires a controlled Poetry installation.',
+    [POETRY_MANAGER_ID]: 'Poetry lifecycle coverage requires a controlled Poetry installation.',
 };
 
 const deferredProfiles = {
