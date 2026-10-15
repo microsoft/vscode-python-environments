@@ -17,6 +17,7 @@ import {
     DidChangePackagesEventArgs,
     GetPackagesOptions,
     IconPath,
+    isPackageVersionLookupNotSupportedError,
     Package,
     PackageManagementOptions,
     PackageManager,
@@ -24,6 +25,13 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import {
+    Capabilities,
+    CapabilityCheck,
+    PackageCapability,
+    PackageManagerCapability,
+    supportedCapability,
+} from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { PythonVersion } from '../../common/pythonVersion';
 import { showErrorMessage, withProgress } from '../../common/window.apis';
@@ -51,6 +59,39 @@ import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
 
 export class PipPackageManager implements PackageManager, Disposable {
+    private readonly packageManagementCapability: CapabilityCheck = async ({ environment }) => {
+        if (PythonVersion.tryParse(environment?.version)?.major === 2) {
+            return { supported: false, reason: l10n.t('Python 2.* is not supported (deprecated)') };
+        }
+        return { supported: true };
+    };
+
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
+        [PackageCapability.List]: supportedCapability,
+        [PackageCapability.Install]: this.packageManagementCapability,
+        [PackageCapability.Uninstall]: this.packageManagementCapability,
+        [PackageCapability.Upgrade]: this.packageManagementCapability,
+        [PackageCapability.FetchAvailableVersions]: async ({ environment }) => {
+            if (!environment) {
+                return {
+                    supported: false,
+                    reason: l10n.t('An environment is required to check package version lookup support.'),
+                };
+            }
+            try {
+                await this.getPackageAvailableVersionsCommand(environment);
+            } catch (error) {
+                if (isPackageVersionLookupNotSupportedError(error)) {
+                    return { supported: false, reason: error.message };
+                }
+                throw error;
+            }
+            return await supportedCapability({ environment });
+        },
+        // Dependency roots are best-effort classification, not exact user install intent.
+        [PackageCapability.ListDirect]: supportedCapability,
+    };
+
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 
@@ -109,8 +150,9 @@ export class PipPackageManager implements PackageManager, Disposable {
             }
         }
 
-        if (PythonVersion.tryParse(environment.version)?.major === 2) {
-            throw new Error('Python 2.* is not supported (deprecated)');
+        const support = await this.packageManagementCapability({ environment });
+        if (!support.supported) {
+            throw new Error(support.reason);
         }
 
         const execute = async (token?: CancellationToken): Promise<void> => {
@@ -317,7 +359,10 @@ export class PipPackageManager implements PackageManager, Disposable {
         }
         if (compare(version.public, '21.2.0') < 0) {
             throw new PackageVersionLookupNotSupportedError(
-                `Package version lookup requires pip 21.2 or newer; the environment has pip ${version.public}.`,
+                l10n.t(
+                    'Package version lookup requires pip 21.2 or newer; the environment has pip {0}.',
+                    version.public,
+                ),
             );
         }
         if (compare(version.public, '25.1') >= 0) {
