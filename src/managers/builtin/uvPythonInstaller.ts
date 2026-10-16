@@ -54,7 +54,7 @@ export type PromptInstallPythonViaUvResult =
     | { readonly kind: 'declined' }
     | { readonly kind: 'failed' };
 
-function sanitizePromptDetail(value: string | undefined): string | undefined {
+export function sanitizePromptDetail(value: string | undefined): string | undefined {
     const normalized = value?.replace(PROMPT_CONTROL_CHARACTERS, ' ').replace(/\s+/g, ' ').trim();
     if (!normalized) {
         return undefined;

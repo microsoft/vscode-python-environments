@@ -1,11 +1,47 @@
 import * as path from 'path';
+import { promises as fs } from 'fs';
 import { Disposable, Event, LogOutputChannel, RelativePattern, Terminal, Uri } from 'vscode';
 import { PackageManager, PythonEnvironment } from '../../api';
+import { traceWarn } from '../../common/logging';
 import { createSimpleDebounce } from '../../common/utils/debounce';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { onDidCloseTerminal } from '../../common/window.apis';
 import { pathExists } from '../../common/workspace.fs.apis';
 import { createFileSystemWatcher, getConfiguration, onDidChangeConfiguration } from '../../common/workspace.apis';
 import type { EnvironmentManagers } from '../../features/envManagers';
+
+const pausedRuntimePrefixes = new Map<string, number>();
+const runtimeWatcherPauseListeners = new Set<() => Promise<void>>();
+
+async function reconcileRuntimeWatchers(): Promise<void> {
+    await Promise.all([...runtimeWatcherPauseListeners].map((listener) => listener()));
+}
+
+/**
+ * Releases this extension's package watchers while an installer replaces a base runtime.
+ * Windows cannot rename an installation containing a watched directory.
+ * @param prefix The physically resolved runtime prefix.
+ * @param operation The approved installation and verification operation.
+ * @returns The operation result, restoring watchers even on failure or cancellation.
+ */
+export async function withPackageWatchersPaused<T>(prefix: string, operation: () => Promise<T>): Promise<T> {
+    const key = normalizePath(path.resolve(prefix));
+    pausedRuntimePrefixes.set(key, (pausedRuntimePrefixes.get(key) ?? 0) + 1);
+    try {
+        await reconcileRuntimeWatchers();
+        return await operation();
+    } finally {
+        const remaining = (pausedRuntimePrefixes.get(key) ?? 1) - 1;
+        if (remaining === 0) {
+            pausedRuntimePrefixes.delete(key);
+        } else {
+            pausedRuntimePrefixes.set(key, remaining);
+        }
+        await reconcileRuntimeWatchers().catch((error) => {
+            traceWarn('Could not restore package watchers after Python installation:', error);
+        });
+    }
+}
 
 export interface PackageWatcherTerminalActivation {
     onDidChangeTerminalActivationState: Event<{
@@ -148,13 +184,46 @@ export function registerPackageWatchers(
     }
 
     type WatcherConsumer = string | Terminal;
+    interface DesiredWatcher {
+        readonly context: Uri | PythonEnvironment | undefined;
+        readonly environment: PythonEnvironment;
+        prefixKey: Promise<string | undefined>;
+    }
     const activeWatcherByConsumer = new Map<WatcherConsumer, string>();
+    const desiredWatchers = new Map<WatcherConsumer, DesiredWatcher>();
     const activeEnvironmentByScope = new Map<
         string,
         { scope: Uri | undefined; environment: PythonEnvironment }
     >();
-    const sharedWatchers = new Map<string, { disposable: Disposable; references: number }>();
+    const sharedWatchers = new Map<
+        string,
+        { disposable: Disposable; references: number; prefixKey: Promise<string | undefined> }
+    >();
     const closedTerminals = new WeakSet<Terminal>();
+    let disposed = false;
+
+    const resolvePrefixKey = async (prefix: string): Promise<string | undefined> => {
+        if (!prefix) {
+            return undefined;
+        }
+        let deadline: ReturnType<typeof setTimeout> | undefined;
+        try {
+            const physical = await Promise.race([
+                fs.realpath(prefix),
+                new Promise<never>((_resolve, reject) => {
+                    deadline = setTimeout(() => reject(new Error('Package watcher prefix resolution timed out.')), 1000);
+                }),
+            ]);
+            return normalizePath(physical);
+        } catch (error) {
+            if (!disposed) {
+                log.warn(`Could not resolve package watcher prefix; it will be paused conservatively during runtime updates: ${error}`);
+            }
+            return undefined;
+        } finally {
+            clearTimeout(deadline);
+        }
+    };
 
     const releaseConsumer = (consumer: WatcherConsumer): void => {
         const watcherKey = activeWatcherByConsumer.get(consumer);
@@ -175,7 +244,7 @@ export function registerPackageWatchers(
         }
     };
 
-    const watchEnvironment = (
+    const attachWatcher = (
         consumer: WatcherConsumer,
         packageManagerContext: Uri | PythonEnvironment | undefined,
         environment: PythonEnvironment,
@@ -191,13 +260,17 @@ export function registerPackageWatchers(
         const packageManagerKey =
             `${selectedPackageManager.id}:${selectedPackageManager.project?.uri.toString() ?? ''}`;
         const watcherKey = `${environment.envId.managerId}:${environment.envId.id}:${packageManagerKey}`;
+        const desired = desiredWatchers.get(consumer);
+        const sharedWatcher = sharedWatchers.get(watcherKey);
+        if (desired && sharedWatcher) {
+            desired.prefixKey = sharedWatcher.prefixKey;
+        }
         if (activeWatcherByConsumer.get(consumer) === watcherKey) {
             return;
         }
 
         releaseConsumer(consumer);
 
-        const sharedWatcher = sharedWatchers.get(watcherKey);
         if (sharedWatcher) {
             sharedWatcher.references += 1;
         } else {
@@ -220,9 +293,47 @@ export function registerPackageWatchers(
                     resolvePackageManager,
                 ),
                 references: 1,
+                prefixKey: desired?.prefixKey ?? resolvePrefixKey(environment.sysPrefix),
             });
         }
         activeWatcherByConsumer.set(consumer, watcherKey);
+    };
+
+    const reconcileConsumer = async (consumer: WatcherConsumer, desired: DesiredWatcher): Promise<void> => {
+        const prefixKey = await desired.prefixKey;
+        if (disposed || desiredWatchers.get(consumer) !== desired) {
+            return;
+        }
+        if (pausedRuntimePrefixes.size > 0 && (!prefixKey || pausedRuntimePrefixes.has(prefixKey))) {
+            releaseConsumer(consumer);
+        } else {
+            attachWatcher(consumer, desired.context, desired.environment);
+        }
+    };
+
+    const watchEnvironment = (
+        consumer: WatcherConsumer,
+        context: Uri | PythonEnvironment | undefined,
+        environment: PythonEnvironment,
+    ): void => {
+        const previous = desiredWatchers.get(consumer);
+        const desired: DesiredWatcher = {
+            context,
+            environment,
+            prefixKey: previous?.environment === environment
+                ? previous.prefixKey
+                : resolvePrefixKey(environment.sysPrefix),
+        };
+        desiredWatchers.set(consumer, desired);
+        if (pausedRuntimePrefixes.size > 0) {
+            // Do not create an alias-spelled watcher while its physical identity is pending.
+            releaseConsumer(consumer);
+            void reconcileConsumer(consumer, desired).catch((error) => {
+                log.error(`Could not reconcile package watchers during Python installation: ${error}`);
+            });
+        } else {
+            attachWatcher(consumer, context, environment);
+        }
     };
 
     const environmentChangeDisposable = envManagers.onDidChangeActiveEnvironment((changes) => {
@@ -232,6 +343,7 @@ export function registerPackageWatchers(
             watchEnvironment(scopeKey, changes.uri, changes.new);
         } else {
             activeEnvironmentByScope.delete(scopeKey);
+            desiredWatchers.delete(scopeKey);
             releaseConsumer(scopeKey);
         }
     });
@@ -257,14 +369,21 @@ export function registerPackageWatchers(
                 watchEnvironment(changes.terminal, managerContext, changes.environment);
             }
         } else {
+            desiredWatchers.delete(changes.terminal);
             releaseConsumer(changes.terminal);
         }
     });
 
     const terminalCloseDisposable = onDidCloseTerminal((terminal) => {
         closedTerminals.add(terminal);
+        desiredWatchers.delete(terminal);
         releaseConsumer(terminal);
     });
+
+    const reconcile = async (): Promise<void> => {
+        await Promise.all([...desiredWatchers].map(([consumer, desired]) => reconcileConsumer(consumer, desired)));
+    };
+    runtimeWatcherPauseListeners.add(reconcile);
 
     const configurationChangeDisposable = onDidChangeConfiguration((changes) => {
         if (
@@ -280,13 +399,16 @@ export function registerPackageWatchers(
     });
 
     return new Disposable(() => {
+        disposed = true;
         environmentChangeDisposable.dispose();
         terminalActivationDisposable.dispose();
         terminalCloseDisposable.dispose();
         configurationChangeDisposable.dispose();
+        runtimeWatcherPauseListeners.delete(reconcile);
         sharedWatchers.forEach(({ disposable }) => disposable.dispose());
         sharedWatchers.clear();
         activeWatcherByConsumer.clear();
         activeEnvironmentByScope.clear();
+        desiredWatchers.clear();
     });
 }
