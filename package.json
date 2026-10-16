@@ -104,7 +104,7 @@
                         "%python-envs.terminal.autoActivationType.shellStartup%",
                         "%python-envs.terminal.autoActivationType.off%"
                     ],
-                    "scope": "machine"
+                    "scope": "window"
                 },
                 "python.terminal.useEnvFile": {
                     "type": "boolean",
