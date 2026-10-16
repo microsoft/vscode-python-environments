@@ -26,7 +26,15 @@
         }
     },
     "activationEvents": [
-        "onLanguage:python"
+        "onLanguage:python",
+        "workspaceContains:**/*.py",
+        "workspaceContains:**/*.pyi",
+        "workspaceContains:**/*.ipynb",
+        "workspaceContains:**/pyproject.toml",
+        "workspaceContains:**/requirements.txt",
+        "workspaceContains:**/Pipfile",
+        "workspaceContains:**/pyvenv.cfg",
+        "workspaceContains:mspythonconfig.json"
     ],
     "homepage": "https://github.com/microsoft/vscode-python-environments",
     "repository": {
