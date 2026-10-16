@@ -22,6 +22,7 @@ import * as helpers from '../../managers/builtin/helpers';
 import { PipPackageManager } from '../../managers/builtin/pipPackageManager';
 import { VenvManager } from '../../managers/builtin/venvManager';
 import * as packageChanges from '../../managers/common/packageChanges';
+import { InternalPackageManager } from '../../managers/common/registeredManagers';
 import { CondaPackageManager } from '../../managers/conda/condaPackageManager';
 import * as condaUtils from '../../managers/conda/condaUtils';
 import { PoetryManager } from '../../managers/poetry/poetryManager';
@@ -114,6 +115,15 @@ suite('Public package API execution policy', () => {
     });
 
     function publicApi(manager: PackageManager): PythonEnvironmentApi {
+        const project = { name: 'project', uri: scope };
+        const registeredManager = new InternalPackageManager(
+            `test:${manager.name}`,
+            manager,
+            manager.createForProject ? project : undefined,
+        );
+        disposables.push(registeredManager);
+        // Isolate operation process policy from capability telemetry's version subprocess.
+        sinon.stub(registeredManager, 'getVersion').resolves(undefined);
         const event = () => {
             const emitter = new EventEmitter<void>();
             disposables.push(emitter);
@@ -124,9 +134,9 @@ suite('Public package API execution policy', () => {
             {
                 onDidChangeActiveEnvironment: event(),
                 onDidChangePackageProviderPackages: event(),
-                getPackageManager: () => manager,
+                getPackageManager: () => registeredManager,
             } as unknown as Args[0],
-            { getProjects: () => [], onDidChangeProjects: event() } as unknown as Args[1],
+            { getProjects: () => [project], onDidChangeProjects: event() } as unknown as Args[1],
             {} as Args[2],
             {} as Args[3],
             { onDidChangeEnvironmentVariables: event() } as unknown as Args[4],

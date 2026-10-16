@@ -18,6 +18,7 @@ This guide covers the full testing lifecycle:
 
 ## Learnings
 
+- Public API manager fixtures must return internal manager wrappers. In execution-policy tests, stub the wrapper's `getVersion()` to isolate operation subprocesses from capability telemetry (1).
 - Pip commands that return JSON must pass `--disable-pip-version-check`; the process helper combines stderr with stdout, so update notices can otherwise make valid JSON unparseable (1).
 - When a view subscribes to a newly added provider event, TypeMoq-based view tests must return a real `EventEmitter.event`; an unstubbed event yields an undefined disposable and fails during teardown (1).
 - Test agent selections across a full reload with `python.defaultInterpreterPath` set. An effective manager value equal to the extension default does not prove a workspace value was saved; tool-owned persistence must inspect `workspaceValue` or startup can restore the global interpreter (1).
