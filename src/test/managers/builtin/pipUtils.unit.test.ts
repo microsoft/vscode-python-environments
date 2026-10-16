@@ -1,13 +1,15 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { CancellationToken, Progress, ProgressOptions, Uri } from 'vscode';
+import { CancellationError, CancellationToken, CancellationTokenSource, LogOutputChannel, Progress, ProgressLocation, ProgressOptions, Uri } from 'vscode';
 import * as fse from 'fs-extra';
 import * as os from 'os';
-import { PythonEnvironmentApi, PythonProject } from '../../../api';
+import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
-import { getProjectInstallable } from '../../../managers/builtin/pipUtils';
+import { PipListCommand } from '../../../managers/builtin/commands/list';
+import * as helpers from '../../../managers/builtin/helpers';
+import { getProjectInstallable, getWorkspacePackagesToInstall } from '../../../managers/builtin/pipUtils';
 
 suite('Pip Utils - getProjectInstallable', () => {
     let findFilesStub: sinon.SinonStub;
@@ -45,6 +47,97 @@ suite('Pip Utils - getProjectInstallable', () => {
                 return undefined;
             },
         };
+    });
+
+    suite('Pip Utils - getWorkspacePackagesToInstall', () => {
+        teardown(() => {
+            sinon.restore();
+        });
+
+        test('ordinary search retains its cancellation behavior while tool search rejects cancellation', async () => {
+            const source = new CancellationTokenSource();
+            source.cancel();
+            findFilesStub.resolves([]);
+            withProgressStub.callsFake(async (_options, task) => task({ report: () => {} }, source.token));
+            const projects = [{ name: 'workspace', uri: Uri.file(process.cwd()) }];
+            try {
+                const ordinary = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
+                assert.deepStrictEqual(ordinary.installables, []);
+                await assert.rejects(
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, projects, {
+                        runHeadless: true,
+                        token: source.token,
+                    }),
+                    CancellationError,
+                );
+                assert.ok(withProgressStub.calledOnce);
+            } finally {
+                source.dispose();
+            }
+        });
+
+        test('opens the package picker when listing installed packages fails', async () => {
+            const listError = new Error('pip list failed');
+            const logError = sinon.stub();
+            const log = { error: logError } as unknown as LogOutputChannel;
+            const environment = {
+                environmentPath: Uri.file('.'),
+                execInfo: { run: { executable: 'python' } },
+            } as PythonEnvironment;
+            const workspacePath = Uri.file('/test/path/root').fsPath;
+            findFilesStub.callsFake((pattern: string) =>
+                Promise.resolve(
+                    pattern === '*requirements*.txt'
+                        ? [Uri.file(path.join(workspacePath, 'requirements.txt'))]
+                        : [],
+                ),
+            );
+
+            sinon.stub(helpers, 'shouldUseUv').resolves(false);
+            sinon.stub(PipListCommand.prototype, 'execute').rejects(listError);
+            const showQuickPick = sinon.stub(winapi, 'showQuickPickWithButtons').resolves(undefined);
+
+            const result = await getWorkspacePackagesToInstall(
+                mockApi as PythonEnvironmentApi,
+                { install: [], showSkipOption: true },
+                [{ name: 'workspace', uri: Uri.file(workspacePath) }],
+                environment,
+                log,
+            );
+
+            assert.strictEqual(result, undefined);
+            assert.ok(logError.calledOnceWithExactly('Error listing installed packages', listError));
+            assert.ok(showQuickPick.calledOnce, 'The package picker should still open after a list failure');
+        });
+
+        test('shows progress while listing installed packages', async () => {
+            const environment = {
+                environmentPath: Uri.file('.'),
+                execInfo: { run: { executable: 'python' } },
+            } as PythonEnvironment;
+            const workspacePath = Uri.file('/test/path/root').fsPath;
+            findFilesStub.callsFake((pattern: string) =>
+                Promise.resolve(
+                    pattern === '*requirements*.txt'
+                        ? [Uri.file(path.join(workspacePath, 'requirements.txt'))]
+                        : [],
+                ),
+            );
+            sinon.stub(helpers, 'shouldUseUv').resolves(false);
+            sinon.stub(PipListCommand.prototype, 'execute').resolves([]);
+            const showQuickPick = sinon.stub(winapi, 'showQuickPickWithButtons').resolves(undefined);
+
+            await getWorkspacePackagesToInstall(
+                mockApi as PythonEnvironmentApi,
+                { install: [] },
+                [{ name: 'workspace', uri: Uri.file(workspacePath) }],
+                environment,
+            );
+
+            assert.strictEqual(withProgressStub.callCount, 2);
+            assert.strictEqual(withProgressStub.secondCall.args[0].location, ProgressLocation.Notification);
+            assert.ok(withProgressStub.secondCall.calledBefore(showQuickPick.firstCall));
+        });
     });
 
     teardown(() => {
@@ -171,6 +264,36 @@ suite('Pip Utils - getProjectInstallable', () => {
         // Assert: Should return empty array
         assert.strictEqual(result.length, 0, 'Should return empty array');
         assert.ok(!findFilesStub.called, 'Should not call findFiles when no projects');
+    });
+
+    test('private nested creation excludes parent and sibling dependencies before parsing or validating them', async () => {
+        const temp = await fse.mkdtemp(path.join(os.tmpdir(), 'private-dependency-scope-'));
+        const source = new CancellationTokenSource();
+        try {
+            const project = { name: 'root', uri: Uri.file(temp) };
+            const nested = Uri.file(path.join(temp, 'new service'));
+            const ownRequirement = Uri.file(path.join(nested.fsPath, 'requirements.txt'));
+            const rootRequirement = Uri.file(path.join(temp, 'requirements.txt'));
+            const siblingRequirement = Uri.file(path.join(temp, 'sibling', 'requirements.txt'));
+            const siblingToml = Uri.file(path.join(temp, 'sibling', 'pyproject.toml'));
+            const invalidSiblingSyntax = Uri.file(path.join(temp, 'sibling-two', 'pyproject.toml'));
+            await fse.outputFile(siblingToml.fsPath, '[project]\nname = "sibling"\n[build-system]\nbuild-backend = "missing"\n');
+            await fse.outputFile(invalidSiblingSyntax.fsPath, '[invalid syntax');
+            mockApi.getPythonProject = () => project;
+            findFilesStub.resolves([rootRequirement, ownRequirement, siblingRequirement, siblingToml, invalidSiblingSyntax]);
+            const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [project], {
+                runHeadless: true,
+                token: source.token,
+                preferredRoot: nested,
+                deduplicateProjectPackages: true,
+            });
+            assert.deepStrictEqual(result.installables.map((item) => item.uri?.fsPath), [ownRequirement.fsPath]);
+            assert.strictEqual(result.validationError, undefined);
+            assert.ok(withProgressStub.notCalled);
+        } finally {
+            source.dispose();
+            await fse.remove(temp);
+        }
     });
 
     test('should filter out files not in project directories', async () => {

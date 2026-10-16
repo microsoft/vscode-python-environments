@@ -484,7 +484,7 @@ suite('Terminal Utils - getAutoActivationType', () => {
     });
 
     suite('Legacy Python Setting Fallback', () => {
-        test('should return ACT_TYPE_OFF and update config when python.terminal.activateEnvironment is false', () => {
+        test('should return ACT_TYPE_OFF without writing config when python.terminal.activateEnvironment is false', () => {
             // Mock - no python-envs settings, python.terminal.activateEnvironment is false
             pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns(undefined);
             pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).returns(false);
@@ -494,10 +494,26 @@ suite('Terminal Utils - getAutoActivationType', () => {
 
             // Assert
             assert.strictEqual(result, ACT_TYPE_OFF, 'Should return ACT_TYPE_OFF when legacy setting is false');
-            assert.ok(
-                pyEnvsConfig.update.calledWithExactly('terminal.autoActivationType', ACT_TYPE_OFF),
-                'Should update python-envs config to ACT_TYPE_OFF',
-            );
+            sinon.assert.notCalled(pyEnvsConfig.update);
+        });
+
+        test('should follow changes to the legacy setting without persisting an override', () => {
+            pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns(undefined);
+            pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).onFirstCall().returns(false);
+            pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).onSecondCall().returns(true);
+
+            assert.strictEqual(getAutoActivationType(), ACT_TYPE_OFF);
+            assert.strictEqual(getAutoActivationType(), ACT_TYPE_COMMAND);
+            sinon.assert.notCalled(pyEnvsConfig.update);
+        });
+
+        test('should keep an explicit activation mode when the legacy setting is false', () => {
+            pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns({ globalValue: ACT_TYPE_SHELL });
+            pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).returns(false);
+
+            assert.strictEqual(getAutoActivationType(), ACT_TYPE_SHELL);
+            sinon.assert.notCalled(pythonConfig.get);
+            sinon.assert.notCalled(pyEnvsConfig.update);
         });
 
         test('should return ACT_TYPE_COMMAND when python.terminal.activateEnvironment is true', () => {

@@ -20,16 +20,49 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { ENVS_EXTENSION_ID } from '../constants';
-import { TestEventHandler, waitForCondition } from '../testUtils';
+import { waitForCondition } from '../testUtils';
 
 const ENV_CHANGE_TIMEOUT_MS = 15_000;
+
+function getEnvironmentIdentity(environment: PythonEnvironment) {
+    return {
+        managerId: environment.envId.managerId,
+        path: normalizePath(environment.environmentPath.fsPath),
+        version: environment.version,
+    };
+}
+
+function isSameEnvironment(
+    first: PythonEnvironment | undefined,
+    second: PythonEnvironment | undefined,
+): boolean {
+    if (!first || !second) {
+        return first === second;
+    }
+    const firstIdentity = getEnvironmentIdentity(first);
+    const secondIdentity = getEnvironmentIdentity(second);
+    return (
+        firstIdentity.managerId === secondIdentity.managerId &&
+        firstIdentity.path === secondIdentity.path &&
+        firstIdentity.version === secondIdentity.version
+    );
+}
+
+function assertSameEnvironment(
+    actual: PythonEnvironment,
+    expected: PythonEnvironment,
+    message: string,
+): void {
+    assert.deepStrictEqual(getEnvironmentIdentity(actual), getEnvironmentIdentity(expected), message);
+}
 
 function getDifferentEnvironment(
     environments: PythonEnvironment[],
     currentEnv: PythonEnvironment | undefined,
 ): PythonEnvironment | undefined {
-    return environments.find((env) => env.envId.id !== currentEnv?.envId.id);
+    return environments.find((env) => !isSameEnvironment(env, currentEnv));
 }
 
 async function setEnvironmentAndWaitForChange(
@@ -43,12 +76,15 @@ async function setEnvironmentAndWaitForChange(
         const timeout = setTimeout(() => {
             subscription?.dispose();
             reject(
-                new Error(`onDidChangeEnvironment did not fire within ${timeoutMs}ms. Expected envId: ${env.envId.id}`),
+                new Error(
+                    `onDidChangeEnvironment did not fire within ${timeoutMs}ms. ` +
+                        `Expected environment: ${JSON.stringify(getEnvironmentIdentity(env))}`,
+                ),
             );
         }, timeoutMs);
 
         subscription = api.onDidChangeEnvironment((e) => {
-            if (e.uri?.toString() === projectUri.toString() && e.new?.envId.id === env.envId.id) {
+            if (e.uri?.toString() === projectUri.toString() && isSameEnvironment(e.new, env)) {
                 clearTimeout(timeout);
                 subscription?.dispose();
                 resolve();
@@ -228,7 +264,7 @@ suite('Integration: Python Projects', function () {
         // Verify getEnvironment returns the correct value now that setEnvironment has fully completed
         const retrievedEnv = await api.getEnvironment(project.uri);
         assert.ok(retrievedEnv, 'Should get environment after setting');
-        assert.strictEqual(retrievedEnv.envId.id, env.envId.id, 'Retrieved environment should match set environment');
+        assertSameEnvironment(retrievedEnv, env, 'Retrieved environment should match set environment');
     });
 
     /**
@@ -256,28 +292,9 @@ suite('Integration: Python Projects', function () {
             return;
         }
 
-        // Register handler BEFORE making the change
-        const handler = new TestEventHandler(api.onDidChangeEnvironment, 'onDidChangeEnvironment');
-
-        try {
-            // Set environment - this should fire the event
-            await api.setEnvironment(project.uri, targetEnv);
-
-            // Wait for an event where event.new is defined (the actual change event)
-            // Use 15s timeout - CI runners can be slow
-            await waitForCondition(
-                () => handler.all.some((e) => e.new !== undefined),
-                15_000,
-                'onDidChangeEnvironment with new environment was not fired',
-            );
-
-            // Find the event with the new environment
-            const changeEvent = handler.all.find((e) => e.new !== undefined);
-            assert.ok(changeEvent, 'Should have change event with new environment');
-            assert.ok(changeEvent.new, 'Event should have new environment');
-        } finally {
-            handler.dispose();
-        }
+        // This helper subscribes before setting and only resolves for this
+        // project and logical environment.
+        await setEnvironmentAndWaitForChange(api, project.uri, targetEnv);
     });
 
     /**
@@ -311,7 +328,7 @@ suite('Integration: Python Projects', function () {
         // Verify it was set
         const beforeClear = await api.getEnvironment(project.uri);
         assert.ok(beforeClear, 'Environment should be set before clearing');
-        assert.strictEqual(beforeClear.envId.id, env.envId.id, 'Should have the explicitly set environment');
+        assertSameEnvironment(beforeClear, env, 'Should have the explicitly set environment');
 
         // Clear environment
         await api.setEnvironment(project.uri, undefined);
@@ -371,6 +388,6 @@ suite('Integration: Python Projects', function () {
 
         // Should inherit project's environment
         assert.ok(fileEnv, 'File should get environment from project');
-        assert.strictEqual(fileEnv.envId.id, env.envId.id, 'File should use project environment');
+        assertSameEnvironment(fileEnv, env, 'File should use project environment');
     });
 });

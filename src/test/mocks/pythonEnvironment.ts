@@ -3,7 +3,7 @@
 
 import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
-import { PythonEnvironmentImpl } from '../../internal.api';
+import { PythonEnvironmentImpl } from '../../managers/common/models';
 
 /**
  * Options for {@link createMockPythonEnvironment}.

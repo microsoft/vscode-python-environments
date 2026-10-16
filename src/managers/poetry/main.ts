@@ -1,8 +1,8 @@
 import { Disposable, LogOutputChannel } from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { traceInfo } from '../../common/logging';
-import { getPythonApi } from '../../features/pythonApi';
-import { PythonProjectManager } from '../../internal.api';
+import { getPythonApi } from '../../extensionApi';
+import type { PythonProjectManager } from '../../features/projectManager';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { PoetryManager } from './poetryManager';
 import { PoetryPackageManager } from './poetryPackageManager';

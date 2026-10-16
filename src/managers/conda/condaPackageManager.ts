@@ -1,11 +1,13 @@
 import type { Pep440Version } from '@renovatebot/pep440';
-import { explain as parse, rcompare } from '@renovatebot/pep440';
+import { compare } from '@renovatebot/pep440';
 import * as path from 'path';
 import {
     CancellationError,
+    CancellationToken,
     Disposable,
     Event,
     EventEmitter,
+    l10n,
     LogOutputChannel,
     MarkdownString,
     ProgressLocation,
@@ -21,14 +23,37 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { Capabilities, PackageCapability, PackageManagerCapability, supportedCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
-import { traceError } from '../../common/logging';
 import { withProgress } from '../../common/window.apis';
+
+import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 import { updatePackagesAndNotify } from '../common/packageChanges';
-import { getCommonCondaPackagesToInstall, managePackages, runCondaExecutable } from './condaUtils';
+import { parsePackageSpecs } from '../common/packageUtils';
+import {
+    CondaAvailableVersionsCommand,
+    CondaInstallCommand,
+    CondaListCommand,
+    CondaListOutputError,
+    CondaUninstallCommand,
+    CondaVersionCommand,
+} from './commands/index';
+import { getCommonCondaPackagesToInstall } from './condaUtils';
 
 export class CondaPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
+        [PackageCapability.List]: supportedCapability,
+        [PackageCapability.Install]: supportedCapability,
+        [PackageCapability.Uninstall]: supportedCapability,
+        [PackageCapability.Upgrade]: supportedCapability,
+        [PackageCapability.FetchAvailableVersions]: supportedCapability,
+        [PackageCapability.ListDirect]: async () => ({
+            supported: false,
+            reason: l10n.t('Conda does not classify direct and transitive packages.'),
+        }),
+    };
+
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 
@@ -49,11 +74,30 @@ export class CondaPackageManager implements PackageManager, Disposable {
     tooltip?: string | MarkdownString;
     iconPath?: IconPath;
 
-    async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+    readonly [pythonToolSupport]: PackageToolSupport = {
+        manage: (environment, options, token) => this.manage(environment, { ...options, runHeadless: true }, token),
+        getPackages: async (environment, token) => {
+            const packages = await this.fetchPackages(environment, token);
+            if (!packages) {
+                throw new Error('Conda package listing returned no result.');
+            }
+            return packages;
+        },
+    };
+
+    async manage(
+        environment: PythonEnvironment,
+        options: PackageManagementOptions,
+        toolToken?: CancellationToken,
+    ): Promise<void> {
+        throwIfCancelled(toolToken);
         let toInstall: string[] = [...(options.install ?? [])];
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
         if (toInstall.length === 0 && toUninstall.length === 0) {
+            if (options.runHeadless) {
+                return;
+            }
             const result = await getCommonCondaPackagesToInstall(environment, options, this.api);
             if (result) {
                 toInstall = result.install;
@@ -63,39 +107,69 @@ export class CondaPackageManager implements PackageManager, Disposable {
             }
         }
 
-        const manageOptions = {
-            ...options,
-            install: toInstall,
-            uninstall: toUninstall,
+        const execute = async (token?: CancellationToken): Promise<void> => {
+            try {
+                const commandOptions = {
+                    pythonExecutable: 'conda',
+                    condaEnvironmentPath: environment.environmentPath.fsPath,
+                    log: this.log,
+                };
+
+                if (toUninstall.length > 0) {
+                    const command = new CondaUninstallCommand(commandOptions);
+                    await command.execute({
+                        packages: parsePackageSpecs(toUninstall),
+                        cancellationToken: token,
+                        toolExecution: !!toolToken,
+                    });
+                }
+
+                if (toInstall.length > 0) {
+                    const command = new CondaInstallCommand(commandOptions);
+                    await command.execute({
+                        packages: parsePackageSpecs(toInstall),
+                        upgrade: options.upgrade,
+                        cancellationToken: token,
+                        toolExecution: !!toolToken,
+                    });
+                }
+
+                await updatePackagesAndNotify(
+                    this,
+                    environment,
+                    this.packages.get(environment.envId.id),
+                    (changes) => {
+                        this._onDidChangePackages.fire({ environment, manager: this, changes });
+                    },
+                    () => this.fetchPackages(environment, toolToken),
+                    !!toolToken,
+                );
+            } catch (e) {
+                if (e instanceof CancellationError) {
+                    throw e;
+                }
+                this.log.error('Error installing packages', e);
+                if (!options.runHeadless) {
+                    setImmediate(async () => {
+                        await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
+                    });
+                }
+                throw e;
+            }
         };
+
+        if (options.runHeadless) {
+            await execute(toolToken);
+            return;
+        }
+
         await withProgress(
             {
                 location: ProgressLocation.Notification,
                 title: CondaStrings.condaInstallingPackages,
                 cancellable: true,
             },
-            async (_progress, token) => {
-                try {
-                    await managePackages(environment, manageOptions, token, this.log);
-                    await updatePackagesAndNotify(
-                        this,
-                        environment,
-                        this.packages.get(environment.envId.id),
-                        (changes) => {
-                            this._onDidChangePackages.fire({ environment, manager: this, changes });
-                        },
-                    );
-                } catch (e) {
-                    if (e instanceof CancellationError) {
-                        throw e;
-                    }
-
-                    this.log.error('Error installing packages', e);
-                    setImmediate(async () => {
-                        await showErrorMessageWithLogs(CondaStrings.condaInstallError, this.log);
-                    });
-                }
-            },
+            (_progress, token) => execute(token),
         );
     }
 
@@ -113,46 +187,50 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     (changes) => {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
+                    () => this.fetchPackages(environment),
                 );
-                this.packages.set(environment.envId.id, packages ?? []);
+                if (packages !== undefined) {
+                    this.packages.set(environment.envId.id, packages);
+                }
             },
         );
     }
 
     async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         if (options?.skipCache || !this.packages.has(environment.envId.id)) {
-            const args = ['list', '-p', environment.environmentPath.fsPath, '--json'];
-            const data = await runCondaExecutable(args);
-
-            let condaPackages: { name: string; version: string }[];
-            try {
-                condaPackages = JSON.parse(data) as { name: string; version: string }[];
-            } catch (e) {
-                traceError(`Failed to parse conda list JSON output: ${data}`, e);
-                return [];
-            }
-
-            const packages: Package[] = [];
-            for (const condaPkg of condaPackages) {
-                if (condaPkg.name && condaPkg.version) {
-                    packages.push(
-                        this.api.createPackageItem(
-                            {
-                                name: condaPkg.name,
-                                displayName: condaPkg.name,
-                                version: condaPkg.version,
-                                description: condaPkg.version,
-                            },
-                            environment,
-                            this,
-                        ),
-                    );
-                }
-            }
-            this.packages.set(environment.envId.id, packages);
-            return packages;
+            return (await this.fetchPackages(environment)) ?? [];
         }
         return this.packages.get(environment.envId.id);
+    }
+
+    private async fetchPackages(
+        environment: PythonEnvironment,
+        token?: CancellationToken,
+    ): Promise<Package[] | undefined> {
+        throwIfCancelled(token);
+        const listCmd = new CondaListCommand({
+            pythonExecutable: 'conda',
+            condaEnvironmentPath: environment.environmentPath.fsPath,
+            log: this.log,
+        });
+        try {
+            const data = await listCmd.execute(
+                token ? { cancellationToken: token, strict: true, toolExecution: true } : undefined,
+            );
+            throwIfCancelled(token);
+            const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
+            this.packages.set(environment.envId.id, packages);
+            return packages;
+        } catch (error) {
+            if (token) {
+                throw error;
+            }
+            if (error instanceof CondaListOutputError) {
+                this.log.error('Error parsing installed Conda packages', error);
+                return undefined;
+            }
+            throw error;
+        }
     }
 
     formatInstallSpec(packageName: string, version: string): string {
@@ -162,42 +240,23 @@ export class CondaPackageManager implements PackageManager, Disposable {
 
     async getVersion(_environment: PythonEnvironment): Promise<Pep440Version | undefined> {
         try {
-            const output = await runCondaExecutable(['--version'], this.log);
-            // "conda X.Y.Z"
-            const match = output.match(/conda\s+(\d+\.\d+(?:\.\d+)*)/i);
-            return match ? (parse(match[1]) ?? undefined) : undefined;
+            const versionCmd = new CondaVersionCommand({
+                pythonExecutable: 'conda',
+                log: this.log,
+            });
+            return await versionCmd.execute();
         } catch {
             return undefined;
         }
     }
 
-    async getPackageAvailableVersions(
-        _environment: PythonEnvironment,
-        packageName: string,
-    ): Promise<Pep440Version[] | undefined> {
-        try {
-            const output = await runCondaExecutable(['search', packageName, '--json'], this.log);
-            const parsed = JSON.parse(output);
-            if (parsed && typeof parsed === 'object' && Array.isArray(parsed[packageName])) {
-                const uniqueVersions = new Map<string, Pep440Version>();
-                parsed[packageName]
-                    .filter((entry: { version?: string }) => !!entry.version?.trim())
-                    .map((entry: { version?: string }) => parse(entry.version!))
-                    .filter((v: Pep440Version | null): v is Pep440Version => v !== null)
-                    .forEach((version: Pep440Version) => {
-                        if (!uniqueVersions.has(version.public)) {
-                            uniqueVersions.set(version.public, version);
-                        }
-                    });
-
-                return Array.from(uniqueVersions.values()).sort((a: Pep440Version, b: Pep440Version) =>
-                    rcompare(a.public, b.public),
-                );
-            }
-            return undefined;
-        } catch {
-            return undefined;
-        }
+    async getPackageAvailableVersions(_environment: PythonEnvironment, packageName: string): Promise<Pep440Version[]> {
+        const availableVersionsCmd = new CondaAvailableVersionsCommand({
+            pythonExecutable: 'conda',
+            log: this.log,
+        });
+        const versions = await availableVersionsCmd.execute({ packageName, pythonVersion: '' });
+        return versions.sort((a, b) => compare(b.public, a.public));
     }
 
     getPackageWatchTargets(environment: PythonEnvironment): RelativePattern[] {

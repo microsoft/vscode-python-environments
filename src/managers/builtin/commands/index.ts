@@ -1,4 +1,8 @@
-export { PipAvailableVersionsCommand, UvAvailableVersionsCommand } from './availableVersions';
+export {
+    PipAvailableVersionsCommand,
+    PipAvailableVersionsTextCommand,
+    UvAvailableVersionsCommand,
+} from './availableVersions';
 export { PipInstallCommand, UvInstallCommand } from './install';
 export { PipListCommand, UvListCommand } from './list';
 export { PipListDirectNamesCommand, UvListDirectNamesCommand } from './listDirectNames';

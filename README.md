@@ -52,7 +52,7 @@ The following environment managers are supported out of the box:
 | conda               | ✅                | ✅     | ✅           |
 | pyenv               | ✅                |        |              |
 | poetry              | ✅                |        |              |
-| system              | ✅                |        |              |
+| system              | ✅                | ✅     |              |
 | pipenv              | ✅                |        |              |
 
 **Legend:**
@@ -130,7 +130,7 @@ All commands can be accessed via the Command Palette (`ctrl/cmd + Shift + P`):
 | pythonProjects               | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`.                                                                                                                                                                                                           |
 | terminal.showActivateButton  | `false`                   | (experimental) Show a button in the terminal to activate/deactivate the current environment for the terminal. This button is only shown if the active terminal is associated with a project that has an activatable environment.                                                                                                                                                                                                                                                                 |
 | terminal.autoActivationType  | `"command"`               | Specifies how the extension can activate an environment in a terminal. Accepted values: `command` (execute activation command in terminal), `shellStartup` (`terminal.integrated.shellIntegration.enabled` successfully enabled or we may modify shell startup scripts ), `off` (no auto-activation). Shell startup is only supported for: zsh, fish, pwsh, bash, cmd. **Takes precedence over** `python.terminal.activateEnvironment`. Restart terminals after changing this setting. To revert shell startup changes, run `Python Envs: Revert Shell Startup Script Changes`. |                                                                                        
-| alwaysUseUv                  | `true`                    | When `true`, [uv](https://github.com/astral-sh/uv) will be used to manage all virtual environments if available. When `false`, uv will only manage virtual environments explicitly created by uv.                                                                                                                                                                                                                                                                                                |
+| alwaysUseUv                  | `true`                    | When `true`, [uv](https://github.com/astral-sh/uv) will be used to manage all virtual environments if available. When `false`, uv will only manage virtual environments explicitly created by uv. The extension uses `uv` on its PATH, or the executable it installed during the current session. If unavailable in a trusted workspace, it also checks that workspace's `.pyprojectx/main/uv` (`uv.exe` on Windows) for environments inside that workspace. External environments require uv on PATH or a current-session installation. This does not alter the integrated terminal's PATH. |
 | globalSearchPaths            | `[]`                      | Global search paths for Python environments. Array of absolute directory paths to search for environments at the user level. This setting is merged with the legacy `python.venvPath` and `python.venvFolders` settings.                                                                                                                                                                                                                                                                        |
 | workspaceSearchPaths         | `[]`                      | Workspace search paths for Python environments. Can be absolute paths or relative directory paths searched within the workspace.                                                                                                                                                                                                                                                                                                                                                                 |
 
@@ -155,9 +155,7 @@ The Python Environments extension was built to provide a cohesive and user frien
 
 ### API Reference (proposed)
 
-See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the full list of Extension APIs.
-
-To consume these APIs you can look at the example here: [API Consumption Examples](https://github.com/microsoft/vscode-python-environments/blob/main/examples/README.md)
+See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the runtime API facade and [types.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/types.ts) for the public API contracts. Extension authors can consume these contracts from the `@vscode/python-environments` npm package.
 
 ### Callable Commands
 

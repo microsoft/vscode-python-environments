@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri, workspace } from 'vscode';
+import { Disposable, EventEmitter, l10n, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -8,6 +8,7 @@ import {
     GetEnvironmentScope,
     GetEnvironmentsScope,
     IconPath,
+    Pep440Version,
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
@@ -15,6 +16,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
 import { PoetryStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -24,9 +26,15 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { withProgress } from '../../common/window.apis';
-import { PythonProjectManager } from '../../internal.api';
-import { NativePythonFinder } from '../common/nativePythonFinder';
+import { getConfiguration } from '../../common/workspace.apis';
+import type { PythonProjectManager } from '../../features/projectManager';
+import { NativePythonEnvironmentKind, NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, notifyMissingManagerIfDefault } from '../common/utils';
+import {
+    EnvironmentToolSupport,
+    pythonToolSupport,
+    resolveToolProjectEnvironment,
+} from '../../internal/pythonToolSupport';
 import {
     clearPoetryCache,
     getPoetry,
@@ -39,8 +47,24 @@ import {
     setPoetryForWorkspace,
     setPoetryForWorkspaces,
 } from './poetryUtils';
+import { PoetryVersionCommand } from './commands/version';
 
 export class PoetryManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        [EnvironmentCapability.List]: supportedCapability,
+        [EnvironmentCapability.Resolve]: supportedCapability,
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
+        [EnvironmentCapability.Create]: async () => ({
+            supported: false,
+            reason: l10n.t('{0} does not support creating environments.', 'Poetry'),
+        }),
+        [EnvironmentCapability.Remove]: async () => ({
+            supported: false,
+            reason: l10n.t('{0} does not support removing environments.', 'Poetry'),
+        }),
+    };
+
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;
@@ -74,7 +98,33 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         this.fsPathToEnv.clear();
     }
 
+    public async getVersion(): Promise<Pep440Version | undefined> {
+        const poetry = await getPoetry();
+        if (!poetry) {
+            return undefined;
+        }
+        return await new PoetryVersionCommand({ pythonExecutable: poetry }).execute();
+    }
+
     private _initialized: Deferred<void> | undefined;
+    private discovery: Deferred<void> | undefined;
+    private initializationError: unknown;
+    readonly [pythonToolSupport]: EnvironmentToolSupport = {
+        initialize: async () => {
+            await this.initializeDiscovery();
+            if (this.initializationError) {
+                throw this.initializationError;
+            }
+        },
+        get: (scope) => this.get(scope, true),
+        getEnvironments: (scope) => this.getEnvironments(scope, true),
+        resolve: (scope) => this.resolve(scope, true),
+        resolveProject: (scope) =>
+            resolveToolProjectEnvironment(scope, NativePythonEnvironmentKind.poetry, this.nativeFinder, (uri) =>
+                this.resolve(uri, true),
+            ),
+    };
+
     async initialize(): Promise<void> {
         if (this._initialized) {
             return this._initialized.promise;
@@ -88,26 +138,13 @@ export class PoetryManager implements EnvironmentManager, Disposable {
 
         try {
             // Check if tool is findable before PET refresh (settings/cache/PATH only, no PET)
-            const hasExplicitSetting = !!workspace.getConfiguration('python').get<string>('poetryPath');
+            const hasExplicitSetting = !!getConfiguration('python').get<string>('poetryPath');
             const preRefreshTool = await getPoetry();
             if (preRefreshTool) {
                 toolSource = hasExplicitSetting ? 'settings' : 'local';
             }
 
-            await withProgress(
-                {
-                    location: ProgressLocation.Window,
-                    title: PoetryStrings.poetryDiscovering,
-                },
-                async () => {
-                    this.collection = (await refreshPoetry(false, this.nativeFinder, this.api, this)) ?? [];
-                    await this.loadEnvMap();
-
-                    this._onDidChangeEnvironments.fire(
-                        this.collection.map((e) => ({ environment: e, kind: EnvironmentChangeKind.add })),
-                    );
-                },
-            );
+            await this.initializeDiscovery();
 
             envCount = this.collection.length;
 
@@ -139,8 +176,34 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         }
     }
 
-    async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
-        await this.initialize();
+    private async initializeDiscovery(): Promise<void> {
+        if (this.discovery) {
+            return this.discovery.promise;
+        }
+        const discovery = (this.discovery = createDeferred());
+        try {
+            await withProgress(
+                { location: ProgressLocation.Window, title: PoetryStrings.poetryDiscovering },
+                async () => {
+                    this.collection = (await refreshPoetry(false, this.nativeFinder, this.api, this)) ?? [];
+                    await this.loadEnvMap();
+                    this.initializationError = undefined;
+                    this._onDidChangeEnvironments.fire(
+                        this.collection.map((environment) => ({ environment, kind: EnvironmentChangeKind.add })),
+                    );
+                },
+            );
+        } catch (error) {
+            this.initializationError = error;
+            this.discovery = undefined;
+            throw error;
+        } finally {
+            discovery.resolve();
+        }
+    }
+
+    async getEnvironments(scope: GetEnvironmentsScope, toolExecution = false): Promise<PythonEnvironment[]> {
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (scope === 'all') {
             return Array.from(this.collection);
@@ -175,6 +238,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
                     this.collection = (await refreshPoetry(true, this.nativeFinder, this.api, this)) ?? [];
 
                     await this.loadEnvMap();
+                    this.initializationError = undefined;
 
                     const args = [
                         ...discard.map((env) => ({ kind: EnvironmentChangeKind.remove, environment: env })),
@@ -187,8 +251,8 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         }
     }
 
-    async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        await this.initialize();
+    async get(scope: GetEnvironmentScope, toolExecution = false): Promise<PythonEnvironment | undefined> {
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
         if (scope instanceof Uri) {
             let env = this.fsPathToEnv.get(normalizePath(scope.fsPath));
             if (env) {
@@ -256,8 +320,8 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         }
     }
 
-    async resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
-        await this.initialize();
+    async resolve(context: ResolveEnvironmentContext, toolExecution = false): Promise<PythonEnvironment | undefined> {
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (context instanceof Uri) {
             const env = await resolvePoetryPath(context.fsPath, this.nativeFinder, this.api, this);

@@ -22,7 +22,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
-import { sleep, waitForCondition } from '../testUtils';
+import { runWithBlockedDialogsAsCancellation, sleep, waitForCondition } from '../testUtils';
 
 suite('Integration: Environment Creation', function () {
     this.timeout(120_000); // Environment creation can be slow
@@ -77,7 +77,9 @@ suite('Integration: Environment Creation', function () {
 
         try {
             // --- ACTION: User creates environment ---
-            createdEnv = await api.createEnvironment(workspaceUri, { quickCreate: true });
+            createdEnv = await runWithBlockedDialogsAsCancellation(() =>
+                api.createEnvironment(workspaceUri, { quickCreate: true }),
+            );
 
             if (!createdEnv) {
                 console.log('Environment creation returned undefined (may require user input)');
@@ -132,7 +134,9 @@ suite('Integration: Environment Creation', function () {
         let createdEnv: PythonEnvironment | undefined;
 
         try {
-            createdEnv = await api.createEnvironment(workspaceUri, { quickCreate: true });
+            createdEnv = await runWithBlockedDialogsAsCancellation(() =>
+                api.createEnvironment(workspaceUri, { quickCreate: true }),
+            );
             if (!createdEnv) {
                 this.skip();
                 return;
@@ -178,7 +182,9 @@ suite('Integration: Environment Creation', function () {
         try {
             // Attempt global creation - this may prompt for user input
             // so we use quickCreate and expect it might return undefined
-            createdEnv = await api.createEnvironment('global', { quickCreate: true });
+            createdEnv = await runWithBlockedDialogsAsCancellation(() =>
+                api.createEnvironment('global', { quickCreate: true }),
+            );
 
             if (createdEnv) {
                 // If creation succeeded, verify the environment has valid structure
@@ -230,7 +236,9 @@ suite('Integration: Environment Creation', function () {
         let createdEnv: PythonEnvironment | undefined;
 
         try {
-            createdEnv = await api.createEnvironment(workspaceUri, { quickCreate: true });
+            createdEnv = await runWithBlockedDialogsAsCancellation(() =>
+                api.createEnvironment(workspaceUri, { quickCreate: true }),
+            );
 
             if (!createdEnv) {
                 this.skip();

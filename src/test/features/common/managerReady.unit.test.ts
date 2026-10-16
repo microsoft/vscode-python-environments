@@ -16,14 +16,16 @@ import {
     withManagerTimeout,
 } from '../../../features/common/managerReady';
 import * as settingHelpers from '../../../features/settings/settingHelpers';
-import {
+import type {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
     EnvironmentManagers,
+} from '../../../features/envManagers';
+import type { PythonProjectManager } from '../../../features/projectManager';
+import type {
     InternalEnvironmentManager,
     InternalPackageManager,
-    PythonProjectManager,
-} from '../../../internal.api';
+} from '../../../managers/common/registeredManagers';
 
 suite('withManagerTimeout', () => {
     let clock: sinon.SinonFakeTimers;

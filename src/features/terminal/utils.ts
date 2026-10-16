@@ -11,6 +11,7 @@ import { VENV_MANAGER_ID } from '../../common/constants';
 import { traceError, traceVerbose } from '../../common/logging';
 import { timeout } from '../../common/utils/asyncUtils';
 import { createSimpleDebounce } from '../../common/utils/debounce';
+import { isSameOrParentPath } from '../../common/utils/pathUtils';
 import { onDidChangeTerminalShellIntegration, onDidWriteTerminalData } from '../../common/window.apis';
 import { getConfiguration, getWorkspaceFolders } from '../../common/workspace.apis';
 import { identifyTerminalShell } from '../common/shellDetector';
@@ -197,11 +198,6 @@ async function getDistinctProjectEnvs(
         }),
     );
     return envs;
-}
-
-function isSameOrParentPath(parentPath: string, candidatePath: string): boolean {
-    const relative = path.relative(path.resolve(parentPath), path.resolve(candidatePath));
-    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function getProjectForCwd(projects: readonly PythonProject[], cwd: string): PythonProject | undefined {
@@ -396,7 +392,7 @@ export type AutoActivationType = 'off' | 'command' | 'shellStartup';
  *    a. globalRemoteValue
  *    b. globalLocalValue
  *    c. globalValue
- * 2. python.terminal.activateEnvironment setting (if false, returns 'off' & sets autoActivationType to 'off')
+ * 2. python.terminal.activateEnvironment setting (if false, returns 'off')
  * 3. Default to 'command' if no setting is found
  *
  * @returns {AutoActivationType} The determined auto-activation type
@@ -424,8 +420,6 @@ export function getAutoActivationType(): AutoActivationType {
     const pythonConfig = getConfiguration('python');
     const pythonActivateSetting = pythonConfig.get<boolean | undefined>('terminal.activateEnvironment', undefined);
     if (pythonActivateSetting === false) {
-        // Set autoActivationType to 'off' if python.terminal.activateEnvironment is false
-        pyEnvsConfig.update('terminal.autoActivationType', ACT_TYPE_OFF);
         return ACT_TYPE_OFF;
     }
 

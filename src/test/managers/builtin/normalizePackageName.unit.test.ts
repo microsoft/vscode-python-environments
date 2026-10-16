@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { normalizePackageName } from '../../../managers/builtin/utils';
+import { normalizePackageName } from '../../../managers/common/packageUtils';
 
 suite('normalizePackageName', () => {
     test('should lowercase names', () => {

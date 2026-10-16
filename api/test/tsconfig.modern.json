@@ -5,7 +5,9 @@
         "moduleResolution": "NodeNext",
         "noEmit": true,
         "strict": true,
-        "skipLibCheck": false
+        "skipLibCheck": false,
+        "types": ["node", "vscode"],
+        "typeRoots": ["../node_modules/@types"]
     },
     "include": ["consumer.ts"]
 }

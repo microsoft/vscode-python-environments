@@ -6,12 +6,15 @@ import {
     EnvManagerTreeItem,
     getEnvironmentParentDirName,
     NoPythonEnvTreeItem,
+    PackageTreeItem,
     ProjectEnvironment,
     ProjectPackage,
     PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
-import { InternalEnvironmentManager, InternalPackageManager, PythonEnvironmentImpl } from '../../../internal.api';
+import { PythonEnvironmentImpl } from '../../../managers/common/models';
+import { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
+import type { InternalPackageManager } from '../../../managers/common/registeredManagers';
 
 /**
  * Helper to create a mock PythonEnvironmentImpl with minimal required fields.
@@ -169,7 +172,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithoutRemove);
 
             // Assert
-            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;');
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;managePackages;');
         });
 
         test('Context value includes activatable when environment has activation', () => {
@@ -183,7 +186,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithoutRemove);
 
             // Assert
-            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;activatable;');
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;activatable;managePackages;');
         });
 
         test('Context value includes remove when manager supports it', () => {
@@ -197,7 +200,51 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithRemove);
 
             // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;remove;activatable;managePackages;');
+        });
+
+        test('Inline-script environments do not advertise package management', () => {
+            // Arrange
+            const env = createMockEnvironment({
+                environmentPath: '/home/user/.cache/script-envs-v1/abc123/bin/python',
+                managerId: 'ms-python.python:inline-script',
+                hasActivation: true,
+            });
+
+            // Act
+            const item = new PythonEnvTreeItem(env, managerWithRemove);
+
+            // Assert
             assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;remove;activatable;');
+        });
+
+        test('Packages of an inline-script environment use the read-only context value', () => {
+            // Arrange
+            const env = createMockEnvironment({
+                environmentPath: '/home/user/.cache/script-envs-v1/abc123/bin/python',
+                managerId: 'ms-python.python:inline-script',
+            });
+            const parent = new PythonEnvTreeItem(env, managerWithRemove);
+            const pkg = { name: 'requests', displayName: 'requests', version: '2.32.0' } as Package;
+
+            // Act
+            const item = new PackageTreeItem(pkg, parent, {} as InternalPackageManager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package-readonly');
+        });
+
+        test('Packages of an ordinary environment keep the manageable context value', () => {
+            // Arrange
+            const env = createMockEnvironment({ environmentPath: '/home/user/envs/.venv/bin/python' });
+            const parent = new PythonEnvTreeItem(env, managerWithRemove);
+            const pkg = { name: 'requests', displayName: 'requests', version: '2.32.0' } as Package;
+
+            // Act
+            const item = new PackageTreeItem(pkg, parent, {} as InternalPackageManager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package');
         });
 
         test('Uses environment displayName as tree item label', () => {

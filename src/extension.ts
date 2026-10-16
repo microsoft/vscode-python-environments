@@ -12,8 +12,9 @@ import {
 import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
+import { InlineScriptPackagesNotManagedError } from './common/inlineScript/errors';
 import { registerLogger, traceError, traceInfo, traceWarn } from './common/logging';
-import { clearPersistentState, setPersistentState } from './common/persistentState';
+import { setPersistentState } from './common/persistentState';
 import { newProjectSelection } from './common/pickers/managers';
 import { StopWatch } from './common/stopWatch';
 import { EventNames } from './common/telemetry/constants';
@@ -35,7 +36,6 @@ import {
     onDidChangeTerminalShellIntegration,
     withProgress,
 } from './common/window.apis';
-import { getConfiguration, getWorkspaceFolders } from './common/workspace.apis';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
@@ -44,6 +44,8 @@ import { NewScriptProject } from './features/creators/newScriptProject';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
+    clearEnvironmentCachesCommand,
+    clearScriptEnvironmentCacheCommand,
     copyPathToClipboard,
     createAnyEnvironmentCommand,
     createEnvironmentCommand,
@@ -65,22 +67,25 @@ import {
 } from './features/envCommands';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
+import { latchInlineScriptFeatureActivation } from './features/inlineScript/activation';
+import { registerInlineScriptDiagnostics } from './features/inlineScript/diagnostics';
 import { InlineScriptLazyDetector } from './features/inlineScript/lazyDetector';
+import { registerInlineScriptUx } from './features/inlineScript/setupEnvironment';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
 } from './features/interpreterSelection';
 import { PythonProjectManagerImpl } from './features/projectManager';
-import { getPythonApi, setPythonApi } from './features/pythonApi';
+import { reportIssue } from './features/reportIssue';
+import { getPythonApi, setPythonApi } from './extensionApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
-import { migrateGlobalDefaultEnvManagerSetting } from './features/settings/settingHelpers';
+import {
+    isEnvironmentsExtensionEnabled,
+    migrateGlobalDefaultEnvManagerSetting,
+} from './features/settings/settingHelpers';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
-import {
-    clearShellProfileCache,
-    createShellEnvProviders,
-    createShellStartupProviders,
-} from './features/terminal/shells/providers';
+import { createShellEnvProviders, createShellStartupProviders } from './features/terminal/shells/providers';
 import { ShellStartupActivationVariablesManagerImpl } from './features/terminal/shellStartupActivationVariablesManager';
 import { cleanupStartupScripts } from './features/terminal/shellStartupSetupHandlers';
 import { TerminalActivationImpl } from './features/terminal/terminalActivationState';
@@ -117,29 +122,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     registerWorkspacePythonContext(context.subscriptions);
     // Only skip activation if user explicitly set useEnvironmentsExtension to false.
     // When disabled, the main Python extension handles environments instead (legacy mode).
-    const config = getConfiguration('python');
-    const inspection = config.inspect<boolean>('useEnvironmentsExtension');
-
-    // Check global and workspace-level explicit disables
-    let explicitlyDisabled = inspection?.globalValue === false || inspection?.workspaceValue === false;
-
-    // Also check folder-scoped settings in multi-root workspaces
-    // (inspect() on an unscoped config won't populate workspaceFolderValue reliably)
-    if (!explicitlyDisabled) {
-        const workspaceFolders = getWorkspaceFolders();
-        if (workspaceFolders) {
-            for (const folder of workspaceFolders) {
-                const folderConfig = getConfiguration('python', folder.uri);
-                const folderInspection = folderConfig.inspect<boolean>('useEnvironmentsExtension');
-                if (folderInspection?.workspaceFolderValue === false) {
-                    explicitlyDisabled = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    const useEnvironmentsExtension = !explicitlyDisabled;
+    const useEnvironmentsExtension = isEnvironmentsExtensionEnabled();
     traceInfo(`Experiment Status: useEnvironmentsExtension setting set to ${useEnvironmentsExtension}`);
     if (!useEnvironmentsExtension) {
         traceWarn(
@@ -183,10 +166,18 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     const projectManager: PythonProjectManager = new PythonProjectManagerImpl();
     context.subscriptions.push(projectManager);
 
+    const inlineScriptFeatureActivation = latchInlineScriptFeatureActivation();
+    const inlineScriptRouting = inlineScriptFeatureActivation.routingRegistry;
+    if (inlineScriptRouting) {
+        context.subscriptions.push(inlineScriptRouting);
+    }
+
+    void commands.executeCommand('setContext', 'pythonEnvsInlineScriptsEnabled', inlineScriptFeatureActivation.enabled);
+
     const envVarManager: EnvVarManager = new PythonEnvVariableManager(projectManager);
     context.subscriptions.push(envVarManager);
 
-    const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager);
+    const envManagers: EnvironmentManagers = new PythonEnvironmentManagers(projectManager, inlineScriptRouting);
     createManagerReady(envManagers, projectManager, context.subscriptions);
     context.subscriptions.push(envManagers);
 
@@ -205,7 +196,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     context.subscriptions.push(
         projectCreators,
         projectCreators.registerPythonProjectCreator(new ExistingProjects(projectManager)),
-        projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager)),
+        projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager, envManagers)),
         projectCreators.registerPythonProjectCreator(new NewPackageProject(envManagers, projectManager)),
         projectCreators.registerPythonProjectCreator(new NewScriptProject(projectManager)),
     );
@@ -213,9 +204,13 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     // Silent observer for `.py` files that declare PEP 723 inline
     // script metadata. Emits anonymized telemetry (inlineScript.detected /
     // inlineScript.edited) but does not register projects or surface any UI.
-    const inlineScriptLazyDetector = new InlineScriptLazyDetector();
+    const inlineScriptLazyDetector = new InlineScriptLazyDetector(inlineScriptRouting);
     inlineScriptLazyDetector.activate();
     context.subscriptions.push(inlineScriptLazyDetector);
+
+    if (inlineScriptFeatureActivation.enabled) {
+        context.subscriptions.push(registerInlineScriptDiagnostics());
+    }
 
     setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
     const api = await getPythonApi();
@@ -260,6 +255,31 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 },
             );
         }),
+        ...(process.env.VSC_PYTHON_INTEGRATION_TEST === '1'
+            ? [
+                  commands.registerCommand('python-envs.test.getPackageManagerIds', () =>
+                      envManagers.packageManagers.map((manager) => manager.id),
+                  ),
+                  commands.registerCommand(
+                      'python-envs.test.resolveEnvironmentWithManager',
+                      async (managerId: string, environmentUri: Uri) => {
+                          const manager = envManagers.getEnvironmentManager(managerId);
+                          if (!manager) {
+                              throw new Error(`Environment manager not found: ${managerId}`);
+                          }
+                          return manager.resolve(environmentUri);
+                      },
+                  ),
+                  commands.registerCommand(
+                      'python-envs.test.getDirectPackageNames',
+                      async (environment: PythonEnvironment) => {
+                          const manager = envManagers.getPackageManager(environment);
+                          const names = await manager?.getDirectPackageNames?.(environment);
+                          return names ? Array.from(names) : undefined;
+                      },
+                  ),
+              ]
+            : []),
         commands.registerCommand('python-envs.searchSettings', async () => {
             await openSearchSettings();
         }),
@@ -310,22 +330,29 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await removeEnvironmentCommand(item, envManagers);
         }),
         commands.registerCommand('python-envs.packages', async (options: unknown) => {
-            const { environment, packageManager } = await getPackageCommandOptions(
-                options,
-                envManagers,
-                projectManager,
-            );
+            let resolved;
             try {
-                packageManager.manage(environment, { install: [] });
+                resolved = await getPackageCommandOptions(options, envManagers, projectManager);
+            } catch (err) {
+                if (!(err instanceof InlineScriptPackagesNotManagedError)) {
+                    // Preserve the existing contract: other resolution failures still surface.
+                    throw err;
+                }
+                traceError('Rejected a package command for an inline-script environment:', err);
+                await window.showErrorMessage(err.message);
+                return;
+            }
+            try {
+                await resolved.packageManager.manage(resolved.environment, { install: [] });
             } catch (err) {
                 traceError('Error when running command python-envs.packages', err);
             }
         }),
         commands.registerCommand('python-envs.uninstallPackage', async (context: unknown) => {
-            await handlePackageUninstall(context, envManagers);
+            await handlePackageUninstall(context);
         }),
         commands.registerCommand('python-envs.managePackageVersion', async (context: unknown) => {
-            await managePackageVersion(context, envManagers);
+            await managePackageVersion(context);
         }),
         commands.registerCommand('python-envs.set', async (item) => {
             await setEnvironmentCommand(item, envManagers, projectManager);
@@ -369,10 +396,16 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             await removePythonProject(item, projectManager, envManagers);
         }),
         commands.registerCommand('python-envs.clearCache', async () => {
-            await clearPersistentState();
-            await envManagers.clearCache(undefined);
-            await clearShellProfileCache(shellStartupProviders);
+            await clearEnvironmentCachesCommand(envManagers, shellStartupProviders, context.workspaceState);
         }),
+        ...(isInlineScriptsFeatureEnabled()
+            ? [
+                  commands.registerCommand('python-envs.clearScriptEnvCache', async () => {
+                      await clearScriptEnvironmentCacheCommand(envManagers);
+                  }),
+              ]
+            : []),
+        ...(inlineScriptRouting ? registerInlineScriptUx(envManagers, inlineScriptRouting) : []),
         commands.registerCommand('python-envs.runInTerminal', (item) => {
             return runInTerminalCommand(item, api, terminalManager);
         }),
@@ -465,47 +498,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 });
             },
         ),
-        commands.registerCommand('python-envs.reportIssue', async () => {
-            try {
-                // Prompt for issue title
-                const rawTitle = await window.showInputBox({
-                    title: l10n.t('Report Issue - Title'),
-                    prompt: l10n.t('Enter a brief title for the issue'),
-                    placeHolder: l10n.t('e.g., Environment not detected, activation fails, etc.'),
-                    ignoreFocusOut: true,
-                });
-                const title = rawTitle?.trim();
-
-                if (!title) {
-                    // User cancelled or provided empty title
-                    return;
-                }
-
-                // Prompt for issue description
-                const rawDescription = await window.showInputBox({
-                    title: l10n.t('Report Issue - Description'),
-                    prompt: l10n.t('Describe the issue in more detail'),
-                    placeHolder: l10n.t('Provide additional context about what happened...'),
-                    ignoreFocusOut: true,
-                });
-                const description = rawDescription?.trim();
-
-                if (!description) {
-                    // User cancelled or provided empty description
-                    return;
-                }
-
-                const issueData = await collectEnvironmentInfo(context, envManagers, projectManager);
-
-                await commands.executeCommand('workbench.action.openIssueReporter', {
-                    extensionId: 'ms-python.vscode-python-envs',
-                    issueTitle: `[Python Environments] ${title}`,
-                    issueBody: `## Description\n${description}\n\n## Steps to Reproduce\n1. \n2. \n3. \n\n## Expected Behavior\n\n\n## Actual Behavior\n\n\n<!-- The following information was automatically generated -->\n\n<details>\n<summary>Environment Information</summary>\n\n\`\`\`\n${issueData}\n\`\`\`\n\n</details>`,
-                });
-            } catch (error) {
-                window.showErrorMessage(`Failed to open issue reporter: ${error}`);
-            }
-        }),
+        commands.registerCommand('python-envs.reportIssue', () => reportIssue(context, envManagers, projectManager)),
         commands.registerCommand('python-envs.runPetInTerminal', async () => {
             try {
                 await runPetInTerminalImpl();
@@ -653,13 +646,17 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 ),
                 safeRegister(
                     'inlineScript',
-                    registerInlineScriptFeatures(
-                        nativeFinder,
-                        context.subscriptions,
-                        outputChannel,
-                        sysMgr,
-                        context.globalStorageUri,
-                    ),
+                    inlineScriptFeatureActivation.enabled
+                        ? registerInlineScriptFeatures(
+                              nativeFinder,
+                              context.subscriptions,
+                              outputChannel,
+                              sysMgr,
+                              context.globalStorageUri,
+                              inlineScriptFeatureActivation,
+                              context.workspaceState,
+                          )
+                        : Promise.resolve(),
                 ),
                 safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);

@@ -5,6 +5,63 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0]
+
+### Added
+
+- Optional `capabilities` maps for environment and package managers, with typed keys and contextual checks. Omitted maps use legacy method inference; when present, the map must advertise every catalog key explicitly, and missing keys resolve unsupported.
+- Raw-provider capability resolvers and routed extension API queries that report support without invoking manager operations or prompting.
+- Capability catalogs for six environment and six package features, with flat operation names. Listing includes refresh, and package installation, uninstallation, and upgrades are advertised individually rather than through a management umbrella.
+- Exported `EnvironmentCapability` and `PackageCapability` constant objects for named access to capability keys, with derived string-literal unions.
+- `getLegacyPackageManagerCapability` and `getLegacyEnvironmentManagerCapability` helpers that infer support from method presence without invoking operations. Resolvers use them automatically when a provider omits its capability map.
+- Optional `Support.isLegacy` metadata, set to true by legacy inference helpers and included in public capability-query telemetry.
+
+### Notes
+
+- Capability prerequisite checks have no cycle protection; providers must keep delegation chains acyclic.
+
+## [1.6.0]
+
+### Added
+
+- Added optional `EnvironmentManager.getVersion?(): Promise<Pep440Version | undefined>` support for retrieving the version of the underlying environment management tool. Built-in implementations are provided for Conda, Poetry, Pipenv, and Pyenv.
+
+## [1.5.0]
+
+### Added
+
+- Added the optional `PackageManager.createForProject` factory for package managers whose operations depend on the calling Python project. Explicit project contexts are used directly; environment-only operations use a scoped manager only when exactly one tracked project matches.
+- Added optional `PackageManager.dispose` support for releasing resources owned by project-scoped package managers.
+
+### Changed
+
+- Environment-only package operations no longer fall back to an unbound project-aware package manager. When no unique project can be inferred, package reads return `undefined` and mutations and refreshes reject with `No package manager found`.
+
+## [1.4.0]
+
+### Changed
+
+- Reorganized the package source into separate API facade, public contract, and public error modules without changing the root package exports.
+
+## [1.3.0]
+
+### Added
+
+- Added `PackageVersionLookupNotSupportedError`, thrown when a package manager cannot list a package's available versions (an unsupported capability, as distinct from an operational failure). The error exposes a stable `code` (`'PackageVersionLookupNotSupported'`) discriminator.
+- Added the `isPackageVersionLookupNotSupportedError(error): error is PackageVersionLookupNotSupportedError` type guard. It recognizes the error via its stable `code`, so it works even when the error crosses an extension bundle boundary and `instanceof` would fail.
+- Added an optional `errorMode` to `PythonPackageGetterApi.getPackageAvailableVersions`. The default `legacy` mode preserves the existing `undefined` result for unsupported lookups and operational failures. The opt-in `throw` mode rejects with `PackageVersionLookupNotSupportedError` for unsupported capabilities and propagates operational failures unchanged.
+
+### Changed
+
+- Documented that `PackageManager.getPackageAvailableVersions` implementations should throw `PackageVersionLookupNotSupportedError` when version lookup is unsupported and let operational failures propagate. Resolving to `undefined` continues to be treated by callers as an unsupported capability.
+
+## [1.2.0]
+
+### Added
+
+- Added `PackageManagementInteractionOptions` with an optional `runHeadless?: boolean` property, mixed into `PackageManagementOptions`. When `true`, package management operations run without any user prompts or interaction — steps that would normally require input, such as selecting packages to install when none are specified, are skipped instead of prompting — for automated or headless scenarios such as integration tests.
+- Added `RemoveEnvironmentOptions` with an optional `runHeadless?: boolean` property to remove environments without a confirmation prompt in automated or headless scenarios.
+
 ## [1.1.0]
 
 ### Added

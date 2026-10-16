@@ -9,6 +9,7 @@ import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import {
     InlineScriptMetadata,
+    getInlineScriptSourceHash,
     MAX_HEADER_BYTES,
     matchesPythonVersion,
     readInlineScriptMetadata,
@@ -93,6 +94,62 @@ suite('inlineScriptMetadata', () => {
             assert.deepStrictEqual(md.tool, { mybuild: { extra: 'thing' } });
         });
 
+        test('fingerprints dependencies surrounded by marker text inside valid TOML strings', () => {
+            const text = script([
+                '# /// script',
+                '# note = """',
+                '# ///',
+                '# """',
+                '# dependencies = ["requests"]',
+                '# other = """',
+                '# /// script',
+                '# """',
+                '# ///',
+            ]);
+            const original = readInlineScriptMetadata(text);
+            const changed = readInlineScriptMetadata(text.replace('requests', 'httpx'));
+            assert.ok(original?.sourceHash);
+            assert.ok(changed?.sourceHash);
+            assert.deepStrictEqual(original.dependencies, ['requests']);
+            assert.deepStrictEqual(changed.dependencies, ['httpx']);
+            assert.notStrictEqual(original.sourceHash, changed.sourceHash);
+        });
+
+        test('fingerprints every non-newline character of valid metadata with embedded markers', () => {
+            const fixtures = [
+                script(['# /// script', '# requires-python = ">=3.11"', '# dependencies = ["requests"]', '# ///']),
+                script([
+                    '# /// script',
+                    '# note = """',
+                    '# ///',
+                    '# """',
+                    '# dependencies = ["requests"]',
+                    '# other = """',
+                    '# /// script',
+                    '# /// script',
+                    '# content',
+                    '# """',
+                    '# ///',
+                ]),
+            ];
+            for (const source of fixtures) {
+                const metadata = readInlineScriptMetadata(source);
+                assert.ok(metadata?.sourceHash);
+                for (let offset = metadata.sourceRange!.start; offset < metadata.sourceRange!.end; offset += 1) {
+                    if (source[offset] === '\n' || source[offset] === '\r') {
+                        continue;
+                    }
+                    const replacement = source[offset] === 'x' ? 'y' : 'x';
+                    const changed = source.slice(0, offset) + replacement + source.slice(offset + 1);
+                    assert.notStrictEqual(
+                        getInlineScriptSourceHash(changed),
+                        metadata.sourceHash,
+                        `Fingerprint omitted metadata character at ${offset}`,
+                    );
+                }
+            }
+        });
+
         test('multiple `script` blocks returns undefined and logs a warning', () => {
             const text = script([
                 '# /// script',
@@ -131,6 +188,8 @@ suite('inlineScriptMetadata', () => {
             const md = readInlineScriptMetadata(text);
             assert.ok(md);
             assert.deepStrictEqual([...(md.dependencies ?? [])], ['a']);
+            assert.deepStrictEqual(md.sourceRange, { start: 0, end: text.length });
+            assert.strictEqual(md.range.end, text.replace(/\r\n/g, '\n').length);
         });
 
         test('lone-CR line endings parse identically to LF', () => {
@@ -155,6 +214,8 @@ suite('inlineScriptMetadata', () => {
             const md = readInlineScriptMetadata(text);
             assert.ok(md);
             assert.deepStrictEqual([...(md.dependencies ?? [])], ['a']);
+            assert.strictEqual(md.range.start, 0, 'normalized parser offsets continue to exclude the BOM');
+            assert.deepStrictEqual(md.sourceRange, { start: 1, end: text.length });
         });
 
         test('shebang before block does not block detection', () => {
@@ -198,6 +259,59 @@ suite('inlineScriptMetadata', () => {
             const text = script(['# /// script', '# this is = not valid = toml', '# ///']);
             assert.strictEqual(readInlineScriptMetadata(text), undefined);
             assert.ok(traceWarnStub.called, 'expected a traceWarn for malformed TOML');
+        });
+
+        test('malformed TOML warning names the source, the script line, and carries no stack', () => {
+            // `# /// script` is line 1, so its first content line is line 2.
+            const text = script(['# /// script', '# requires-python = ">=3.11', '# ///']);
+
+            assert.strictEqual(readInlineScriptMetadata(text, '/tmp/broken.py'), undefined);
+
+            const warning = String(traceWarnStub.firstCall.args[0]);
+            assert.ok(
+                warning.includes('/tmp/broken.py'),
+                `expected the warning to name the source, got: ${warning}`,
+            );
+            assert.ok(warning.includes('(line 2)'), `expected a script line number, got: ${warning}`);
+            assert.ok(
+                !/at row \d+, col \d+/.test(warning),
+                `expected the TOML payload coordinates to be dropped, got: ${warning}`,
+            );
+            assert.strictEqual(
+                traceWarnStub.firstCall.args.length,
+                1,
+                'the warning must not pass the raw error, which would print a stack',
+            );
+            assert.ok(
+                traceVerboseStub.getCalls().some((call) => String(call.args[0]).includes('TOML parse error detail')),
+                'expected the full error to be logged at the debug level',
+            );
+        });
+
+        test('the reported line is relative to the script, not the metadata block', () => {
+            // Push the block down; the bad content line is file line 5.
+            const text = script([
+                '#!/usr/bin/env python3',
+                '# leading commentary',
+                '',
+                '# /// script',
+                '# requires-python = ">=3.11',
+                '# ///',
+            ]);
+
+            assert.strictEqual(readInlineScriptMetadata(text, '/tmp/offset.py'), undefined);
+
+            const warning = String(traceWarnStub.firstCall.args[0]);
+            assert.ok(warning.includes('(line 5)'), `expected line 5, got: ${warning}`);
+        });
+
+        test('omitting the source keeps the warning free of a dangling separator', () => {
+            const text = script(['# /// script', '# requires-python = ">=3.11', '# ///']);
+
+            assert.strictEqual(readInlineScriptMetadata(text), undefined);
+
+            const warning = String(traceWarnStub.firstCall.args[0]);
+            assert.ok(warning.startsWith('inline script metadata:'), `unexpected prefix: ${warning}`);
         });
 
         test('dependencies is not a list returns undefined', () => {
@@ -359,6 +473,20 @@ suite('inlineScriptMetadata', () => {
             assert.strictEqual(md, undefined);
         });
 
+        test('strict tool reads reject invalid metadata while public reads keep their existing behavior', async () => {
+            const uri = Uri.file(path.join(tmpDir, 'invalid.py'));
+            await fs.writeFile(uri.fsPath, script(['# /// script', '# dependencies = [', '# ///']));
+            assert.strictEqual(await readInlineScriptMetadataFromFile(uri), undefined);
+            await assert.rejects(readInlineScriptMetadataFromFile(uri, true), /PEP 723/);
+        });
+
+        test('strict tool reads surface I/O errors but accept an ordinary script without metadata', async () => {
+            const uri = Uri.file(path.join(tmpDir, 'plain.py'));
+            await assert.rejects(readInlineScriptMetadataFromFile(uri, true), /ENOENT/);
+            await fs.writeFile(uri.fsPath, 'print("ordinary script")\n');
+            assert.strictEqual(await readInlineScriptMetadataFromFile(uri, true), undefined);
+        });
+
         test('block past MAX_HEADER_BYTES boundary is NOT found (cap is enforced)', async () => {
             const filePath = path.join(tmpDir, 'big.py');
             // Pad with a comment that fills more than MAX_HEADER_BYTES,
@@ -458,9 +586,16 @@ suite('inlineScriptMetadata', () => {
             assert.strictEqual(matchesPythonVersion('===3.11.0', '3.11'), false);
         });
 
-        test('input version with pre/dev suffix is truncated to release', () => {
-            assert.strictEqual(matchesPythonVersion('>=3.11', '3.11.0rc1'), true);
+        test('prereleases require an explicitly prerelease-compatible specifier', () => {
+            assert.strictEqual(matchesPythonVersion('>=3.11', '3.11.0rc1'), false);
+            assert.strictEqual(matchesPythonVersion('>=3.11.0rc1', '3.11.0rc1'), true);
             assert.strictEqual(matchesPythonVersion('>=3.11', '3.10.0rc1'), false);
+        });
+
+        test('supports normalized interpreter version formats', () => {
+            assert.strictEqual(matchesPythonVersion('>=3.14', '3.14.3.final.0'), true);
+            assert.strictEqual(matchesPythonVersion('==3.14.*', '3.14.0b1'), false);
+            assert.strictEqual(matchesPythonVersion('<3.14', '3.14.0b1'), false);
         });
 
         test('invalid specifier returns false and logs warn', () => {

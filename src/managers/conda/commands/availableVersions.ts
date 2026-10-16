@@ -19,17 +19,30 @@ export class CondaAvailableVersionsCommand extends AvailableVersionsCommand {
             executeArgs.cancellationToken,
         );
 
-        try {
-            const parsed = JSON.parse(output);
-            if (parsed && typeof parsed === 'object' && Array.isArray(parsed[executeArgs.packageName])) {
-                const versions = (parsed[executeArgs.packageName] as Array<{ version?: string }>)
-                    .map((entry) => entry.version?.trim() ?? '')
-                    .filter((version) => !!version);
-                return this.parseVersions(versions, executeArgs.includePrerelease);
-            }
-            return [];
-        } catch {
-            return [];
+        const parsed: unknown = JSON.parse(output);
+        if (
+            typeof parsed !== 'object' ||
+            parsed === null ||
+            !(executeArgs.packageName in parsed)
+        ) {
+            throw new Error(`Conda returned unexpected package version data for: ${executeArgs.packageName}`);
         }
+
+        const entries = (parsed as Record<string, unknown>)[executeArgs.packageName];
+        if (!Array.isArray(entries)) {
+            throw new Error(`Conda returned unexpected package version data for: ${executeArgs.packageName}`);
+        }
+        const versions = entries.map((entry) => {
+            if (
+                typeof entry !== 'object' ||
+                entry === null ||
+                !('version' in entry) ||
+                typeof entry.version !== 'string'
+            ) {
+                throw new Error(`Conda returned an invalid package version entry for: ${executeArgs.packageName}`);
+            }
+            return entry.version.trim();
+        });
+        return this.parseVersions(versions, executeArgs.includePrerelease);
     }
 }

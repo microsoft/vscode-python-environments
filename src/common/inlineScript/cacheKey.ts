@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 import { createHash } from 'crypto';
-import { normalizePackageName } from '../../managers/builtin/utils';
+import { normalizePackageName } from '../../managers/common/packageUtils';
 import { normalizePath } from '../utils/pathUtils';
 
 /** Length, in hex chars, of the cache key returned by {@link computeCacheKey}. 16 = 64 bits of SHA-256; fixed-length and filesystem-safe. */

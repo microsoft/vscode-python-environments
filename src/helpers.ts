@@ -8,7 +8,8 @@ import { ShellConstants } from './features/common/shellConstants';
 import { identifyTerminalShell } from './features/common/shellDetector';
 import { quoteArgs } from './features/execution/execUtils';
 import { getAutoActivationType } from './features/terminal/utils';
-import { EnvironmentManagers, PythonProjectManager } from './internal.api';
+import type { EnvironmentManagers } from './features/envManagers';
+import type { PythonProjectManager } from './features/projectManager';
 import { getNativePythonToolsPath } from './managers/common/nativePythonFinder';
 
 /**

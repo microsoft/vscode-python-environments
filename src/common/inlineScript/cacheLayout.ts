@@ -3,6 +3,7 @@
 
 import * as crypto from 'crypto';
 import * as fsapi from 'fs-extra';
+import { rename as renameWithoutRetry } from 'fs/promises';
 import * as path from 'path';
 import { Uri } from 'vscode';
 import type { PythonEnvironment } from '../../api';
@@ -22,8 +23,13 @@ export const META_JSON_FILENAME = '.meta.json';
  * Schema version embedded in every {@link InlineScriptEnvMeta}.
  */
 export const META_SCHEMA_VERSION = 1 as const;
+export const SOURCE_METADATA_IDENTITY_HASH_HEX_LENGTH = 64;
+export const INSTALLED_PACKAGES_HASH_HEX_LENGTH = 64;
+export const MAX_SOURCE_METADATA_IDENTITY_HASHES = 128;
 
 const MAX_META_JSON_BYTES = 1024 * 1024;
+const META_JSON_BACKUP_FILENAME_RE = /^\.meta\.json\.backup-[0-9a-f]{12}$/;
+const pendingMetaJsonWrites = new Map<string, Promise<void>>();
 
 /**
  * Validated on-disk schema for a cached inline-script environment's
@@ -38,11 +44,20 @@ export interface InlineScriptEnvMeta {
     readonly baseInterpreterVersion: string;
     /** Last successful use as a canonical UTC string produced by `Date.toISOString()`. */
     readonly lastUsedAt: string;
+    /** Set when packages changed outside setup; the entry no longer matches its declared dependencies. */
+    readonly manuallyModified?: boolean;
+    /**
+     * SHA-256 of the distributions this extension installed into the entry, as recorded under the
+     * cache-entry lock. Absent when never recorded — which means "unknown", never "changed".
+     */
+    readonly installedPackagesHash?: string;
+    /** Bounded SHA-256 hashes of metadata identities proven for this cache entry. */
+    readonly sourceMetadataIdentityHashes?: readonly string[];
 }
 
 export type InlineScriptMetaReadResult =
     | { readonly kind: 'valid'; readonly metadata: InlineScriptEnvMeta }
-    | { readonly kind: 'missing' | 'invalid' | 'unavailable' };
+    | { readonly kind: 'missing' | 'invalid' | 'unsupported' | 'unavailable' };
 
 export type BaseInterpreterStatus = 'available' | 'missing' | 'unavailable';
 export type CacheEnvironmentInspection = 'expected' | 'stale' | 'uncertain';
@@ -119,8 +134,76 @@ export async function readMetaJson(envDir: Uri): Promise<InlineScriptEnvMeta | u
 
 /** Classify sidecar state; only `unavailable` denotes transient I/O. */
 export async function inspectMetaJson(envDir: Uri): Promise<InlineScriptMetaReadResult> {
-    const metaPath = getMetaJsonPath(envDir).fsPath;
+    return inspectMetaJsonFile(getMetaJsonPath(envDir).fsPath);
+}
 
+/**
+ * Restore the most recently-used compatible sidecar backup while the caller
+ * owns the cache-entry lock. General readers must use {@link inspectMetaJson}.
+ */
+export async function restoreMetaJsonBackupUnderLock(
+    envDir: Uri,
+    isCompatible: (metadata: InlineScriptEnvMeta) => boolean = () => true,
+): Promise<InlineScriptMetaReadResult> {
+    const finalPath = getMetaJsonPath(envDir).fsPath;
+    const initial = await inspectMetaJsonFile(finalPath);
+    if (initial.kind !== 'missing') {
+        return initial;
+    }
+
+    let entries: string[];
+    try {
+        entries = await fsapi.readdir(envDir.fsPath);
+    } catch (error) {
+        traceWarn(`inline-script meta: failed to scan backup sidecars in ${envDir.fsPath}:`, error);
+        return { kind: 'unavailable' };
+    }
+
+    const validBackups: Array<{ readonly path: string; readonly metadata: InlineScriptEnvMeta }> = [];
+    let hasUnsupportedBackup = false;
+    for (const entry of entries.filter((name) => META_JSON_BACKUP_FILENAME_RE.test(name))) {
+        const result = await inspectMetaJsonFile(path.join(envDir.fsPath, entry));
+        if (result.kind === 'valid' && isCompatible(result.metadata)) {
+            validBackups.push({ path: path.join(envDir.fsPath, entry), metadata: result.metadata });
+        } else if (result.kind === 'unsupported') {
+            hasUnsupportedBackup = true;
+        } else if (result.kind === 'unavailable' || result.kind === 'missing') {
+            // A listed candidate changing or becoming unreadable is an
+            // uncertain scan; preserve the entry rather than rebuilding it.
+            return { kind: 'unavailable' };
+        }
+    }
+
+    if (validBackups.length === 0) {
+        return { kind: hasUnsupportedBackup ? 'unsupported' : 'missing' };
+    }
+
+    // `lastUsedAt` is schema-validated canonical ISO text. Prefer the newest
+    // compatible backup; use the path as a stable tie-breaker.
+    validBackups.sort((a, b) => {
+        if (a.metadata.lastUsedAt !== b.metadata.lastUsedAt) {
+            return a.metadata.lastUsedAt < b.metadata.lastUsedAt ? 1 : -1;
+        }
+        return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+    });
+    const selected = validBackups[0];
+
+    // Native rename may replace an existing destination on some platforms,
+    // so recheck under the caller's entry lock before restoring.
+    const current = await inspectMetaJsonFile(finalPath);
+    if (current.kind !== 'missing') {
+        return current;
+    }
+    try {
+        await fsapi.rename(selected.path, finalPath);
+    } catch (error) {
+        traceWarn(`inline-script meta: failed to restore backup ${selected.path}:`, error);
+        return { kind: 'unavailable' };
+    }
+    return { kind: 'valid', metadata: selected.metadata };
+}
+
+async function inspectMetaJsonFile(metaPath: string): Promise<InlineScriptMetaReadResult> {
     try {
         const stat = await fsapi.lstat(metaPath);
         if (!stat.isFile()) {
@@ -160,6 +243,10 @@ export async function inspectMetaJson(envDir: Uri): Promise<InlineScriptMetaRead
     }
 
     const validated = validateMeta(parsed);
+    if (validated === 'unsupported') {
+        traceWarn(`inline-script meta: unsupported schema in ${metaPath}`);
+        return { kind: 'unsupported' };
+    }
     if (!validated) {
         traceWarn(`inline-script meta: invalid shape in ${metaPath}`);
         return { kind: 'invalid' };
@@ -168,21 +255,198 @@ export async function inspectMetaJson(envDir: Uri): Promise<InlineScriptMetaRead
 }
 
 /**
- * Atomically write the `.meta.json` sidecar via temp-file + rename.
+ * Queue writes for a single sidecar in this process. Production callers also
+ * hold the cache-entry file lock, which serializes this operation across
+ * extension-host processes.
  */
-export async function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta): Promise<void> {
-    await fsapi.ensureDir(envDir.fsPath);
+export interface WriteMetaJsonOptions {
+    /**
+     * Fail immediately instead of letting graceful-fs retry a Windows sharing violation on the
+     * rename for a full minute. Read-path bookkeeping must never hold the shared cache-entry lock
+     * that long: other windows cannot tell it apart from a build or a deletion.
+     */
+    readonly failFast?: boolean;
+}
+
+export function writeMetaJson(envDir: Uri, meta: InlineScriptEnvMeta, options?: WriteMetaJsonOptions): Promise<void> {
     const finalPath = getMetaJsonPath(envDir).fsPath;
+    const key = normalizePath(path.resolve(finalPath));
+    const previous = pendingMetaJsonWrites.get(key) ?? Promise.resolve();
+    const operation = previous
+        .catch(() => undefined)
+        .then(() => writeMetaJsonOnce(envDir, meta, finalPath, options?.failFast === true));
+    let queued: Promise<void>;
+    queued = operation.finally(() => {
+        if (pendingMetaJsonWrites.get(key) === queued) {
+            pendingMetaJsonWrites.delete(key);
+        }
+    });
+    pendingMetaJsonWrites.set(key, queued);
+    return queued;
+}
+
+async function writeMetaJsonOnce(
+    envDir: Uri,
+    meta: InlineScriptEnvMeta,
+    finalPath: string,
+    failFast: boolean,
+): Promise<void> {
+    const rename = failFast ? renameWithoutRetry : fsapi.rename;
+    await fsapi.ensureDir(envDir.fsPath);
     const tmpSuffix = crypto.randomBytes(6).toString('hex');
     const tmpPath = `${finalPath}.tmp-${tmpSuffix}`;
+    const backupPath = `${finalPath}.backup-${tmpSuffix}`;
     const payload = JSON.stringify(meta, undefined, 2);
+    let hasBackup = false;
+    let finalKnownToExist = false;
+
     try {
         await fsapi.writeFile(tmpPath, payload, 'utf8');
-        await fsapi.rename(tmpPath, finalPath);
-    } catch (err) {
+        try {
+            await rename(tmpPath, finalPath);
+            finalKnownToExist = true;
+            return;
+        } catch (err) {
+            const code = (err as NodeJS.ErrnoException | undefined)?.code;
+            // Read-path bookkeeping must leave the old sidecar in place rather than enter
+            // the backup/restore path, whose recovery may itself need a retrying rename.
+            if (failFast || !['EPERM', 'EEXIST', 'EBUSY'].includes(code ?? '')) {
+                throw err;
+            }
+        }
+
+        try {
+            await rename(finalPath, backupPath);
+            hasBackup = true;
+        } catch (err) {
+            if (!isFileNotFoundError(err)) {
+                throw err;
+            }
+        }
+
+        try {
+            await rename(tmpPath, finalPath);
+            finalKnownToExist = true;
+        } catch (replaceError) {
+            if (hasBackup) {
+                try {
+                    await fsapi.rename(backupPath, finalPath);
+                    finalKnownToExist = true;
+                } catch {
+                    // Keep the backup: it is the only known copy when
+                    // restoration cannot prove the final sidecar exists.
+                }
+            }
+            throw replaceError;
+        }
+    } finally {
         await fsapi.remove(tmpPath).catch(() => undefined);
-        throw err;
+        if (hasBackup && finalKnownToExist) {
+            await fsapi.remove(backupPath).catch(() => undefined);
+        }
     }
+}
+
+export function hashSourceMetadataIdentity(identity: string): string {
+    return crypto.createHash('sha256').update(identity, 'utf8').digest('hex');
+}
+
+/**
+ * Outcome of comparing an entry's recorded distributions against what is on disk.
+ *
+ * `unknown` is deliberately distinct from `changed`. Treating "no record" as "everything was
+ * added" is exactly the mistake that made merely listing packages invalidate a working
+ * environment; callers must never invalidate on `unknown`.
+ */
+export type InstalledPackagesComparison = 'unknown' | 'unchanged' | 'changed';
+
+/**
+ * The only place this decision is made. Keep it that way.
+ */
+export function compareInstalledPackages(
+    recordedHash: string | undefined,
+    actualHash: string | undefined,
+): InstalledPackagesComparison {
+    if (recordedHash === undefined || actualHash === undefined) {
+        return 'unknown';
+    }
+    return recordedHash === actualHash ? 'unchanged' : 'changed';
+}
+
+export function hashInstalledDistributions(distributions: readonly string[]): string {
+    const normalized = Array.from(new Set(distributions.map((name) => name.toLowerCase()))).sort();
+    return crypto.createHash('sha256').update(normalized.join('\n'), 'utf8').digest('hex');
+}
+
+/**
+ * `site-packages` locations inside a cached environment. Windows keeps a single `Lib/site-packages`;
+ * POSIX nests it under a version directory (`lib/python3.12/site-packages`), so that level is
+ * enumerated rather than guessed.
+ */
+async function getSitePackagesDirs(envDir: Uri): Promise<string[]> {
+    if (isWindows()) {
+        return [path.join(envDir.fsPath, 'Lib', 'site-packages')];
+    }
+    const libPath = path.join(envDir.fsPath, 'lib');
+    let entries: string[];
+    try {
+        entries = await fsapi.readdir(libPath);
+    } catch {
+        return [];
+    }
+    return entries.filter((entry) => entry.startsWith('python')).map((entry) => path.join(libPath, entry, 'site-packages'));
+}
+
+/**
+ * Names of the installed distributions in a cached environment, derived from `*.dist-info`
+ * directory names (which carry both name and version). Returns `undefined` when the inventory
+ * cannot be read, so callers see `unknown` rather than a false `changed`.
+ *
+ * Distributions that only ship legacy `.egg-info` are not observed here, matching the scope the
+ * package watcher previously treated as authoritative.
+ */
+export async function readInstalledDistributions(envDir: Uri): Promise<string[] | undefined> {
+    const sitePackagesDirs = await getSitePackagesDirs(envDir);
+    if (sitePackagesDirs.length === 0) {
+        return undefined;
+    }
+    const distributions: string[] = [];
+    let readAny = false;
+    for (const sitePackages of sitePackagesDirs) {
+        let entries: string[];
+        try {
+            entries = await fsapi.readdir(sitePackages);
+        } catch (error) {
+            if (isFileNotFoundError(error)) {
+                continue;
+            }
+            traceWarn(`inline-script env: failed to list ${sitePackages}:`, error);
+            return undefined;
+        }
+        readAny = true;
+        distributions.push(...entries.filter((entry) => entry.endsWith('.dist-info')));
+    }
+    return readAny ? distributions : undefined;
+}
+
+/** Current inventory hash for an entry, or `undefined` when it cannot be determined. */
+export async function readInstalledPackagesHash(envDir: Uri): Promise<string | undefined> {
+    const distributions = await readInstalledDistributions(envDir);
+    return distributions === undefined ? undefined : hashInstalledDistributions(distributions);
+}
+
+export function mergeSourceMetadataIdentityHashes(
+    existing: readonly string[] | undefined,
+    current: string | undefined,
+): readonly string[] | undefined {
+    const ordered = [...(existing ?? [])];
+    if (current && !ordered.includes(current)) {
+        ordered.push(current);
+    }
+    if (ordered.length === 0) {
+        return undefined;
+    }
+    return Object.freeze(ordered.slice(-MAX_SOURCE_METADATA_IDENTITY_HASHES));
 }
 
 /**
@@ -204,7 +468,7 @@ export function selectStaleEntries(entries: ReadonlyArray<CacheEntrySummary>, no
 }
 
 /**
- * Verify that a cached env's base interpreter still exists on disk.
+ * Verify that a cached env's launcher and base interpreter still exist on disk.
  */
 export async function verifyBaseInterpreterExists(envDir: Uri): Promise<boolean> {
     return (await getBaseInterpreterStatus(envDir)) === 'available';
@@ -221,6 +485,11 @@ async function getPosixBaseInterpreterStatus(envDir: Uri): Promise<BaseInterpret
 }
 
 async function getWindowsBaseInterpreterStatus(envDir: Uri): Promise<BaseInterpreterStatus> {
+    const launcherStatus = await getRegularFileStatus(getVenvPythonPath(envDir.fsPath), 'cached interpreter launcher');
+    if (launcherStatus !== 'available') {
+        return launcherStatus;
+    }
+
     const pyvenvPath = Uri.joinPath(envDir, 'pyvenv.cfg').fsPath;
     let raw: string;
     try {
@@ -285,11 +554,17 @@ function isNonEmptyTrimmedString(value: unknown): value is string {
     return typeof value === 'string' && value.length > 0 && value.trim() === value;
 }
 
-function validateMeta(value: unknown): InlineScriptEnvMeta | undefined {
+function validateMeta(value: unknown): InlineScriptEnvMeta | 'unsupported' | undefined {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         return undefined;
     }
     const obj = value as Record<string, unknown>;
+    if (typeof obj.schemaVersion !== 'number' || !Number.isSafeInteger(obj.schemaVersion) || obj.schemaVersion <= 0) {
+        return undefined;
+    }
+    if (obj.schemaVersion > META_SCHEMA_VERSION) {
+        return 'unsupported';
+    }
     if (obj.schemaVersion !== META_SCHEMA_VERSION) {
         return undefined;
     }
@@ -302,13 +577,60 @@ function validateMeta(value: unknown): InlineScriptEnvMeta | undefined {
     if (!isCanonicalIsoTimestamp(obj.lastUsedAt)) {
         return undefined;
     }
+    if (obj.manuallyModified !== undefined && typeof obj.manuallyModified !== 'boolean') {
+        return undefined;
+    }
+    if (obj.installedPackagesHash !== undefined && !isInstalledPackagesHash(obj.installedPackagesHash)) {
+        return undefined;
+    }
+    const sourceMetadataIdentityHashes = validateSourceMetadataIdentityHashes(obj.sourceMetadataIdentityHashes);
+    if (obj.sourceMetadataIdentityHashes !== undefined && sourceMetadataIdentityHashes === undefined) {
+        return undefined;
+    }
 
     return {
         schemaVersion: META_SCHEMA_VERSION,
         baseInterpreterPath: obj.baseInterpreterPath,
         baseInterpreterVersion: obj.baseInterpreterVersion,
         lastUsedAt: obj.lastUsedAt,
+        ...(obj.manuallyModified === true ? { manuallyModified: true } : {}),
+        ...(isInstalledPackagesHash(obj.installedPackagesHash)
+            ? { installedPackagesHash: obj.installedPackagesHash }
+            : {}),
+        ...(sourceMetadataIdentityHashes ? { sourceMetadataIdentityHashes } : {}),
     };
+}
+
+function isInstalledPackagesHash(value: unknown): value is string {
+    return (
+        typeof value === 'string' &&
+        value.length === INSTALLED_PACKAGES_HASH_HEX_LENGTH &&
+        /^[0-9a-f]+$/.test(value)
+    );
+}
+
+function validateSourceMetadataIdentityHashes(value: unknown): readonly string[] | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (!Array.isArray(value) || value.length === 0 || value.length > MAX_SOURCE_METADATA_IDENTITY_HASHES) {
+        return undefined;
+    }
+    const hashes: string[] = [];
+    const seen = new Set<string>();
+    for (const item of value) {
+        if (
+            typeof item !== 'string' ||
+            item.length !== SOURCE_METADATA_IDENTITY_HASH_HEX_LENGTH ||
+            !/^[0-9a-f]+$/.test(item) ||
+            seen.has(item)
+        ) {
+            return undefined;
+        }
+        seen.add(item);
+        hashes.push(item);
+    }
+    return Object.freeze(hashes);
 }
 
 function isCanonicalIsoTimestamp(value: unknown): value is string {
