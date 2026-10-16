@@ -791,7 +791,7 @@ async function resolvePackageCommandOptions(
     }
 
     if (e instanceof Uri) {
-        const environment = await em.getEnvironmentManager(e)?.get(e);
+        const environment = await em.getEnvironment(e);
         const packageManager = em.getPackageManager(e);
         if (environment && packageManager) {
             return { environment, packageManager };
