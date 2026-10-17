@@ -572,6 +572,10 @@ async function toAbsoluteInterpreterPath(interpreterPath: string, scope: Uri | u
         if (onPath) {
             return onPath;
         }
+        // Keep bare commands intact when they are absent from the extension host's PATH.
+        // The native finder can resolve them using its own environment (for example, the
+        // integrated terminal's shell environment).
+        return interpreterPath;
     }
     if (!scope) {
         return interpreterPath;
