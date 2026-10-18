@@ -29,9 +29,10 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
 import { executeCommand } from '../../common/command.api';
 import { PYTHON_EXTENSION_ID } from '../../common/constants';
-import { VenvManagerStrings } from '../../common/localize';
+import { PythonInstallStrings, VenvManagerStrings } from '../../common/localize';
 import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
@@ -49,8 +50,8 @@ import { findParentIfFile } from '../../features/envCommands';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
-import { getDefaultGlobalPython } from './utils';
-import { promptInstallPythonViaUv } from './uvPythonInstaller';
+import { promptInstallPython } from './pythonInstaller';
+import { getDefaultGlobalPython, resolveSystemPythonEnvironmentPath } from './utils';
 import {
     clearVenvCache,
     CreateEnvironmentResult,
@@ -69,6 +70,15 @@ import {
 } from './venvUtils';
 
 export class VenvManager implements EnvironmentManager {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        [EnvironmentCapability.List]: supportedCapability,
+        [EnvironmentCapability.Resolve]: supportedCapability,
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
+        [EnvironmentCapability.Create]: supportedCapability,
+        [EnvironmentCapability.Remove]: supportedCapability,
+    };
+
     private collection: PythonEnvironment[] = [];
     private environmentFolders: { collection: PythonEnvironment[]; length: number; folders: Set<string> } | undefined;
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
@@ -280,22 +290,33 @@ export class VenvManager implements EnvironmentManager {
 
             let globals = await this.api.getEnvironments('global');
 
-            // If no Python environments found, offer to install Python via uv
+            // Runtime acquisition is separate from the venv/package backend selection.
             if (globals.length === 0) {
-                const installedPath = await promptInstallPythonViaUv('createEnvironment', this.log);
-                if (installedPath) {
-                    // Refresh environments to detect the newly installed Python
-                    await this.api.refreshEnvironments(undefined);
-                    // Re-fetch environments after refresh
-                    globals = await this.api.getEnvironments('global');
-                    // Update globalEnv reference if we found any Python 3.x environments
-                    const python3Envs = globals.filter((e) => PythonVersion.tryParse(e.version)?.major === 3);
-                    if (python3Envs.length === 0) {
-                        this.log.warn('Python installed via uv but no Python 3.x global environments were detected.');
-                    } else {
-                        this.globalEnv = getLatest(python3Envs);
-                    }
+                const installedPath = await promptInstallPython('createEnvironment', this.log);
+                if (!installedPath) {
+                    return undefined;
                 }
+                try {
+                    await this.api.refreshEnvironments(undefined);
+                    globals = await this.api.getEnvironments('global');
+                } catch (error) {
+                    this.log.warn(`Python was installed, but discovery could not be refreshed: ${error}`);
+                }
+                const installed = globals.find((environment) =>
+                    normalizePath(environment.execInfo.run.executable) === normalizePath(installedPath)) ??
+                    await resolveSystemPythonEnvironmentPath(
+                        installedPath, this.nativeFinder, this.api, this.baseManager,
+                    );
+                if (!installed || PythonVersion.tryParse(installed.version)?.major !== 3) {
+                    this.log.error(`The installed Python could not be resolved at ${installedPath}.`);
+                    showErrorMessage(PythonInstallStrings.discoveryFailed);
+                    return undefined;
+                }
+                if (!globals.some((environment) =>
+                    normalizePath(environment.execInfo.run.executable) === normalizePath(installed.execInfo.run.executable))) {
+                    globals = [...globals, installed];
+                }
+                this.globalEnv = installed;
             }
 
             let result: CreateEnvironmentResult | undefined = undefined;
@@ -676,6 +697,7 @@ export class VenvManager implements EnvironmentManager {
             if (resolved.envId.managerId === `${PYTHON_EXTENSION_ID}:venv`) {
                 // We should only return the resolved env if it is a venv.
                 // Fall through an return undefined if it is not a venv
+                this.addEnvironment(resolved, true);
                 return resolved;
             }
         }

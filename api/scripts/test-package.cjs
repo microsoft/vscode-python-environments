@@ -94,6 +94,7 @@ try {
             "};",
             'exports.__runtimeApi = runtimeApi;',
             'exports.extensions = { getExtension: () => extension };',
+            'exports.l10n = { t: (message) => message };',
         ].join('\n'),
     );
     const installedPackageJson = JSON.parse(fs.readFileSync(path.join(installedPackageRoot, 'package.json'), 'utf8'));

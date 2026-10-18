@@ -14,9 +14,9 @@ import * as workspaceApis from '../../common/workspace.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
 import { pythonToolSupport, ToolEnvironmentManager, waitForToolRead } from '../../internal/pythonToolSupport';
 import * as cache from '../../managers/builtin/cache';
+import * as pythonInstaller from '../../managers/builtin/pythonInstaller';
 import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import * as systemUtils from '../../managers/builtin/utils';
-import * as uvInstaller from '../../managers/builtin/uvPythonInstaller';
 import { VenvManager } from '../../managers/builtin/venvManager';
 import * as venvUtils from '../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
@@ -91,7 +91,7 @@ suite('Agent discovery isolation from public onboarding', () => {
             entered.resolve();
             return release.promise;
         };
-        prompt = sinon.stub(uvInstaller, 'promptInstallPythonViaUv').callsFake(async () => {
+        prompt = sinon.stub(pythonInstaller, 'promptInstallPython').callsFake(async () => {
             await wait();
             return undefined;
         });

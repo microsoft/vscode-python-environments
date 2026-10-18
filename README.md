@@ -52,7 +52,7 @@ The following environment managers are supported out of the box:
 | conda               | ✅                | ✅     | ✅           |
 | pyenv               | ✅                |        |              |
 | poetry              | ✅                |        |              |
-| system              | ✅                |        |              |
+| system              | ✅                | ✅     |              |
 | pipenv              | ✅                |        |              |
 
 **Legend:**

@@ -20,6 +20,7 @@ import {
     GetEnvironmentScope,
     GetEnvironmentsScope,
     IconPath,
+    Pep440Version,
     PythonEnvironment,
     PythonEnvironmentApi,
     PythonProject,
@@ -28,6 +29,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
 import { CondaStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -48,6 +50,7 @@ import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { notifyMissingManagerIfDefault } from '../common/utils';
 import { constructCondaSourcingStatus, CondaSourcingStatus } from './condaSourcingUtils';
+import { CondaVersionCommand } from './commands/version';
 import {
     checkForNoPythonCondaEnvironment,
     clearCondaCache,
@@ -69,6 +72,15 @@ import {
 } from './condaUtils';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        [EnvironmentCapability.List]: supportedCapability,
+        [EnvironmentCapability.Resolve]: supportedCapability,
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
+        [EnvironmentCapability.Create]: supportedCapability,
+        [EnvironmentCapability.Remove]: supportedCapability,
+    };
+
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;
@@ -103,6 +115,15 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     public dispose() {
         this.collection = [];
         this.fsPathToEnv.clear();
+    }
+
+    public async getVersion(): Promise<Pep440Version | undefined> {
+        try {
+            return await new CondaVersionCommand({ pythonExecutable: 'conda', log: this.log }).execute();
+        } catch (error) {
+            traceInfo(`Unable to determine Conda version: ${error instanceof Error ? error.message : String(error)}`);
+            return undefined;
+        }
     }
 
     private _initialized: Deferred<void> | undefined;

@@ -1,4 +1,10 @@
-import { Disposable, Event, EventEmitter, TaskExecution, Terminal, Uri } from 'vscode';
+import { Disposable, Event, EventEmitter, l10n, TaskExecution, Terminal, Uri } from 'vscode';
+import * as path from 'path';
+import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCapability, Support } from './capabilities';
+import { isKnownManagerCapability } from './capabilities';
+import { explain as parsePep440Version } from '@renovatebot/pep440';
+import { EventNames } from './common/telemetry/constants';
+import { sendTelemetryEvent } from './common/telemetry/sender';
 import type {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -40,12 +46,12 @@ import { traceError, traceInfo } from './common/logging';
 import { pickEnvironmentManager } from './common/pickers/managers';
 import { timeout } from './common/utils/asyncUtils';
 import { createDeferred } from './common/utils/deferred';
-import { checkUri } from './common/utils/pathUtils';
+import { checkUri, normalizePath } from './common/utils/pathUtils';
 import { handlePythonPath } from './common/utils/pythonPath';
 import type { EnvironmentManagers } from './features/envManagers';
 import type { ProjectCreators } from './features/creators/projectCreators';
 import type { PythonProjectManager } from './features/projectManager';
-import type { InternalEnvironmentManager } from './managers/common/registeredManagers';
+import type { InternalEnvironmentManager, InternalPackageManager } from './managers/common/registeredManagers';
 import { PythonEnvironmentImpl, PythonPackageImpl } from './managers/common/models';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './features/common/managerReady';
 import { EnvVarManager } from './features/execution/envVariableManager';
@@ -61,6 +67,22 @@ import type { PythonToolsApi } from './internal/pythonToolsApi';
 // workspace/configuration handler) from hanging on the full environment enumeration at startup.
 const GET_ENVIRONMENT_TIMEOUT_MS = 1000;
 const GET_ENVIRONMENT_TIMED_OUT = Symbol('getEnvironmentTimedOut');
+const CAPABILITY_TELEMETRY_VERSION_TIMEOUT_MS = 1000;
+
+type ManagerCapabilityQuery =
+    | {
+          kind: 'environment';
+          manager: InternalEnvironmentManager | undefined;
+          managerId: string;
+          capability: EnvironmentManagerCapability;
+          context?: CapabilityContext;
+      }
+    | {
+          kind: 'package';
+          manager: InternalPackageManager | undefined;
+          capability: PackageManagerCapability;
+          context: CapabilityContext & { environment: PythonEnvironment };
+      };
 
 export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     readonly __pythonTools: PythonToolsApi;
@@ -142,6 +164,131 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             );
         }
         return new Disposable(() => disposables.forEach((d) => d.dispose()));
+    }
+
+    /**
+     * Queries one registered environment provider without activation, waiting, or prompting.
+     * @param managerId Exact registered environment manager ID.
+     * @param capability Feature to query.
+     * @param context Optional scope, environment, and project forwarded to the provider.
+     */
+    async getEnvironmentManagerCapability(
+        managerId: string,
+        capability: EnvironmentManagerCapability,
+        context?: CapabilityContext,
+    ): Promise<Support> {
+        if (context?.environment && context.environment.envId.managerId !== managerId) {
+            throw new Error(l10n.t('The environment does not belong to environment manager {0}.', managerId));
+        }
+        const manager = this.envManagers.getEnvironmentManager(managerId);
+        return this.captureCapabilityQuery({
+            kind: 'environment',
+            manager,
+            managerId,
+            capability,
+            context,
+        });
+    }
+
+    /**
+     * Queries the registered package provider routed for an environment or explicit project without activation or waiting.
+     * @param environment Environment whose packages would be managed.
+     * @param capability Feature to query.
+     * @param project Optional project selecting its configured, project-bound provider.
+     */
+    async getPackageManagerCapability(
+        environment: PythonEnvironment,
+        capability: PackageManagerCapability,
+        project?: PythonProject,
+    ): Promise<Support> {
+        const registeredProject = project && this.projectManager.getProjects().find(
+            ({ uri }) => uri.scheme === project.uri.scheme && (
+                uri.scheme === 'file'
+                    ? normalizePath(path.resolve(uri.fsPath)) === normalizePath(path.resolve(project.uri.fsPath))
+                    : uri.toString() === project.uri.toString()
+            ),
+        );
+        let manager = !project || registeredProject
+            ? this.envManagers.getPackageManager(registeredProject?.uri ?? environment)
+            : undefined;
+        // A project-aware root is not a usable substitute for a missing scoped instance.
+        if (manager?.createForProject && !manager.project) {
+            manager = undefined;
+        }
+        return this.captureCapabilityQuery({
+            kind: 'package',
+            manager,
+            capability,
+            context: { environment, project: registeredProject ?? project },
+        });
+    }
+
+    private async captureCapabilityQuery(query: ManagerCapabilityQuery): Promise<Support> {
+        const { manager, capability } = query;
+        let outcome: 'supported' | 'unsupported' | 'unavailable' | 'error' = 'error';
+        let isLegacy = false;
+        try {
+            if (!query.manager) {
+                outcome = 'unavailable';
+                return {
+                    supported: false,
+                    reason: query.kind === 'environment'
+                        ? l10n.t('Environment manager {0} is unavailable.', query.managerId)
+                        : l10n.t('No package manager is available for the environment and project context.'),
+                };
+            }
+            const support = query.kind === 'environment'
+                ? await query.manager.getCapability(query.capability, query.context)
+                : await query.manager.getCapability(query.capability, query.context);
+            outcome = support.supported ? 'supported' : 'unsupported';
+            isLegacy = support.isLegacy === true;
+            return support;
+        } finally {
+            void this.getManagerVersionForTelemetryWithTimeout(query, CAPABILITY_TELEMETRY_VERSION_TIMEOUT_MS)
+                .then((managerVersion) => {
+                    sendTelemetryEvent(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
+                        managerId: manager?.id ?? 'none',
+                        managerKind: query.kind,
+                        managerVersion,
+                        capability: isKnownManagerCapability(capability) ? capability : 'unknown',
+                        outcome,
+                        isLegacy,
+                    });
+                })
+                .catch((error) => traceError('Failed to send manager capability query telemetry:', error));
+        }
+    }
+
+    private async getManagerVersionForTelemetryWithTimeout(
+        query: ManagerCapabilityQuery,
+        timeoutMs: number,
+    ): Promise<string> {
+        if (!query.manager) {
+            return 'unknown';
+        }
+
+        let versionTimer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            const version = await Promise.race([
+                query.kind === 'package'
+                    ? query.manager.getVersion(query.context.environment)
+                    : query.manager.getVersion(),
+                new Promise<never>((_, reject) => {
+                    versionTimer = setTimeout(
+                        () => reject(new Error('Manager version lookup timed out.')),
+                        timeoutMs,
+                    );
+                }),
+            ]);
+            return version ? parsePep440Version(version.public)?.public ?? 'unknown' : 'unknown';
+        } catch (error) {
+            traceError(`Failed to retrieve manager version for capability telemetry: ${query.manager.id}`, error);
+            return 'unknown';
+        } finally {
+            if (versionTimer !== undefined) {
+                clearTimeout(versionTimer);
+            }
+        }
     }
 
     createPythonEnvironmentItem(info: PythonEnvironmentInfo, manager: EnvironmentManager): PythonEnvironment {

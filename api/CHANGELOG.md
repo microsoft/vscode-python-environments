@@ -5,6 +5,27 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0]
+
+### Added
+
+- Optional `capabilities` maps for environment and package managers, with typed keys and contextual checks. Omitted maps use legacy method inference; when present, the map must advertise every catalog key explicitly, and missing keys resolve unsupported.
+- Raw-provider capability resolvers and routed extension API queries that report support without invoking manager operations or prompting.
+- Capability catalogs for six environment and six package features, with flat operation names. Listing includes refresh, and package installation, uninstallation, and upgrades are advertised individually rather than through a management umbrella.
+- Exported `EnvironmentCapability` and `PackageCapability` constant objects for named access to capability keys, with derived string-literal unions.
+- `getLegacyPackageManagerCapability` and `getLegacyEnvironmentManagerCapability` helpers that infer support from method presence without invoking operations. Resolvers use them automatically when a provider omits its capability map.
+- Optional `Support.isLegacy` metadata, set to true by legacy inference helpers and included in public capability-query telemetry.
+
+### Notes
+
+- Capability prerequisite checks have no cycle protection; providers must keep delegation chains acyclic.
+
+## [1.6.0]
+
+### Added
+
+- Added optional `EnvironmentManager.getVersion?(): Promise<Pep440Version | undefined>` support for retrieving the version of the underlying environment management tool. Built-in implementations are provided for Conda, Poetry, Pipenv, and Pyenv.
+
 ## [1.5.0]
 
 ### Added
