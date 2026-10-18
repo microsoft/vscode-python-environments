@@ -547,7 +547,6 @@ export class VenvManager implements EnvironmentManager {
                     await setVenvForGlobal(undefined);
                 }
             },
-            startBackgroundInit: () => this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize),
             startBackgroundInit: () => this.initializeWithBase(),
         });
         if (fastResult) {
