@@ -1,5 +1,5 @@
 import { explain as parsePep440Version } from '@renovatebot/pep440';
-import { Disposable, EventEmitter, MarkdownString, ProgressLocation, Uri } from 'vscode';
+import { Disposable, EventEmitter, l10n, MarkdownString, ProgressLocation, Uri } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -16,6 +16,7 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
 import { PipenvStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -49,6 +50,21 @@ import {
 } from './pipenvUtils';
 
 export class PipenvManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        [EnvironmentCapability.List]: supportedCapability,
+        [EnvironmentCapability.Resolve]: supportedCapability,
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
+        [EnvironmentCapability.Create]: async () => ({
+            supported: false,
+            reason: l10n.t('{0} does not support creating environments.', 'Pipenv'),
+        }),
+        [EnvironmentCapability.Remove]: async () => ({
+            supported: false,
+            reason: l10n.t('{0} does not support removing environments.', 'Pipenv'),
+        }),
+    };
+
     private collection: PythonEnvironment[] = [];
     private fsPathToEnv: Map<string, PythonEnvironment> = new Map();
     private globalEnv: PythonEnvironment | undefined;

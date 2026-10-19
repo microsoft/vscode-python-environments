@@ -29,6 +29,7 @@ import * as metadataReader from '../../../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../../../common/inlineScript/routingRegistry';
 import * as lockfileApis from '../../../../common/lockfile.apis';
 import { INLINE_SCRIPT_ENVS_KEY } from '../../../../common/constants';
+import { PythonInstallStrings } from '../../../../common/localize';
 import { EventNames } from '../../../../common/telemetry/constants';
 import * as telemetrySender from '../../../../common/telemetry/sender';
 import { isWindows } from '../../../../common/utils/platformUtils';
@@ -41,6 +42,8 @@ import { InlineScriptCodeLensProvider } from '../../../../features/inlineScript/
 import { InlineScriptEnvManager } from '../../../../managers/builtin/inlineScript/envManager';
 import * as builtinUtils from '../../../../managers/builtin/utils';
 import * as uvPythonInstaller from '../../../../managers/builtin/uvPythonInstaller';
+import * as pymanagerInstaller from '../../../../managers/builtin/pymanagerPythonInstaller';
+import * as pythonInstaller from '../../../../managers/builtin/pythonInstaller';
 import * as venvUtils from '../../../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../../../managers/common/nativePythonFinder';
 import { MockDocument } from '../../../mocks/mockDocument';
@@ -199,6 +202,7 @@ suite('InlineScriptEnvManager', () => {
         });
         registerCacheKey(CACHE_KEY, VALID_METADATA.dependencies ?? [], baseExecutable);
         getAvailablePythonVersionsStub = sinon.stub(uvPythonInstaller, 'getAvailablePythonVersions').resolves([]);
+        sinon.stub(pymanagerInstaller, 'detectPymanager').resolves({ kind: 'absent' });
         ensureUvForVersionLookupStub = sinon
             .stub(uvPythonInstaller, 'ensureUvForInlineScriptVersionLookupDetailed')
             .resolves('available');
@@ -790,6 +794,73 @@ suite('InlineScriptEnvManager', () => {
                 dependencies: ['requests'],
                 interpreterPath: await fs.realpath(baseExecutable),
             });
+        });
+    });
+
+    suite('shared runtime installer integration', () => {
+        test('uses the verified PyManager base without invoking the uv installation path', async () => {
+            const executable = path.join(tempRoot, 'pim-python', isWindows() ? 'python.exe' : 'python');
+            await fs.outputFile(executable, '');
+            const base = makeEnvironment('ms-python.python:system', '3.13.2', executable);
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            apiGetEnvironmentsStub.onThirdCall().resolves([base]);
+            const install = sinon.stub(pythonInstaller, 'promptInstallPythonDetailed').resolves({
+                kind: 'installed',
+                provider: 'pymanager',
+                pythonPath: executable,
+            });
+
+            assert.ok(await manager.create(scriptUri()));
+
+            sinon.assert.calledOnceWithExactly(install, 'inlineScript', manager.log, { requiresPython: '>=3.13' });
+            sinon.assert.calledOnceWithExactly(apiRefreshEnvironmentsStub, undefined);
+            assert.strictEqual(createWithProgressStub.firstCall.args[4], base);
+            sinon.assert.notCalled(promptInstallPythonViaUvStub);
+            sinon.assert.notCalled(ensureUvForVersionLookupStub);
+        });
+
+        test('preserves installer cancellation without refreshing discovery or creating a cache', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            sinon.stub(pythonInstaller, 'promptInstallPythonDetailed').resolves({
+                kind: 'cancelled',
+                message: PythonInstallStrings.cancelled,
+            });
+            const uri = scriptUri();
+
+            assert.strictEqual(await manager.create(uri), undefined);
+
+            assert.deepStrictEqual(routingRegistry.getSetupOutcome(uri), {
+                kind: 'cancelled',
+                message: PythonInstallStrings.cancelled,
+            });
+            sinon.assert.notCalled(apiRefreshEnvironmentsStub);
+            sinon.assert.notCalled(lockStub);
+            sinon.assert.notCalled(createWithProgressStub);
+            sinon.assert.notCalled(promptInstallPythonViaUvStub);
+        });
+
+        test('preserves provider failure details and notification ownership for the setup UI', async () => {
+            readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
+            sinon.stub(pythonInstaller, 'promptInstallPythonDetailed').resolves({
+                kind: 'failed',
+                reason: 'provider-unusable',
+                message: PythonInstallStrings.managerUnusable,
+                alreadyReported: true,
+            });
+            const uri = scriptUri();
+
+            assert.strictEqual(await manager.create(uri), undefined);
+
+            assert.deepStrictEqual(routingRegistry.getSetupOutcome(uri), {
+                kind: 'failed',
+                category: 'install-failure',
+                requiresPython: '>=3.13',
+                message: PythonInstallStrings.managerUnusable,
+                alreadyReported: true,
+            });
+            sinon.assert.notCalled(apiRefreshEnvironmentsStub);
+            sinon.assert.notCalled(createWithProgressStub);
+            sinon.assert.notCalled(promptInstallPythonViaUvStub);
         });
     });
 

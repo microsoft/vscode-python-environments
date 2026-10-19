@@ -27,10 +27,17 @@ import {
     PythonEnvironmentApi,
     PythonProject,
 } from '../../api';
+import { Capabilities, PackageCapability, PackageManagerCapability, Support } from '../../capabilities';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
+import {
+    PackageToolSupport,
+    PythonToolError,
+    pythonToolSupport,
+    throwIfCancelled,
+} from '../../internal/pythonToolSupport';
 import { PackageManagerRequiresProjectError } from '../common/errors';
-import { normalizePath } from '../../common/utils/pathUtils';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import {
@@ -40,12 +47,33 @@ import {
     PoetryShowTopLevelCommand,
     PoetryVersionCommand,
 } from './commands/index';
+import { runPoetry } from './commands/runPoetry';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
-import { runPoetry } from './commands/runPoetry';
-import { PackageToolSupport, PythonToolError, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 
 export class PoetryPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
+        [PackageCapability.List]: async () => this.checkProjectSupport(),
+        [PackageCapability.ListDirect]: async () => this.checkProjectSupport(),
+        [PackageCapability.Install]: async () => this.checkProjectSupport(),
+        [PackageCapability.Uninstall]: async () => this.checkProjectSupport(),
+        [PackageCapability.FetchAvailableVersions]: async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package version lookup is not supported by this extension.'),
+        }),
+        [PackageCapability.Upgrade]: async () => ({
+            supported: false,
+            reason: l10n.t('Poetry package management does not support the upgrade option.'),
+        }),
+    };
+
+    private checkProjectSupport(): Support {
+        if (!this.project) {
+            return { supported: false, reason: l10n.t('Poetry package management requires a project-bound manager.') };
+        }
+        return { supported: true };
+    }
+
     private readonly packagesChangedEmitter = new EventEmitter<DidChangePackagesEventArgs>();
     readonly onDidChangePackages: Event<DidChangePackagesEventArgs> = this.packagesChangedEmitter.event;
 
@@ -76,12 +104,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
      * @returns A Poetry package manager scoped to the project.
      */
     createForProject(project: PythonProject): PoetryPackageManager {
-        return new PoetryPackageManager(
-            this.api,
-            this.log,
-            this.poetryManager,
-            project,
-        );
+        return new PoetryPackageManager(this.api, this.log, this.poetryManager, project);
     }
 
     readonly [pythonToolSupport]: PackageToolSupport = {
@@ -109,7 +132,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             throw new PythonToolError(
                 'ENVIRONMENT_MISMATCH',
                 l10n.t(
-                    'Poetry for {0} targets {1}, not the selected environment {2}. Select this project\'s Poetry environment before querying or installing packages.',
+                    "Poetry for {0} targets {1}, not the selected environment {2}. Select this project's Poetry environment before querying or installing packages.",
                     scope.fsPath,
                     target || l10n.t('no environment'),
                     environment.sysPrefix,
@@ -196,12 +219,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
 
         const execute = async (token?: CancellationToken): Promise<void> => {
             try {
-                await this.runPoetryManage(
-                    { install: toInstall, uninstall: toUninstall },
-                    cwd,
-                    token,
-                    !!toolToken,
-                );
+                await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, cwd, token, !!toolToken);
                 await updatePackagesAndNotify(
                     this,
                     environment,
@@ -304,10 +322,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         return await versionCmd.execute();
     }
 
-    async getPackageAvailableVersions(
-        _environment: PythonEnvironment,
-        _packageName: string,
-    ): Promise<Pep440Version[]> {
+    async getPackageAvailableVersions(_environment: PythonEnvironment, _packageName: string): Promise<Pep440Version[]> {
         throw new PackageVersionLookupNotSupportedError(
             'Poetry does not provide a package version lookup command supported by this extension.',
         );

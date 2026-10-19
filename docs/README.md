@@ -16,6 +16,8 @@ Use this manual to:
 The runtime facade is [`src/api.ts`](../src/api.ts). The authoritative public
 contracts are in [`src/types.ts`](../src/types.ts), with public errors and type
 guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
+Capability types, catalog key sets, and raw-provider resolvers are in
+[`src/capabilities.ts`](../src/capabilities.ts).
 
 > [!IMPORTANT]
 > The API is flat. Call `api.getEnvironments()`, not
@@ -46,6 +48,7 @@ guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
     - [Extensibility data types](#extensibility-data-types)
     - [Extensibility methods](#extensibility-methods)
 - [API interface groups](#api-interface-groups)
+- [Manager capabilities](#manager-capabilities)
 - [Compatibility guidance](#compatibility-guidance)
 - [Related documentation](#related-documentation)
 
@@ -1552,6 +1555,7 @@ trigger, as the specification.
 | `name` | `string` | Yes | Manager name. Allowed characters: `a-z`, `A-Z`, `0-9`, `-`, `_`. |
 | `displayName` | `string` | No | Name shown in the UI. |
 | `preferredPackageManagerId` | `string` | Yes | Package manager to pair with, formatted `<publisher>.<extension>:<manager-name>`, for example `ms-python.python:pip`. |
+| `capabilities` | `Capabilities<EnvironmentManagerCapability>` | No | Optional advertisements for legacy compatibility; when supplied, includes every environment capability key. See [manager capabilities](#manager-capabilities). |
 | `description` | `string` | No | Secondary text shown in the UI. |
 | `tooltip` | `string \| MarkdownString` | No | Hover text for the manager. |
 | `iconPath` | [`IconPath`](#iconpath) | No | Icon shown for the manager. |
@@ -1625,6 +1629,7 @@ Reports and changes the packages of an environment.
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
 | `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
+| `capabilities` | `Capabilities<PackageManagerCapability>` | No | Optional advertisements for legacy compatibility; when supplied, includes every package capability key, evaluated on the correct project-bound instance. See [manager capabilities](#manager-capabilities). |
 | `dispose()` | `() => void` | No | Releases resources owned by the manager. The extension disposes project-scoped managers when their project is removed or replaced, their provider is unregistered, or the extension shuts down. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
@@ -1823,13 +1828,13 @@ directly on the single flat API object.
 
 | Interface | Members grouped by the interface | Description |
 | --- | --- | --- |
-| `PythonEnvironmentsApi` | Environment discovery and resolution | Lists and refreshes discovered environments, resolves environment URIs, and reports discovery changes. |
+| `PythonEnvironmentsApi` | Environment discovery, resolution, and capabilities | Lists and refreshes discovered environments, resolves environment URIs, queries manager support, and reports discovery changes. |
 | `PythonProjectEnvironmentApi` | Selected environment get/set | Reads, updates, and observes the selected environment for URI or global scopes. |
 | `PythonEnvironmentManagementApi` | Environment creation/removal | Creates and removes environments through their associated environment managers. |
 | `PythonEnvironmentItemApi` | Environment item creation | Converts provider-supplied environment information into an identified `PythonEnvironment`. |
 | `PythonEnvironmentManagerRegistrationApi` | Environment manager registration | Registers an `EnvironmentManager` implementation with the extension. |
 | `PythonEnvironmentManagerApi` | Combined environment API | Combines environment registration, item creation, lifecycle, discovery, and selection interfaces. |
-| `PythonPackageGetterApi` | Package retrieval and version lookup | Retrieves and refreshes packages, looks up available versions, and reports package changes. |
+| `PythonPackageGetterApi` | Package retrieval, version lookup, and capabilities | Retrieves and refreshes packages, looks up available versions, queries routed manager support, and reports package changes. |
 | `PythonPackageManagementApi` | Package installation/removal | Installs, upgrades, or uninstalls packages in an environment. |
 | `PythonPackageItemApi` | Package item creation | Converts provider-supplied package information into an identified `Package`. |
 | `PythonPackageManagerRegistrationApi` | Package manager registration | Registers a `PackageManager` implementation with the extension. |
@@ -1845,6 +1850,115 @@ directly on the single flat API object.
 | `PythonExecutionApi` | Combined execution API | Combines terminal creation, terminal execution, task execution, and background execution. |
 | `PythonEnvironmentVariablesApi` | Environment variable lookup/events | Resolves effective environment variables and reports source changes. |
 | `PythonEnvironmentApi` | Complete flat public API | Combines all environment, package, project, execution, and environment-variable APIs exposed at runtime. |
+
+## Manager capabilities
+
+Capabilities are advisory, read-only checks of manager support. They do not
+invoke operations, validate requests, or guarantee success.
+
+| Environment capabilities | Package capabilities |
+| --- | --- |
+| `environments.list` | `packages.list` |
+| `environments.resolve` | `packages.install` |
+| `environments.getSelected` | `packages.uninstall` |
+| `environments.setSelected` | `packages.upgrade` |
+| `environments.create` | `packages.list.direct` |
+| `environments.remove` | `packages.fetchversions` |
+
+Listing includes refresh. Package installation, uninstallation, and upgrades
+use the existing `manage()` method. `packages.list.direct` is best-effort
+classification, not exact installation intent. Selection is scoped environment
+selection, not shell activation.
+Pip reports installation, uninstallation, and upgrades as unsupported for Python 2 environments.
+
+Public environment and package operations initiate the corresponding capability
+queries before delegating to managers. These queries are observational: operations
+do not wait for them or use their results to gate execution, and probe failures
+are logged without changing operation results. They use the existing
+`getEnvironmentManagerCapability` and `getPackageManagerCapability` methods,
+including their legacy fallback and query telemetry. Package queries include the
+routed manager's project when applicable. Registration, item factories, project
+APIs, and execution APIs have no corresponding capability checks.
+
+Use the exported `EnvironmentCapability` and `PackageCapability` constants or
+their literal string values.
+`PackageCapability.ListDirect` is `packages.list.direct`;
+`PackageCapability.FetchAvailableVersions` is `packages.fetchversions`.
+
+### Querying support
+
+Environment queries target an explicit manager ID; package queries follow
+environment/project routing. They use registered managers without activation,
+waiting, or prompting. Unavailable managers return `{ supported: false, reason }`.
+An explicit package-query project must be registered; an unregistered nested
+project cannot use its containing project's provider.
+File-project paths are compared using platform-aware normalization and routed through the registered URI.
+Feature-detect query methods when supporting older extension runtimes:
+
+```typescript
+import { PackageCapability } from '@vscode/python-environments';
+
+if (typeof api.getPackageManagerCapability === 'function') {
+    const support = await api.getPackageManagerCapability(environment, PackageCapability.ListDirect);
+    if (!support.supported) {
+        // support.reason explains why this feature is unavailable.
+    }
+}
+```
+
+### Advertising manager support
+
+Managers may omit `capabilities` for legacy compatibility. When supplied, the
+map must advertise every capability key. An omitted map uses legacy method
+inference; a missing key in a supplied map resolves `{ supported: false,
+reason: 'Capability not implemented' }`. Checks receive `CapabilityContext`
+and return `Promise<Support>`.
+
+Legacy inference uses `getLegacyPackageManagerCapability(manager, capability)`
+or `getLegacyEnvironmentManagerCapability(manager, capability)`. They inspect method
+presence without executing methods or reading advertisements. Listing requires both
+listing and refresh methods; package install, uninstall, and upgrade require `manage`.
+Other capabilities require their corresponding methods. This does not verify tool
+versions or option behavior. Regular queries use this fallback only when the map is omitted.
+Legacy helper results include `isLegacy: true`; other `Support` results may omit
+the field, which means false.
+
+```typescript
+import {
+    Capabilities,
+    PackageCapability,
+    PackageManagerCapability,
+    supportedCapability,
+    unsupportedCapability,
+} from '@vscode/python-environments';
+import { l10n } from 'vscode';
+
+// Members of a PackageManager implementation:
+readonly capabilities: Capabilities<PackageManagerCapability> = {
+    [PackageCapability.List]: supportedCapability,
+    [PackageCapability.ListDirect]: supportedCapability,
+    [PackageCapability.FetchAvailableVersions]: unsupportedCapability,
+    [PackageCapability.Install]: supportedCapability,
+    [PackageCapability.Uninstall]: supportedCapability,
+    [PackageCapability.Upgrade]: async (_context) => ({
+        supported: false,
+        reason: l10n.t('This manager does not support upgrading packages.'),
+    }),
+};
+```
+
+Checks must not prompt, mutate state, or invoke operations to test support.
+Return `{ supported: false, reason }` for unsupported features; let unexpected
+probe failures reject.
+
+Public routed queries emit `MANAGER.CAPABILITY_QUERY` with the manager ID, kind,
+tool version, capability, outcome, and `isLegacy` (false when omitted from support).
+Unavailable managers use ID `none`;
+unknown or failed version lookups use `unknown`. Version collection runs in the
+background with a one-second timeout and cannot delay query results or errors.
+Context, paths, reasons, and error messages are not sent. Unresolved routing
+emits an `unavailable` event. Ownership errors and routing exceptions thrown
+before capture, as well as internal checks, do not emit this event.
 
 ## Compatibility guidance
 

@@ -35,6 +35,30 @@ export async function activate() {
 }
 ```
 
+## Manager capabilities
+
+Capabilities report general manager support without invoking an operation:
+
+```typescript
+import { PackageCapability, PythonEnvironments } from '@vscode/python-environments';
+
+const api = await PythonEnvironments.api();
+const environment = await api.getEnvironment(undefined);
+if (environment) {
+    const support = await api.getPackageManagerCapability(environment, PackageCapability.ListDirect);
+    if (support.supported) {
+        // Best-effort direct/transitive package classification is available.
+    }
+}
+```
+
+Manager advertisements are optional for legacy compatibility. Missing maps use
+method-presence inference and return `isLegacy: true`; missing keys in a supplied
+map report unsupported. Support is advisory, not a guarantee that an operation succeeds.
+
+See the [capability guide](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#manager-capabilities)
+for the full catalog and provider authoring.
+
 ## Full API reference
 
 📘 **[Python Environments API reference](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md)**
@@ -51,4 +75,3 @@ extensibility - with field tables, parameter tables, return types, and examples.
 - [Extensibility](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#extensibility) - register your own environment manager, package manager, or project creator
 
 See [`CHANGELOG.md`](https://github.com/microsoft/vscode-python-environments/blob/main/api/CHANGELOG.md) for API changes between versions.
-
