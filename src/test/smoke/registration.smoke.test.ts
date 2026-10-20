@@ -135,7 +135,7 @@ suite('Smoke: Registration Checks', function () {
         assert.strictEqual(
             paletteEntry.when,
             'pythonEnvsInlineScriptsEnabled',
-            'python-envs.clearScriptEnvCache should only appear when the inline-scripts feature flag is enabled',
+            'python-envs.clearScriptEnvCache should only appear when the inline-script preview is active',
         );
     });
 
@@ -163,16 +163,43 @@ suite('Smoke: Registration Checks', function () {
         assert.strictEqual(
             paletteEntry.when,
             'pythonEnvsInlineScriptsEnabled',
-            'python-envs.setupInlineScriptEnvs should only appear when the inline-scripts feature flag is enabled',
+            'python-envs.setupInlineScriptEnvs should only appear when the inline-script preview is active',
         );
     });
 
-    test('Internal inline-script commands are not registered while the feature flag is off', async function () {
+    test('Inline-script preview setting is declared for a default-off settings rollout', function () {
+        const extension = vscode.extensions.getExtension<PythonEnvironmentApi>(ENVS_EXTENSION_ID);
+        assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);
+
+        const properties = extension.packageJSON?.contributes?.configuration?.properties as
+            | Record<
+                  string,
+                  {
+                      type?: string;
+                      default?: unknown;
+                      scope?: string;
+                      requiresReload?: boolean;
+                      tags?: string[];
+                  }
+              >
+            | undefined;
+        const setting = properties?.['python-envs.inlineScripts.enabled'];
+
+        assert.ok(setting, 'python-envs.inlineScripts.enabled should be contributed');
+        assert.strictEqual(setting.type, 'boolean');
+        assert.strictEqual(setting.default, false);
+        assert.strictEqual(setting.scope, 'window');
+        assert.strictEqual(setting.requiresReload, true);
+        assert.ok(setting.tags?.includes('onExP'), 'the setting should participate in settings experiments');
+        assert.ok(setting.tags?.includes('preview'), 'the setting should be marked as preview');
+    });
+
+    test('Inline-script commands are not registered while the effective setting is off', async function () {
         const allCommands = await vscode.commands.getCommands(true);
 
         assert.ok(
             !allCommands.includes('python-envs.clearScriptEnvCache'),
-            'python-envs.clearScriptEnvCache should not be registered by default',
+            'python-envs.clearScriptEnvCache should not be registered while the preview is off',
         );
         await assert.rejects(
             () => Promise.resolve(vscode.commands.executeCommand('python-envs.clearScriptEnvCache')),
@@ -181,7 +208,7 @@ suite('Smoke: Registration Checks', function () {
 
         assert.ok(
             !allCommands.includes('python-envs.setupInlineScriptEnvs'),
-            'python-envs.setupInlineScriptEnvs should not be registered by default',
+            'python-envs.setupInlineScriptEnvs should not be registered while the preview is off',
         );
         await assert.rejects(
             () => Promise.resolve(vscode.commands.executeCommand('python-envs.setupInlineScriptEnvs')),

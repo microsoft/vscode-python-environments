@@ -101,7 +101,6 @@ import { TemporaryStateManager } from './features/views/temporaryStateManager';
 import { PythonEnvTreeItem } from './features/views/treeViewItems';
 import {
     getEnvManagerAndPackageManagerConfigLevels,
-    isInlineScriptsFeatureEnabled,
     runPetInTerminalImpl,
 } from './helpers';
 import type { ProjectCreators } from './features/creators/projectCreators';
@@ -402,7 +401,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         commands.registerCommand('python-envs.clearCache', async () => {
             await clearEnvironmentCachesCommand(envManagers, shellStartupProviders, context.workspaceState);
         }),
-        ...(isInlineScriptsFeatureEnabled()
+        ...(inlineScriptFeatureActivation.enabled
             ? [
                   commands.registerCommand('python-envs.clearScriptEnvCache', async () => {
                       await clearScriptEnvironmentCacheCommand(envManagers);
