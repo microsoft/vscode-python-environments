@@ -502,7 +502,9 @@ export async function getProjectInstallable(
                     continue;
                 }
                 const projectName = getTomlProjectName(parsed.toml);
-                if (!projectName || getTomlInstallable(parsed.toml, uri).length === 0) {
+                const canProvideProjectPackage =
+                    getTomlInstallable(parsed.toml, uri).length > 0 || tomlValidationErrors.has(uri.fsPath);
+                if (!projectName || !canProvideProjectPackage) {
                     continue;
                 }
                 const normalizedName = normalizePackageName(projectName);

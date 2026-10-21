@@ -777,6 +777,28 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         assert.deepStrictEqual(result.validationErrors, []);
     });
 
+    test('keeps a schema-invalid exact owner ahead of a valid same-name ancestor', async () => {
+        const ancestorToml = await writeToml('main', 'shared');
+        const owningToml = await writeTomlContent(
+            path.join('main', 'pkg'),
+            ['[project]', 'name = "shared"', 'optional-dependencies = ["pytest"]', ''].join('\n'),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(ancestorToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main', 'pkg')),
+        );
+
+        assert.deepStrictEqual(result.installables, []);
+        assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, owningToml);
+    });
+
     test('ignores a same-name invalid ancestor that emits no installable when an exact owner is selected', async () => {
         const ancestorToml = await writeTomlContent(
             'main',
