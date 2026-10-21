@@ -16,7 +16,7 @@ import { shouldUseUv } from './helpers';
 import { PipPackageManager } from './pipPackageManager';
 import { UvPackageManager } from './uvPackageManager';
 
-/** Routes the existing built-in pip entry point to independent pip and uv managers. */
+/** Routes the existing pip entry point and coordinates invalidation between independent backend caches. */
 export class BuiltInPackageManager implements PackageManager, Disposable {
     private readonly cacheSubscriptions: Disposable[];
 

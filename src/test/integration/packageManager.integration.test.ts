@@ -144,8 +144,16 @@ for (const profile of profiles) {
                 name: `${profile.name} Package Manager Test`,
                 packageManagerId: profile.packageManagerId,
                 provider: profile.provider,
+                parentDirectory: useProjectManager ? workspaceFolder.uri : undefined,
             });
             environment = fixture.environment;
+            if (useProjectManager) {
+                assert.strictEqual(
+                    vscode.workspace.getConfiguration('python-envs', fixture.projectUri).get('alwaysUseUv'),
+                    false,
+                    'Explicit uv selection must be tested without automatic uv routing',
+                );
+            }
             assert.strictEqual(
                 environment.envId.managerId,
                 profile.provider.managerId,
