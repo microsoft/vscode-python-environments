@@ -110,6 +110,7 @@ export class UvPackageManager implements PackageManager, Disposable {
 
     /**
      * Installs, upgrades, or removes packages using uv.
+     * Invalidates cached inventory after mutation attempts, including failure or cancellation.
      * @param environment Target Python environment.
      * @param options Requested operations and whether to suppress interactive UI.
      * @param toolToken Cancellation token for a headless tool request.
@@ -144,33 +145,38 @@ export class UvPackageManager implements PackageManager, Disposable {
             throw new Error(support.reason);
         }
         const execute = async (token?: CancellationToken): Promise<void> => {
+            const previousPackages = this.packages.get(environment.envId.id);
             try {
-                const commandOptions = {
-                    cwd: scope?.fsPath,
-                    cancellationToken: token,
-                    toolExecution: !!toolToken,
-                };
-                if (toUninstall.length > 0) {
-                    const command = new UvUninstallCommand(await this.getCommandOptions(environment, commandOptions));
-                    await command.execute({
-                        packages: parsePackageSpecs(toUninstall),
+                try {
+                    const commandOptions = {
+                        cwd: scope?.fsPath,
                         cancellationToken: token,
                         toolExecution: !!toolToken,
-                    });
-                }
-                if (toInstall.length > 0) {
-                    const command = new UvInstallCommand(await this.getCommandOptions(environment, commandOptions));
-                    await command.execute({
-                        packages: parsePackageSpecs(toInstall),
-                        upgrade: options.upgrade,
-                        cancellationToken: token,
-                        toolExecution: !!toolToken,
-                    });
+                    };
+                    if (toUninstall.length > 0) {
+                        const command = new UvUninstallCommand(await this.getCommandOptions(environment, commandOptions));
+                        await command.execute({
+                            packages: parsePackageSpecs(toUninstall),
+                            cancellationToken: token,
+                            toolExecution: !!toolToken,
+                        });
+                    }
+                    if (toInstall.length > 0) {
+                        const command = new UvInstallCommand(await this.getCommandOptions(environment, commandOptions));
+                        await command.execute({
+                            packages: parsePackageSpecs(toInstall),
+                            upgrade: options.upgrade,
+                            cancellationToken: token,
+                            toolExecution: !!toolToken,
+                        });
+                    }
+                } finally {
+                    this.packages.delete(environment.envId.id);
                 }
                 await updatePackagesAndNotify(
                     this,
                     environment,
-                    this.packages.get(environment.envId.id),
+                    previousPackages,
                     (changes) => this._onDidChangePackages.fire({ environment, manager: this, changes }),
                     () => this.fetchPackages(environment, !options.runHeadless, toolToken),
                     !!toolToken,

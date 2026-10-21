@@ -5,7 +5,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { CancellationError, CancellationTokenSource, Uri } from 'vscode';
-import { PackageCapability, PythonEnvironmentApi } from '../../../api';
+import { PackageCapability, PackageChangeKind, PythonEnvironmentApi } from '../../../api';
 import { pythonToolSupport } from '../../../internal/pythonToolSupport';
 import { BuiltInPackageManager } from '../../../managers/builtin/builtInPackageManager';
 import * as helpers from '../../../managers/builtin/helpers';
@@ -47,6 +47,78 @@ suite('BuiltInPackageManager routing', () => {
     });
 
     for (const useUv of [false, true]) {
+        for (const failure of ['install', 'cancellation', 'refresh']) {
+            test(`${useUv ? 'uv' : 'pip'} invalidates inventory after ${failure} following an uninstall`, async () => {
+                const backend = useUv ? uv : pip;
+                if (useUv) {
+                    sinon.stub(helpers, 'getUvExecutable').resolves('test-uv');
+                }
+                const before = [{
+                    name: 'old-package', version: '1.0', displayName: 'old-package', description: '1.0',
+                }];
+                const after = [{
+                    name: 'remaining-package', version: '2.0', displayName: 'remaining-package', description: '2.0',
+                }];
+                const run = sinon.stub(helpers, useUv ? 'runUV' : 'runPython').resolves(JSON.stringify(after));
+                run.onFirstCall().resolves(JSON.stringify(before));
+                const error = failure === 'cancellation' ? new CancellationError() : new Error(`${failure} failed`);
+                run.onCall(failure === 'refresh' ? 3 : 2).callsFake(async () => {
+                    if (failure === 'cancellation') {
+                        source.cancel();
+                    }
+                    throw error;
+                });
+                const changes = sinon.spy();
+                backend.onDidChangePackages(changes);
+                assert.deepStrictEqual(await backend.getPackages(environment), before);
+
+                await assert.rejects(
+                    backend.manage(
+                        environment,
+                        { uninstall: ['old-package'], install: ['new-package'], runHeadless: true },
+                        source.token,
+                    ),
+                    (actual: unknown) => actual === error,
+                );
+
+                assert.deepStrictEqual(await backend.getPackages(environment), after);
+                assert.strictEqual(run.callCount, failure === 'refresh' ? 5 : 4);
+                assert.ok(changes.notCalled);
+            });
+        }
+
+        test(`${useUv ? 'uv' : 'pip'} retains the old snapshot for events and caches the successful refresh`, async () => {
+            const backend = useUv ? uv : pip;
+            if (useUv) {
+                sinon.stub(helpers, 'getUvExecutable').resolves('test-uv');
+            }
+            const before = [{
+                name: 'old-package', version: '1.0', displayName: 'old-package', description: '1.0',
+            }];
+            const after = [{
+                name: 'new-package', version: '2.0', displayName: 'new-package', description: '2.0',
+            }];
+            const run = sinon.stub(helpers, useUv ? 'runUV' : 'runPython').resolves(JSON.stringify(after));
+            run.onFirstCall().resolves(JSON.stringify(before));
+            const changes = sinon.spy();
+            backend.onDidChangePackages(changes);
+            await backend.getPackages(environment);
+
+            await backend.manage(
+                environment,
+                { uninstall: ['old-package'], install: ['new-package'], runHeadless: true },
+                source.token,
+            );
+
+            assert.deepStrictEqual(await backend.getPackages(environment), after);
+            assert.strictEqual(run.callCount, 4);
+            assert.ok(changes.calledOnce);
+            assert.deepStrictEqual(changes.firstCall.args[0].changes, [
+                { kind: PackageChangeKind.add, pkg: after[0] },
+                { kind: PackageChangeKind.remove, pkg: before[0] },
+            ]);
+        });
+
         test(`preserves registered package and event identity for ${useUv ? 'uv' : 'pip'}`, async () => {
             shouldUseUv.resolves(useUv);
             if (useUv) {
