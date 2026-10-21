@@ -77,7 +77,9 @@ The extension uses `pip` as the default package manager, but you can use the pac
 
 Set `"python-envs.defaultPackageManager": "ms-python.python:uv"` to select uv for package operations.
 Environment-only API calls still use the environment manager's preferred package manager
-(for example, pip for venv); project-scoped UI and tool operations use the selected package manager.
+(for example, pip for venv); project-scoped UI operations use the selected package manager.
+Tool operations use the selected project manager only when its ID matches the environment manager's
+preferred package manager ID; otherwise, they use the environment's preferred manager.
 Automatic routing preserves the existing uv selection rules: when the configured or preferred
 manager is pip, `python-envs.alwaysUseUv` and whether the environment was created by uv determine
 whether the router selects pip or uv. Each manager executes only its own commands. Selecting the uv
