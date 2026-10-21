@@ -214,6 +214,138 @@ suite('createWithProgress uv tracking', () => {
         }
     });
 
+    test('interactive quick create rejects invalid TOML before creating an environment', async () => {
+        const pyproject = Uri.file(path.join(tempRoot, 'pyproject.toml'));
+        const validationError = { message: 'Could not parse pyproject.toml', fileUri: pyproject };
+        api.getPythonProject = sinon.stub().returns({ name: 'project', uri: Uri.file(tempRoot) });
+        sinon.stub(pipUtils, 'getProjectInstallable').resolves({
+            installables: [],
+            validationErrors: [validationError],
+        });
+        const shouldProceed = sinon.stub(pipUtils, 'shouldProceedAfterPyprojectValidation').resolves(false);
+
+        const result = await quickCreateVenv(
+            nativeFinder,
+            api,
+            log,
+            manager,
+            baseEnvironment,
+            Uri.file(tempRoot),
+        );
+
+        assert.strictEqual(result, undefined);
+        assert.ok(shouldProceed.calledOnceWithExactly([validationError], { allPyprojectTomlsSelected: true }));
+        assert.ok((builtinHelpers.runUV as sinon.SinonStub).notCalled);
+        assert.strictEqual(await fs.pathExists(path.join(tempRoot, '.venv')), false);
+    });
+
+    test('interactive quick create rejects an invalid optional dependency group before creation', async () => {
+        const pyproject = Uri.file(path.join(tempRoot, 'pyproject.toml'));
+        const invalidExtra = `${tempRoot}[bad extra]`;
+        const validationError = {
+            message: 'Invalid optional dependency group name "bad extra" in pyproject.toml.',
+            fileUri: pyproject,
+        };
+        api.getPythonProject = sinon.stub().returns({ name: 'project', uri: Uri.file(tempRoot) });
+        sinon.stub(pipUtils, 'getProjectInstallable').resolves({
+            installables: [
+                {
+                    name: 'bad extra',
+                    displayName: 'bad extra',
+                    uri: pyproject,
+                    args: ['-e', invalidExtra],
+                },
+            ],
+            validationErrors: [validationError],
+        });
+        sinon.stub(pipUtils, 'shouldProceedAfterPyprojectValidation').resolves(false);
+
+        const result = await quickCreateVenv(
+            nativeFinder,
+            api,
+            log,
+            manager,
+            baseEnvironment,
+            Uri.file(tempRoot),
+        );
+
+        assert.strictEqual(result, undefined);
+        assert.ok((builtinHelpers.runUV as sinon.SinonStub).notCalled);
+        assert.strictEqual(await fs.pathExists(path.join(tempRoot, '.venv')), false);
+    });
+
+    test('Continue Anyway forwards only the filtered owning project installable', async () => {
+        const owner = path.join(tempRoot, 'main');
+        const pyproject = Uri.file(path.join(owner, 'pyproject.toml'));
+        const validationError = { message: 'Invalid project dependencies', fileUri: pyproject };
+        api.getPythonProject = sinon.stub().returns({ name: 'project', uri: Uri.file(tempRoot) });
+        sinon.stub(pipUtils, 'getProjectInstallable').resolves({
+            installables: [
+                {
+                    name: 'pyproject.toml',
+                    displayName: 'pyproject.toml',
+                    uri: pyproject,
+                    args: ['-e', owner],
+                },
+            ],
+            validationErrors: [validationError],
+        });
+        sinon.stub(pipUtils, 'shouldProceedAfterPyprojectValidation').resolves(true);
+        (builtinHelpers.runUV as sinon.SinonStub).callsFake(async (args: string[]) => {
+            await fs.outputFile(getVenvPythonPath(args[args.length - 1]), '');
+            return '';
+        });
+
+        const result = await quickCreateVenv(
+            nativeFinder,
+            api,
+            log,
+            manager,
+            baseEnvironment,
+            Uri.file(tempRoot),
+        );
+
+        assert.ok(result?.environment);
+        assert.deepStrictEqual((api.managePackages as sinon.SinonStub).firstCall.args[1].install, ['-e', owner]);
+    });
+
+    test('interactive quick create still creates an environment for valid TOML', async () => {
+        const requirements = path.join(tempRoot, 'requirements.txt');
+        api.getPythonProject = sinon.stub().returns({ name: 'project', uri: Uri.file(tempRoot) });
+        sinon.stub(pipUtils, 'getProjectInstallable').resolves({
+            installables: [
+                {
+                    name: 'requirements.txt',
+                    displayName: 'requirements.txt',
+                    uri: Uri.file(requirements),
+                    args: ['-r', requirements],
+                },
+            ],
+            validationErrors: [],
+        });
+        sinon.stub(pipUtils, 'shouldProceedAfterPyprojectValidation').resolves(true);
+        (builtinHelpers.runUV as sinon.SinonStub).callsFake(async (args: string[]) => {
+            await fs.outputFile(getVenvPythonPath(args[args.length - 1]), '');
+            return '';
+        });
+
+        const result = await quickCreateVenv(
+            nativeFinder,
+            api,
+            log,
+            manager,
+            baseEnvironment,
+            Uri.file(tempRoot),
+        );
+
+        assert.ok(result?.environment);
+        assert.ok((builtinHelpers.runUV as sinon.SinonStub).calledOnce);
+        assert.ok((api.managePackages as sinon.SinonStub).calledOnce);
+        assert.deepStrictEqual((api.managePackages as sinon.SinonStub).firstCall.args[1].install, [
+            '-r',
+            requirements,
+        ]);
+    });
     test('private quick create rejects pyproject validation errors without Continue Anyway', async () => {
         const source = new CancellationTokenSource();
         const operation: PythonToolOperation = {
@@ -224,10 +356,12 @@ suite('createWithProgress uv tracking', () => {
         api.getPythonProject = sinon.stub().returns({ name: 'project', uri: Uri.file(tempRoot) });
         sinon.stub(pipUtils, 'getProjectInstallable').resolves({
             installables: [],
-            validationError: {
-                message: 'Invalid build-system',
-                fileUri: Uri.file(path.join(tempRoot, 'pyproject.toml')),
-            },
+            validationErrors: [
+                {
+                    message: 'Invalid build-system',
+                    fileUri: Uri.file(path.join(tempRoot, 'pyproject.toml')),
+                },
+            ],
         });
         const question = sinon
             .stub(pipUtils, 'shouldProceedAfterPyprojectValidation')
