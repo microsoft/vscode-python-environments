@@ -4,7 +4,7 @@
 import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { LogOutputChannel, Uri } from 'vscode';
+import { CancellationTokenSource, LogOutputChannel, Uri } from 'vscode';
 import {
     Package,
     PackageCapability,
@@ -14,6 +14,7 @@ import {
 } from '../../../api';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
+import { pythonToolSupport } from '../../../internal/pythonToolSupport';
 import { PipListCommand } from '../../../managers/builtin/commands/list';
 import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
@@ -282,6 +283,49 @@ suite('PipPackageManager', () => {
         await manager.manage(environment, { uninstall: ['flask'] });
 
         assert.strictEqual(withProgressStub.firstCall.args[0].title, 'Uninstalling packages');
+    });
+
+    test('keeps headless uninstall, upgrade, version, and direct dependency queries on pip', async () => {
+        const source = new CancellationTokenSource();
+        const scope = Uri.file(path.join(process.cwd(), 'project with spaces'));
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(scope.fsPath, '.venv'),
+            version: '3.12.0',
+            managerId: 'ms-python.python:venv',
+        });
+        const manager = new PipPackageManager(
+            { createPackageItem: sinon.stub().callsFake((info) => info) } as unknown as PythonEnvironmentApi,
+            createMockLogOutputChannel(),
+            {} as VenvManager,
+        );
+        const changes = sinon.spy();
+        manager.onDidChangePackages(changes);
+        const runUV = sinon.stub(helpers, 'runUV');
+        const runPython = sinon.stub(helpers, 'runPython').resolves('');
+        runPython.onThirdCall().resolves(JSON.stringify([{ name: 'requests', version: '2.32.5' }]));
+        runPython.onCall(3).resolves('pip 25.1 from pip (python 3.12)');
+        runPython.onCall(4).resolves(JSON.stringify([{ name: 'Requests' }]));
+
+        try {
+            await manager[pythonToolSupport].manage(
+                environment,
+                { uninstall: ['old-package'], install: ['requests'], upgrade: true },
+                source.token,
+                scope,
+            );
+            assert.strictEqual((await manager.getVersion(environment))?.public, '25.1');
+            assert.deepStrictEqual(await manager.getDirectPackageNames(environment), new Set(['requests']));
+            assert.ok(runUV.notCalled);
+            assert.deepStrictEqual(runPython.firstCall.args[1], ['-m', 'pip', 'uninstall', '-y', 'old-package']);
+            assert.deepStrictEqual(runPython.secondCall.args[1], ['-m', 'pip', 'install', '--upgrade', 'requests']);
+            assert.deepStrictEqual(runPython.getCall(4).args[1], [
+                '-m', 'pip', 'list', '--format=json', '--not-required', '--disable-pip-version-check',
+            ]);
+            assert.strictEqual(changes.firstCall.args[0].manager, manager);
+        } finally {
+            manager.dispose();
+            source.dispose();
+        }
     });
 
     function createManager(): PipPackageManager {

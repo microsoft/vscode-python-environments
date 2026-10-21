@@ -45,6 +45,8 @@ import { getUvExecutable } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
 import { VenvManager } from './venvManager';
 
+let hasShownPackageRefreshError = false;
+
 /** Manages packages using only uv, without requiring pip in the environment. */
 export class UvPackageManager implements PackageManager, Disposable {
     readonly name = 'uv';
@@ -71,9 +73,10 @@ export class UvPackageManager implements PackageManager, Disposable {
 
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     readonly onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
-    private readonly _onDidMutatePackages = new EventEmitter<PythonEnvironment>();
+    private readonly _onDidMutatePackages = new EventEmitter<{ environment: PythonEnvironment; packages?: Package[] }>();
     readonly onDidMutatePackages = this._onDidMutatePackages.event;
     private readonly packages = new Map<string, Package[]>();
+    private readonly baselinePackages = new Map<string, Package[]>();
     private readonly cacheVersions = new Map<string, symbol>();
 
     constructor(
@@ -83,15 +86,35 @@ export class UvPackageManager implements PackageManager, Disposable {
     ) {}
 
     /** Evicts inventory for an environment without emitting public package changes. */
-    invalidateCache(environment: PythonEnvironment): void {
-        this.packages.delete(environment.envId.id);
-        this.cacheVersions.delete(environment.envId.id);
+    invalidateCache(environment: PythonEnvironment, baseline?: Package[]): void {
+        const id = environment.envId.id;
+        this.packages.delete(id);
+        this.cacheVersions.delete(id);
+        if (baseline !== undefined) {
+            this.baselinePackages.set(id, baseline);
+        } else {
+            this.baselinePackages.delete(id);
+        }
+    }
+
+    private getBaselinePackages(environment: PythonEnvironment): Package[] | undefined {
+        const id = environment.envId.id;
+        return this.packages.get(id) ?? this.baselinePackages.get(id);
     }
 
     private getCacheVersion(environment: PythonEnvironment): symbol {
         const version = this.cacheVersions.get(environment.envId.id) ?? Symbol();
         this.cacheVersions.set(environment.envId.id, version);
         return version;
+    }
+
+    private cachePackages(environment: PythonEnvironment, packages: Package[], cacheVersion: symbol): void {
+        const id = environment.envId.id;
+        if (this.cacheVersions.get(id) === cacheVersion) {
+            this.packages.set(id, packages);
+            this.baselinePackages.set(id, packages);
+            this._onDidMutatePackages.fire({ environment, packages });
+        }
     }
 
     readonly [pythonToolSupport]: PackageToolSupport = {
@@ -160,7 +183,7 @@ export class UvPackageManager implements PackageManager, Disposable {
             throw new Error(support.reason);
         }
         const execute = async (token?: CancellationToken): Promise<void> => {
-            const previousPackages = this.packages.get(environment.envId.id);
+            const previousPackages = this.getBaselinePackages(environment);
             try {
                 try {
                     const commandOptions = {
@@ -187,7 +210,7 @@ export class UvPackageManager implements PackageManager, Disposable {
                     }
                 } finally {
                     this.invalidateCache(environment);
-                    this._onDidMutatePackages.fire(environment);
+                    this._onDidMutatePackages.fire({ environment });
                 }
                 await updatePackagesAndNotify(
                     this,
@@ -236,11 +259,11 @@ export class UvPackageManager implements PackageManager, Disposable {
             async () => {
                 const cacheVersion = this.getCacheVersion(environment);
                 const packages = await updatePackagesAndNotify(
-                    this, environment, this.packages.get(environment.envId.id),
+                    this, environment, this.getBaselinePackages(environment),
                     (changes) => this._onDidChangePackages.fire({ environment, manager: this, changes }),
                 );
-                if (packages !== undefined && this.cacheVersions.get(environment.envId.id) === cacheVersion) {
-                    this.packages.set(environment.envId.id, packages);
+                if (packages !== undefined) {
+                    this.cachePackages(environment, packages, cacheVersion);
                 }
             },
         );
@@ -270,16 +293,15 @@ export class UvPackageManager implements PackageManager, Disposable {
             );
             throwIfCancelled(token);
             const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
-            if (this.cacheVersions.get(environment.envId.id) === cacheVersion) {
-                this.packages.set(environment.envId.id, packages);
-            }
+            this.cachePackages(environment, packages, cacheVersion);
             return packages;
         } catch (error) {
             this.log.error('Error refreshing packages', error);
             if (token) {
                 throw error;
             }
-            if (showErrors) {
+            if (showErrors && !hasShownPackageRefreshError) {
+                hasShownPackageRefreshError = true;
                 setImmediate(async () => {
                     await showErrorMessageWithLogs(l10n.t('Error refreshing packages'), this.log);
                 });
@@ -321,6 +343,7 @@ export class UvPackageManager implements PackageManager, Disposable {
         this._onDidChangePackages.dispose();
         this._onDidMutatePackages.dispose();
         this.packages.clear();
+        this.baselinePackages.clear();
         this.cacheVersions.clear();
     }
 }

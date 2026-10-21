@@ -26,8 +26,8 @@ export class BuiltInPackageManager implements PackageManager, Disposable {
     ) {
         this.pip.setPackageManagerOwner(this);
         this.cacheSubscriptions = [
-            this.pip.onDidMutatePackages((environment) => this.uv.invalidateCache(environment)),
-            this.uv.onDidMutatePackages((environment) => this.pip.invalidateCache(environment)),
+            this.pip.onDidMutatePackages(({ environment, packages }) => this.uv.invalidateCache(environment, packages)),
+            this.uv.onDidMutatePackages(({ environment, packages }) => this.pip.invalidateCache(environment, packages)),
         ];
     }
 

@@ -260,59 +260,55 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
             );
         }),
         ...(process.env.VSC_PYTHON_INTEGRATION_TEST === '1'
-            ? [
-                  commands.registerCommand('python-envs.test.getPackageManagerIds', () =>
-                      envManagers.packageManagers.map((manager) => manager.id),
-                  ),
-                  commands.registerCommand(
-                      'python-envs.test.resolveEnvironmentWithManager',
-                      async (managerId: string, environmentUri: Uri) => {
-                          const manager = envManagers.getEnvironmentManager(managerId);
-                          if (!manager) {
-                              throw new Error(`Environment manager not found: ${managerId}`);
-                          }
-                          return manager.resolve(environmentUri);
-                      },
-                  ),
-                  commands.registerCommand(
-                      'python-envs.test.getPackagesForProject',
-                      async (scope: Uri, environment: PythonEnvironment) => {
-                          const manager = envManagers.getPackageManager(scope);
-                          if (!manager) {
-                              throw new Error(`Package manager not found for project: ${scope.fsPath}`);
-                          }
-                          return manager.getPackages(environment, { skipCache: true });
-                      },
-                  ),
-                  commands.registerCommand(
-                      'python-envs.test.managePackagesForProject',
-                      async (scope: Uri, environment: PythonEnvironment, options: PackageManagementOptions) => {
-                          const manager = envManagers.getPackageManager(scope);
-                          if (!manager) {
-                              throw new Error(`Package manager not found for project: ${scope.fsPath}`);
-                          }
-                          return manager.manage(environment, options);
-                      },
-                  ),
-                  commands.registerCommand(
-                      'python-envs.test.getPackageAvailableVersionsForProject',
-                      async (scope: Uri, environment: PythonEnvironment, packageName: string) => {
-                          const manager = envManagers.getPackageManager(scope);
-                          if (!manager) {
-                              throw new Error(`Package manager not found for project: ${scope.fsPath}`);
-                          }
-                          return manager.getPackageAvailableVersions(environment, packageName, { errorMode: 'throw' });
-                      },
-                  ),
-                  commands.registerCommand(
-                      'python-envs.test.getDirectPackageNames',
-                      async (environment: PythonEnvironment, scope?: Uri) => {
-                          const manager = envManagers.getPackageManager(scope ?? environment);
-                          const names = await manager?.getDirectPackageNames?.(environment);
-                          return names ? Array.from(names) : undefined;
-                      },
-                  ),
-              ]
+            ? (() => {
+                  const getProjectPackageManager = (scope: Uri) => {
+                      const manager = envManagers.getPackageManager(scope);
+                      if (!manager) {
+                          throw new Error(`Package manager not found for project: ${scope.fsPath}`);
+                      }
+                      return manager;
+                  };
+                  return [
+                      commands.registerCommand('python-envs.test.getPackageManagerIds', () =>
+                          envManagers.packageManagers.map((manager) => manager.id),
+                      ),
+                      commands.registerCommand(
+                          'python-envs.test.resolveEnvironmentWithManager',
+                          async (managerId: string, environmentUri: Uri) => {
+                              const manager = envManagers.getEnvironmentManager(managerId);
+                              if (!manager) {
+                                  throw new Error(`Environment manager not found: ${managerId}`);
+                              }
+                              return manager.resolve(environmentUri);
+                          },
+                      ),
+                      commands.registerCommand(
+                          'python-envs.test.getPackagesForProject',
+                          (scope: Uri, environment: PythonEnvironment) =>
+                              getProjectPackageManager(scope).getPackages(environment, { skipCache: true }),
+                      ),
+                      commands.registerCommand(
+                          'python-envs.test.managePackagesForProject',
+                          (scope: Uri, environment: PythonEnvironment, options: PackageManagementOptions) =>
+                              getProjectPackageManager(scope).manage(environment, options),
+                      ),
+                      commands.registerCommand(
+                          'python-envs.test.getPackageAvailableVersionsForProject',
+                          (scope: Uri, environment: PythonEnvironment, packageName: string) =>
+                              getProjectPackageManager(scope).getPackageAvailableVersions(environment, packageName, {
+                                  errorMode: 'throw',
+                              }),
+                      ),
+                      commands.registerCommand(
+                          'python-envs.test.getDirectPackageNames',
+                          async (environment: PythonEnvironment, scope?: Uri) => {
+                              const manager = envManagers.getPackageManager(scope ?? environment);
+                              const names = await manager?.getDirectPackageNames?.(environment);
+                              return names ? Array.from(names) : undefined;
+                          },
+                      ),
+                  ];
+              })()
             : []),
         commands.registerCommand('python-envs.searchSettings', async () => {
             await openSearchSettings();

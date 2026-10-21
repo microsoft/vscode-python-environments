@@ -162,20 +162,23 @@ suite('UvPackageManager', () => {
         assert.ok(shouldUseUv.notCalled);
     });
 
-    test('preserves public cached packages on failure but tool inventory rejects', async () => {
+    test('preserves public cached packages on failure, shows one error toast per session, and rejects tool inventory', async () => {
         const errors = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
+        const logError = manager.log.error as sinon.SinonStub;
         const list = sinon.stub(UvListCommand.prototype, 'execute').resolves([
             { name: 'requests', displayName: 'requests', version: '2.32.5' },
         ]);
         const cached = await manager.getPackages(environment);
         list.rejects(new Error('uv list failed'));
         assert.strictEqual(await manager.getPackages(environment, { skipCache: true }), cached);
+        assert.strictEqual(await manager.getPackages(environment, { skipCache: true }), cached);
         await assert.rejects(
             manager[pythonToolSupport].getPackages(environment, source.token, scope),
             /uv list failed/,
         );
         await new Promise<void>((resolve) => setImmediate(resolve));
-        assert.ok(errors.calledOnce);
+        assert.ok(errors.calledOnceWithExactly('Error refreshing packages', manager.log));
+        assert.strictEqual(logError.callCount, 3);
     });
 
     test('cancellation stops tool execution before resolving uv', async () => {
