@@ -6,6 +6,8 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { CancellationError, CancellationTokenSource, Uri } from 'vscode';
 import { PackageCapability, PackageChangeKind, PythonEnvironmentApi } from '../../../api';
+import { createDeferred } from '../../../common/utils/deferred';
+import * as windowApis from '../../../common/window.apis';
 import { pythonToolSupport } from '../../../internal/pythonToolSupport';
 import { BuiltInPackageManager } from '../../../managers/builtin/builtInPackageManager';
 import * as helpers from '../../../managers/builtin/helpers';
@@ -47,6 +49,95 @@ suite('BuiltInPackageManager routing', () => {
     });
 
     for (const useUv of [false, true]) {
+        test(`${useUv ? 'uv' : 'pip'} mutations leave other environments cached`, async () => {
+            sinon.stub(helpers, 'getUvExecutable').resolves('test-uv');
+            const peer = useUv ? pip : uv;
+            const backend = useUv ? uv : pip;
+            const otherEnvironment = createMockPythonEnvironment({
+                envPath: path.join(scope.fsPath, 'other-venv'), version: '3.12.0',
+            });
+            const reader = sinon.stub(helpers, useUv ? 'runPython' : 'runUV').resolves('[]');
+            sinon.stub(helpers, useUv ? 'runUV' : 'runPython').resolves('[]');
+            const cached = await peer.getPackages(otherEnvironment);
+            await peer.getPackages(environment);
+
+            await backend.manage(environment, { install: ['requests'], runHeadless: true }, source.token);
+
+            assert.strictEqual(await peer.getPackages(otherEnvironment), cached);
+            assert.strictEqual(reader.callCount, 2);
+            await peer.getPackages(environment);
+            assert.strictEqual(reader.callCount, 3);
+        });
+
+        for (const direct of [false, true]) {
+            for (const outcome of ['success', 'failure', 'cancellation']) {
+                test(`switching back after ${direct ? 'direct' : 'routed'} ${useUv ? 'uv' : 'pip'} ${outcome} reloads inventory`, async () => {
+                    sinon.stub(helpers, 'getUvExecutable').resolves('test-uv');
+                    const before = JSON.stringify([{ name: 'old-package', version: '1.0' }]);
+                    const after = JSON.stringify([{ name: 'new-package', version: '2.0' }]);
+                    const runPython = sinon.stub(helpers, 'runPython').resolves(before);
+                    const runUV = sinon.stub(helpers, 'runUV').resolves(before);
+                    const reader = useUv ? runPython : runUV;
+                    const writer = useUv ? runUV : runPython;
+                    shouldUseUv.resolves(!useUv);
+                    await manager.getPackages(environment);
+                    reader.resolves(after);
+                    writer.resolves(after);
+                    const error = outcome === 'cancellation' ? new CancellationError() : new Error('Install failed');
+                    if (outcome !== 'success') {
+                        writer.onSecondCall().rejects(error);
+                    }
+                    shouldUseUv.resolves(useUv);
+                    const mutation = (direct ? (useUv ? uv : pip) : manager).manage(
+                        environment,
+                        { uninstall: ['old-package'], install: ['new-package'], runHeadless: true },
+                        source.token,
+                    );
+                    if (outcome === 'success') {
+                        await mutation;
+                    } else {
+                        await assert.rejects(mutation, (actual: unknown) => actual === error);
+                    }
+
+                    shouldUseUv.resolves(!useUv);
+                    const packages = await manager.getPackages(environment);
+                    assert.deepStrictEqual(packages?.map((pkg) => pkg.name), ['new-package']);
+                    assert.strictEqual(await manager.getPackages(environment), packages);
+                    assert.strictEqual(reader.callCount, 2);
+                });
+            }
+        }
+
+        for (const refresh of [false, true]) {
+            test(`${useUv ? 'uv' : 'pip'} mutations prevent older ${refresh ? 'refreshes' : 'reads'} from restoring the peer cache`, async () => {
+                sinon.stub(helpers, 'getUvExecutable').resolves('test-uv');
+                const peer = useUv ? pip : uv;
+                const backend = useUv ? uv : pip;
+                const started = createDeferred<void>();
+                const pending = createDeferred<string>();
+                const run = sinon.stub(helpers, useUv ? 'runPython' : 'runUV')
+                    .resolves(JSON.stringify([{ name: 'new-package', version: '2.0' }]));
+                run.onFirstCall().callsFake(() => {
+                    started.resolve();
+                    return pending.promise;
+                });
+                sinon.stub(helpers, useUv ? 'runUV' : 'runPython').resolves('[]');
+                sinon.stub(peer, 'getDirectPackageNames').resolves(new Set());
+                sinon.stub(windowApis, 'withProgress').callsFake(
+                    async (_options, task) => task({ report: () => undefined }, source.token),
+                );
+                const read = refresh ? peer.refresh(environment) : peer.getPackages(environment);
+                await started.promise;
+                await backend.manage(environment, { install: ['new-package'], runHeadless: true }, source.token);
+                pending.resolve(JSON.stringify([{ name: 'old-package', version: '1.0' }]));
+                await read;
+
+                const packages = await peer.getPackages(environment);
+                assert.deepStrictEqual(packages?.map((pkg) => pkg.name), ['new-package']);
+                assert.strictEqual(run.callCount, 2);
+            });
+        }
+
         for (const failure of ['install', 'cancellation', 'refresh']) {
             test(`${useUv ? 'uv' : 'pip'} invalidates inventory after ${failure} following an uninstall`, async () => {
                 const backend = useUv ? uv : pip;
@@ -175,6 +266,32 @@ suite('BuiltInPackageManager routing', () => {
             ));
         });
     }
+
+    test('headless no-ops preserve both backend caches', async () => {
+        sinon.stub(helpers, 'getUvExecutable').resolves('test-uv');
+        const runPython = sinon.stub(helpers, 'runPython').resolves('[]');
+        const runUV = sinon.stub(helpers, 'runUV').resolves('[]');
+        const pipPackages = await pip.getPackages(environment);
+        const uvPackages = await uv.getPackages(environment);
+
+        await pip.manage(environment, { install: [], runHeadless: true }, source.token);
+        await uv.manage(environment, { install: [], runHeadless: true }, source.token);
+
+        assert.strictEqual(await pip.getPackages(environment), pipPackages);
+        assert.strictEqual(await uv.getPackages(environment), uvPackages);
+        assert.ok(runPython.calledOnce && runUV.calledOnce);
+    });
+
+    test('disposing the router removes cross-backend cache subscriptions', async () => {
+        sinon.stub(helpers, 'getUvExecutable').resolves('test-uv');
+        sinon.stub(helpers, 'runUV').resolves('[]');
+        const invalidate = sinon.spy(pip, 'invalidateCache');
+        manager.dispose();
+
+        await uv.manage(environment, { install: ['requests'], runHeadless: true }, source.token);
+
+        assert.ok(invalidate.notCalled);
+    });
 
     test('uses uv version lookup without querying the environment pip', async () => {
         const executable = sinon.stub(helpers, 'getUvExecutable').resolves('workspace-uv');

@@ -88,8 +88,11 @@ export class PipPackageManager implements PackageManager, Disposable {
 
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
+    private readonly _onDidMutatePackages = new EventEmitter<PythonEnvironment>();
+    readonly onDidMutatePackages = this._onDidMutatePackages.event;
 
     private packages: Map<string, Package[]> = new Map();
+    private readonly cacheVersions = new Map<string, symbol>();
     private packageManagerOwner: PackageManager = this;
 
     constructor(
@@ -106,6 +109,18 @@ export class PipPackageManager implements PackageManager, Disposable {
     /** Sets the registered identity used for package items and events when this manager is wrapped. */
     setPackageManagerOwner(owner: PackageManager): void {
         this.packageManagerOwner = owner;
+    }
+
+    /** Evicts inventory for an environment without emitting public package changes. */
+    invalidateCache(environment: PythonEnvironment): void {
+        this.packages.delete(environment.envId.id);
+        this.cacheVersions.delete(environment.envId.id);
+    }
+
+    private getCacheVersion(environment: PythonEnvironment): symbol {
+        const version = this.cacheVersions.get(environment.envId.id) ?? Symbol();
+        this.cacheVersions.set(environment.envId.id, version);
+        return version;
     }
 
     readonly [pythonToolSupport]: PackageToolSupport = {
@@ -196,7 +211,8 @@ export class PipPackageManager implements PackageManager, Disposable {
                         });
                     }
                 } finally {
-                    this.packages.delete(environment.envId.id);
+                    this.invalidateCache(environment);
+                    this._onDidMutatePackages.fire(environment);
                 }
 
                 await updatePackagesAndNotify(
@@ -254,6 +270,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                 title: l10n.t('Refreshing packages'),
             },
             async () => {
+                const cacheVersion = this.getCacheVersion(environment);
                 const packages = await updatePackagesAndNotify(
                     this,
                     environment,
@@ -262,7 +279,7 @@ export class PipPackageManager implements PackageManager, Disposable {
                         this._onDidChangePackages.fire({ environment, manager: this.packageManagerOwner, changes });
                     },
                 );
-                if (packages !== undefined) {
+                if (packages !== undefined && this.cacheVersions.get(environment.envId.id) === cacheVersion) {
                     this.packages.set(environment.envId.id, packages);
                 }
             },
@@ -282,6 +299,7 @@ export class PipPackageManager implements PackageManager, Disposable {
         showErrors = true,
         token?: CancellationToken,
     ): Promise<Package[] | undefined> {
+        const cacheVersion = this.getCacheVersion(environment);
         try {
             throwIfCancelled(token);
             if (!environment.execInfo?.run?.executable) {
@@ -298,7 +316,9 @@ export class PipPackageManager implements PackageManager, Disposable {
             );
             throwIfCancelled(token);
             const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this.packageManagerOwner));
-            this.packages.set(environment.envId.id, packages);
+            if (this.cacheVersions.get(environment.envId.id) === cacheVersion) {
+                this.packages.set(environment.envId.id, packages);
+            }
             return packages;
         } catch (error) {
             this.log.error('Error refreshing packages', error);
@@ -368,7 +388,9 @@ export class PipPackageManager implements PackageManager, Disposable {
     /** Releases package-change listeners and cached packages. */
     dispose(): void {
         this._onDidChangePackages.dispose();
+        this._onDidMutatePackages.dispose();
         this.packages.clear();
+        this.cacheVersions.clear();
     }
 
     /**

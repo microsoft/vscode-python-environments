@@ -71,13 +71,28 @@ export class UvPackageManager implements PackageManager, Disposable {
 
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     readonly onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
+    private readonly _onDidMutatePackages = new EventEmitter<PythonEnvironment>();
+    readonly onDidMutatePackages = this._onDidMutatePackages.event;
     private readonly packages = new Map<string, Package[]>();
+    private readonly cacheVersions = new Map<string, symbol>();
 
     constructor(
         private readonly api: PythonEnvironmentApi,
         public readonly log: LogOutputChannel,
         private readonly venv: VenvManager,
     ) {}
+
+    /** Evicts inventory for an environment without emitting public package changes. */
+    invalidateCache(environment: PythonEnvironment): void {
+        this.packages.delete(environment.envId.id);
+        this.cacheVersions.delete(environment.envId.id);
+    }
+
+    private getCacheVersion(environment: PythonEnvironment): symbol {
+        const version = this.cacheVersions.get(environment.envId.id) ?? Symbol();
+        this.cacheVersions.set(environment.envId.id, version);
+        return version;
+    }
 
     readonly [pythonToolSupport]: PackageToolSupport = {
         manage: (environment, options, token, scope) =>
@@ -171,7 +186,8 @@ export class UvPackageManager implements PackageManager, Disposable {
                         });
                     }
                 } finally {
-                    this.packages.delete(environment.envId.id);
+                    this.invalidateCache(environment);
+                    this._onDidMutatePackages.fire(environment);
                 }
                 await updatePackagesAndNotify(
                     this,
@@ -218,11 +234,12 @@ export class UvPackageManager implements PackageManager, Disposable {
         await withProgress(
             { location: ProgressLocation.Window, title: l10n.t('Refreshing packages') },
             async () => {
+                const cacheVersion = this.getCacheVersion(environment);
                 const packages = await updatePackagesAndNotify(
                     this, environment, this.packages.get(environment.envId.id),
                     (changes) => this._onDidChangePackages.fire({ environment, manager: this, changes }),
                 );
-                if (packages !== undefined) {
+                if (packages !== undefined && this.cacheVersions.get(environment.envId.id) === cacheVersion) {
                     this.packages.set(environment.envId.id, packages);
                 }
             },
@@ -242,6 +259,7 @@ export class UvPackageManager implements PackageManager, Disposable {
         showErrors = true,
         token?: CancellationToken,
     ): Promise<Package[] | undefined> {
+        const cacheVersion = this.getCacheVersion(environment);
         try {
             throwIfCancelled(token);
             const command = new UvListCommand(await this.getCommandOptions(environment, {
@@ -252,7 +270,9 @@ export class UvPackageManager implements PackageManager, Disposable {
             );
             throwIfCancelled(token);
             const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
-            this.packages.set(environment.envId.id, packages);
+            if (this.cacheVersions.get(environment.envId.id) === cacheVersion) {
+                this.packages.set(environment.envId.id, packages);
+            }
             return packages;
         } catch (error) {
             this.log.error('Error refreshing packages', error);
@@ -299,6 +319,8 @@ export class UvPackageManager implements PackageManager, Disposable {
     /** Releases package-change listeners and cached packages. */
     dispose(): void {
         this._onDidChangePackages.dispose();
+        this._onDidMutatePackages.dispose();
         this.packages.clear();
+        this.cacheVersions.clear();
     }
 }

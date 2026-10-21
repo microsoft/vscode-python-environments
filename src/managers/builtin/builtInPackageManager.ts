@@ -18,11 +18,17 @@ import { UvPackageManager } from './uvPackageManager';
 
 /** Routes the existing built-in pip entry point to independent pip and uv managers. */
 export class BuiltInPackageManager implements PackageManager, Disposable {
+    private readonly cacheSubscriptions: Disposable[];
+
     constructor(
         private readonly pip: PipPackageManager,
         private readonly uv: UvPackageManager,
     ) {
         this.pip.setPackageManagerOwner(this);
+        this.cacheSubscriptions = [
+            this.pip.onDidMutatePackages((environment) => this.uv.invalidateCache(environment)),
+            this.uv.onDidMutatePackages((environment) => this.pip.invalidateCache(environment)),
+        ];
     }
 
     readonly name = 'pip';
@@ -119,6 +125,7 @@ export class BuiltInPackageManager implements PackageManager, Disposable {
 
     /** Releases the pip fallback owned by this registered entry point. */
     dispose(): void {
+        this.cacheSubscriptions.forEach((subscription) => subscription.dispose());
         this.pip.dispose();
     }
 }

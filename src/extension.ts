@@ -9,7 +9,7 @@ import {
     Uri,
     window,
 } from 'vscode';
-import { PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
+import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { InlineScriptPackagesNotManagedError } from './common/inlineScript/errors';
@@ -275,9 +275,39 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                       },
                   ),
                   commands.registerCommand(
+                      'python-envs.test.getPackagesForProject',
+                      async (scope: Uri, environment: PythonEnvironment) => {
+                          const manager = envManagers.getPackageManager(scope);
+                          if (!manager) {
+                              throw new Error(`Package manager not found for project: ${scope.fsPath}`);
+                          }
+                          return manager.getPackages(environment, { skipCache: true });
+                      },
+                  ),
+                  commands.registerCommand(
+                      'python-envs.test.managePackagesForProject',
+                      async (scope: Uri, environment: PythonEnvironment, options: PackageManagementOptions) => {
+                          const manager = envManagers.getPackageManager(scope);
+                          if (!manager) {
+                              throw new Error(`Package manager not found for project: ${scope.fsPath}`);
+                          }
+                          return manager.manage(environment, options);
+                      },
+                  ),
+                  commands.registerCommand(
+                      'python-envs.test.getPackageAvailableVersionsForProject',
+                      async (scope: Uri, environment: PythonEnvironment, packageName: string) => {
+                          const manager = envManagers.getPackageManager(scope);
+                          if (!manager) {
+                              throw new Error(`Package manager not found for project: ${scope.fsPath}`);
+                          }
+                          return manager.getPackageAvailableVersions(environment, packageName, { errorMode: 'throw' });
+                      },
+                  ),
+                  commands.registerCommand(
                       'python-envs.test.getDirectPackageNames',
-                      async (environment: PythonEnvironment) => {
-                          const manager = envManagers.getPackageManager(environment);
+                      async (environment: PythonEnvironment, scope?: Uri) => {
+                          const manager = envManagers.getPackageManager(scope ?? environment);
                           const names = await manager?.getDirectPackageNames?.(environment);
                           return names ? Array.from(names) : undefined;
                       },
