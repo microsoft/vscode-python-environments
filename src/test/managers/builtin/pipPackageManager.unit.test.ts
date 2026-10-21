@@ -208,27 +208,22 @@ suite('PipPackageManager', () => {
         );
     });
 
-    test('uses UV version lookup without querying the Pip version', async () => {
+    test('uses pip directly even when automatic uv selection would be enabled', async () => {
         const manager = createManager();
         const environment = createEnvironment();
         const shouldUseUv = sinon.stub(helpers, 'shouldUseUv').resolves(true);
         const getUvExecutable = sinon.stub(helpers, 'getUvExecutable').resolves('workspace-uv');
         const runPython = sinon.stub(helpers, 'runPython');
+        runPython.onFirstCall().resolves('pip 25.1 from pip (python 3.12)');
+        runPython.onSecondCall().resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
         const runUV = sinon.stub(helpers, 'runUV').resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
 
         const versions = await manager.getPackageAvailableVersions(environment, 'requests');
 
-        assert.ok(runPython.notCalled);
-        assert.ok(
-            shouldUseUv.calledOnceWithExactly(
-                manager.log,
-                environment.environmentPath.fsPath,
-                environment.environmentPath.fsPath,
-                undefined,
-            ),
-        );
-        assert.ok(getUvExecutable.calledOnceWithExactly(manager.log, environment.environmentPath.fsPath, undefined));
-        assert.strictEqual(runUV.firstCall.args[5], 'workspace-uv');
+        assert.ok(runPython.calledTwice);
+        assert.ok(shouldUseUv.notCalled);
+        assert.ok(getUvExecutable.notCalled);
+        assert.ok(runUV.notCalled);
         assert.deepStrictEqual(
             versions.map((version) => version.public),
             ['2.32.5', '2.31.0'],

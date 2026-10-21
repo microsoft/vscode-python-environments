@@ -41,6 +41,13 @@ const profiles: PackageManagerProfile[] = [
         },
     },
     {
+        name: 'uv',
+        packageName: 'requests',
+        packageManagerId: 'ms-python.python:uv',
+        provider: createVenvFixtureProvider(),
+        supportsVersionLookup: () => true,
+    },
+    {
         name: 'Conda',
         packageName: 'flask',
         packageManagerId: CONDA_MANAGER_ID,
@@ -52,10 +59,6 @@ const profiles: PackageManagerProfile[] = [
 const deferredPackageManagers: Readonly<Record<PackageManagerId, string>> = {
     'ms-python.python:poetry': 'Poetry lifecycle coverage requires a controlled Poetry installation.',
 };
-
-const deferredProfiles = {
-    pipWithUv: 'uv-backed Pip selection uses a machine-scoped setting and is unstable within one extension host.',
-} as const;
 
 suite('Package Manager profile coverage', function () {
     this.timeout(60_000);
@@ -70,6 +73,7 @@ suite('Package Manager profile coverage', function () {
             'python-envs.test.getPackageManagerIds',
         );
         assert.ok(registeredIds, 'Registered package-manager IDs are unavailable');
+        assert.ok(registeredIds.includes('ms-python.python:uv'), 'uv package manager is not registered');
 
         const coveredIds = new Set(profiles.map((profile) => profile.packageManagerId));
         const uncoveredIds = registeredIds.filter(
@@ -86,9 +90,6 @@ suite('Package Manager profile coverage', function () {
             );
         }
 
-        for (const [profileName, reason] of Object.entries(deferredProfiles)) {
-            assert.ok(reason.length > 0, `Deferred profile lacks a reason: ${profileName}`);
-        }
     });
 });
 
