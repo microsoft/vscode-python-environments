@@ -49,6 +49,9 @@ suite('BuiltInPackageManager routing', () => {
     for (const useUv of [false, true]) {
         test(`preserves registered package and event identity for ${useUv ? 'uv' : 'pip'}`, async () => {
             shouldUseUv.resolves(useUv);
+            if (useUv) {
+                sinon.stub(helpers, 'getUvExecutable').resolves('test-uv');
+            }
             const run = sinon.stub(helpers, useUv ? 'runUV' : 'runPython').resolves('');
             run.onSecondCall().resolves(JSON.stringify([{ name: 'requests', version: '2.32.5' }]));
             const changes = sinon.spy();
