@@ -10,14 +10,13 @@ import {
     QuickInputButtons,
     QuickPickItem,
     Uri,
-    window,
 } from 'vscode';
 import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { EXTENSION_ROOT_DIR } from '../../common/constants';
 import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/localize';
-import { traceInfo } from '../../common/logging';
+import { traceInfo, traceWarn } from '../../common/logging';
 import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
-import { showQuickPickWithButtons, withProgress } from '../../common/window.apis';
+import { showErrorMessage, showQuickPickWithButtons, showTextDocument, withProgress } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
 import { throwIfCancelled } from '../../internal/pythonToolSupport';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
@@ -28,46 +27,73 @@ import { createPipOrUvCommand } from './commands/factory';
 import { PipListCommand, UvListCommand } from './commands/index';
 
 export interface PyprojectToml {
-    project?: {
-        name?: string;
-        version?: string;
-    };
-    'build-system'?: {
-        requires?: unknown;
-    };
+    project?: unknown;
+    'build-system'?: unknown;
 }
 
+function isTomlTable(value: unknown): value is tomljs.JsonMap {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+}
+
+function isStringArray(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isValidPep508Name(value: string): boolean {
+    return /^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9])$/.test(value);
+}
+
+/**
+ * Validates the pyproject fields consumed when installing project dependencies.
+ * Unknown fields are intentionally ignored so this remains a focused preflight,
+ * not a complete pyproject.toml standards validator.
+ */
 export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
-    // 1. Validate required "requires" field in [build-system] section (PEP 518)
-    const buildSystem = toml['build-system'];
-    if (buildSystem && !buildSystem.requires) {
-        // See PEP 518: https://peps.python.org/pep-0518/
-        return l10n.t('Missing required field "requires" in [build-system] section of pyproject.toml.');
+    const buildSystemValue = toml['build-system'];
+    if (buildSystemValue !== undefined) {
+        if (!isTomlTable(buildSystemValue)) {
+            return l10n.t('The [build-system] section must be a table in pyproject.toml.');
+        }
+        if (buildSystemValue.requires === undefined) {
+            return l10n.t('Missing required field "requires" in [build-system] section of pyproject.toml.');
+        }
+        if (!isStringArray(buildSystemValue.requires)) {
+            return l10n.t(
+                'The "requires" field in [build-system] must be an array of strings in pyproject.toml.',
+            );
+        }
     }
 
-    const project = toml.project;
-    if (!project) {
+    const projectValue = toml.project;
+    if (projectValue === undefined) {
         return undefined;
     }
-
-    const name = project.name;
-    // 2. Validate required "name" field in [project] section (PEP 621)
-    // See PEP 621: https://peps.python.org/pep-0621/
-    if (!name) {
-        return l10n.t('Missing required field "name" in [project] section of pyproject.toml.');
+    if (!isTomlTable(projectValue)) {
+        return l10n.t('The [project] section must be a table in pyproject.toml.');
     }
 
-    // 3. Validate package name (PEP 508)
-    // PEP 508 regex: must start and end with a letter or digit, can contain -_., and alphanumeric characters. No spaces allowed.
-    // See https://peps.python.org/pep-0508/
-    const nameRegex = /^([a-zA-Z0-9]|[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9])$/;
-    if (!nameRegex.test(name)) {
+    const name = projectValue.name;
+    if (name === undefined || name === '') {
+        return l10n.t('Missing required field "name" in [project] section of pyproject.toml.');
+    }
+    if (typeof name !== 'string') {
+        return l10n.t('The "name" field in [project] must be a string in pyproject.toml.');
+    }
+
+    // PEP 508 names must start and end with a letter or digit and may contain -_., in between.
+    if (!isValidPep508Name(name)) {
         return l10n.t('Invalid package name "{0}" in pyproject.toml.', name);
     }
 
-    // 4. Validate version format (PEP 440)
-    const version = project.version;
+    const version = projectValue.version;
     if (version !== undefined) {
+        if (typeof version !== 'string') {
+            return l10n.t('The "version" field in [project] must be a string in pyproject.toml.');
+        }
         if (version.length === 0) {
             return l10n.t('Version cannot be empty in pyproject.toml.');
         }
@@ -76,26 +102,82 @@ export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
         }
     }
 
+    const dependencies = projectValue.dependencies;
+    if (dependencies !== undefined && !isStringArray(dependencies)) {
+        return l10n.t('The "dependencies" field in [project] must be an array of strings in pyproject.toml.');
+    }
+
+    const optionalDependencies = projectValue['optional-dependencies'];
+    if (optionalDependencies !== undefined) {
+        if (!isTomlTable(optionalDependencies)) {
+            return l10n.t(
+                'The "optional-dependencies" field in [project] must be a table of arrays of strings in pyproject.toml.',
+            );
+        }
+        for (const [group, groupDependencies] of Object.entries(optionalDependencies)) {
+            if (!isValidPep508Name(group)) {
+                return l10n.t('Invalid optional dependency group name "{0}" in pyproject.toml.', group);
+            }
+            if (!isStringArray(groupDependencies)) {
+                return l10n.t(
+                    'Dependency group "{0}" in [project.optional-dependencies] must be an array of strings in pyproject.toml.',
+                    group,
+                );
+            }
+        }
+    }
+
     return undefined;
 }
 
-async function tomlParse(fsPath: string, log?: LogOutputChannel, strict = false): Promise<tomljs.JsonMap> {
+interface TomlParseSuccess {
+    toml: tomljs.JsonMap;
+}
+
+interface TomlParseFailure {
+    error: string;
+}
+
+type TomlParseResult = TomlParseSuccess | TomlParseFailure;
+
+function conciseError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.split(/\r?\n/, 1)[0].trim() || l10n.t('Unknown error');
+}
+
+async function tomlParse(fsPath: string): Promise<TomlParseResult> {
     try {
         const content = await fse.readFile(fsPath, 'utf-8');
-        return tomljs.parse(content);
-    } catch (err) {
-        if (strict) {
-            throw new Error(
-                l10n.t('Could not read or parse {0}: {1}', fsPath, err instanceof Error ? err.message : String(err)),
-            );
-        }
-        log?.error('Failed to parse `pyproject.toml`:', err);
+        return { toml: tomljs.parse(content) };
+    } catch (error) {
+        traceWarn(`Failed to read or parse pyproject.toml at ${fsPath}:`, error);
+        return {
+            error: l10n.t('Could not read or parse pyproject.toml: {0}', conciseError(error)),
+        };
     }
-    return {};
 }
 
 function isPipInstallableToml(toml: tomljs.JsonMap): boolean {
     return toml['build-system'] !== undefined && toml.project !== undefined;
+}
+
+function isPotentiallyInstallableToml(toml: tomljs.JsonMap): boolean {
+    if (isPipInstallableToml(toml)) {
+        return true;
+    }
+    const project = isTomlTable(toml.project) ? toml.project : undefined;
+    return project?.['optional-dependencies'] !== undefined;
+}
+
+function isTomlRelevantToPreferredRoot(tomlUri: Uri, preferredRoot: Uri | undefined): boolean {
+    if (!preferredRoot) {
+        return true;
+    }
+    const tomlDirectory = path.dirname(tomlUri.fsPath);
+    return (
+        isSameOrParentPath(preferredRoot.fsPath, tomlDirectory) ||
+        isSameOrParentPath(tomlDirectory, preferredRoot.fsPath)
+    );
 }
 
 /**
@@ -104,7 +186,7 @@ function isPipInstallableToml(toml: tomljs.JsonMap): boolean {
  * declare a name.
  */
 function getTomlProjectName(toml: tomljs.JsonMap): string | undefined {
-    const project = toml.project as tomljs.JsonMap | undefined;
+    const project = isTomlTable(toml.project) ? toml.project : undefined;
     const name = project?.name;
     return typeof name === 'string' && name.length > 0 ? name : undefined;
 }
@@ -125,14 +207,14 @@ function getTomlInstallable(toml: tomljs.JsonMap, tomlPath: Uri): Installable[] 
         });
     }
 
-    if (toml.project && (toml.project as tomljs.JsonMap)['optional-dependencies']) {
-        const deps = (toml.project as tomljs.JsonMap)['optional-dependencies'];
-        for (const key of Object.keys(deps)) {
+    const project = isTomlTable(toml.project) ? toml.project : undefined;
+    const optionalDependencies = project?.['optional-dependencies'];
+    if (isTomlTable(optionalDependencies)) {
+        for (const key of Object.keys(optionalDependencies)) {
             extras.push({
                 name: key,
                 displayName: key,
                 group: 'TOML',
-                // Use a single -e argument with the extras specified as part of the path
                 args: ['-e', `${projectDir}[${key}]`],
                 uri: tomlPath,
             });
@@ -166,12 +248,12 @@ async function selectWorkspaceOrCommon(
     installed: string[],
 ): Promise<PipPackages | undefined> {
     const installable = installableResult.installables;
-    if (installable.length === 0 && common.length === 0) {
+    if (installable.length === 0 && common.length === 0 && installableResult.validationErrors.length === 0) {
         return undefined;
     }
 
     const items: QuickPickItem[] = [];
-    if (installable.length > 0) {
+    if (installable.length > 0 || installableResult.validationErrors.length > 0) {
         items.push({
             label: PackageManagement.workspaceDependencies,
             description: PackageManagement.workspaceDependenciesDescription,
@@ -207,20 +289,26 @@ async function selectWorkspaceOrCommon(
     if (selected && !Array.isArray(selected)) {
         try {
             if (selected.label === PackageManagement.workspaceDependencies) {
-                const selectedInstallables = await selectFromInstallableToInstall(installable, undefined, {
-                    showBackButton,
-                });
+                const selectedInstallables =
+                    installable.length > 0
+                        ? await selectFromInstallableToInstall(installable, undefined, { showBackButton })
+                        : { install: [], uninstall: [] };
+                if (!selectedInstallables) {
+                    return undefined;
+                }
 
-                const validationError = installableResult.validationError;
                 const shouldProceed = await shouldProceedAfterPyprojectValidation(
-                    validationError,
-                    selectedInstallables?.install ?? [],
+                    installableResult.validationErrors,
+                    {
+                        allPyprojectTomlsSelected: installable.length === 0,
+                        selectedPyprojectTomls: selectedInstallables.selectedUris,
+                    },
                 );
                 if (!shouldProceed) {
                     return undefined;
                 }
 
-                return selectedInstallables;
+                return { install: selectedInstallables.install, uninstall: selectedInstallables.uninstall };
             } else if (selected.label === PackageManagement.searchCommonPackages) {
                 return await selectFromCommonPackagesToInstall(common, installed, undefined, { showBackButton });
             } else if (selected.label === PackageManagement.skipPackageInstallation) {
@@ -250,9 +338,9 @@ export interface ProjectInstallableResult {
     installables: Installable[];
 
     /**
-     * Validation error information if pyproject.toml validation failed
+     * Validation errors from pyproject.toml files that could provide project dependencies.
      */
-    validationError?: ValidationError;
+    validationErrors: ValidationError[];
 }
 
 export interface ValidationError {
@@ -320,11 +408,11 @@ export async function getProjectInstallable(
     options?: ProjectInstallableOptions,
 ): Promise<ProjectInstallableResult> {
     if (!projects) {
-        return { installables: [] };
+        return { installables: [], validationErrors: [] };
     }
     const exclude = '**/{.venv*,.git,.nox,.tox,.conda,site-packages,__pypackages__}/**';
     const installable: Installable[] = [];
-    let validationError: { message: string; fileUri: Uri } | undefined;
+    const validationErrors: ValidationError[] = [];
 
     const search = async (token?: CancellationToken) => {
         throwIfCancelled(options?.token);
@@ -337,22 +425,18 @@ export async function getProjectInstallable(
             ])
         ).flat();
 
-        // Deduplicate by fsPath
         const uniqueResults = Array.from(new Map(results.map((uri) => [uri.fsPath, uri])).values());
-
-        const fsPaths = projects.map((p) => p.uri.fsPath);
-        // Compute depth relative to the owning project root so ordering reflects
-        // "shallower within the project", independent of where the project lives on disk.
+        const fsPaths = projects.map((project) => project.uri.fsPath);
         const depthFromProject = (uri: Uri): number => {
             const projectRoot = api.getPythonProject(uri)?.uri.fsPath;
             if (!projectRoot) {
                 return Number.MAX_SAFE_INTEGER;
             }
-            const rel = path.relative(projectRoot, uri.fsPath);
-            if (!rel) {
+            const relative = path.relative(projectRoot, uri.fsPath);
+            if (!relative) {
                 return 0;
             }
-            return rel.split(path.sep).filter((segment) => segment.length > 0).length;
+            return relative.split(path.sep).filter((segment) => segment.length > 0).length;
         };
         const filtered = uniqueResults
             .filter((uri) => {
@@ -363,12 +447,10 @@ export async function getProjectInstallable(
                 ) {
                     return false;
                 }
-                const p = api.getPythonProject(uri)?.uri.fsPath;
-                return p && fsPaths.includes(p);
+                const projectRoot = api.getPythonProject(uri)?.uri.fsPath;
+                return projectRoot && fsPaths.includes(projectRoot);
             })
             .sort((a, b) => {
-                // Sort by path depth relative to the project root (shallowest first) so
-                // top-level files like requirements.txt appear before deeply nested ones.
                 const depthA = depthFromProject(a);
                 const depthB = depthFromProject(b);
                 if (depthA !== depthB) {
@@ -379,18 +461,42 @@ export async function getProjectInstallable(
                 return pathA < pathB ? -1 : pathA > pathB ? 1 : 0;
             });
 
-        // Parse all TOML files first (in parallel), keyed by fsPath, so the
-        // subsequent duplicate-detection pass can run sequentially and
-        // deterministically over the depth-sorted `filtered` list.
-        const parsedTomls = new Map<string, tomljs.JsonMap>();
+        const parsedTomls = new Map<string, TomlParseResult>();
         await Promise.all(
             filtered.map(async (uri) => {
                 if (uri.fsPath.endsWith('.toml')) {
-                    const toml = await tomlParse(uri.fsPath, undefined, options?.runHeadless);
-                    parsedTomls.set(uri.fsPath, toml);
+                    parsedTomls.set(uri.fsPath, await tomlParse(uri.fsPath));
                 }
             }),
         );
+
+        const tomlValidationErrors = new Map<string, string>();
+        for (const uri of filtered) {
+            const parsed = parsedTomls.get(uri.fsPath);
+            if (!parsed || 'error' in parsed) {
+                continue;
+            }
+            const error = validatePyprojectToml(parsed.toml);
+            if (
+                error &&
+                (getTomlInstallable(parsed.toml, uri).length > 0 || isPotentiallyInstallableToml(parsed.toml))
+            ) {
+                tomlValidationErrors.set(uri.fsPath, error);
+            }
+        }
+
+        const hasRelevantTomlFailure = filtered.some((uri) => {
+            const parsed = parsedTomls.get(uri.fsPath);
+            return (
+                !!parsed &&
+                (('error' in parsed || tomlValidationErrors.has(uri.fsPath)) &&
+                    isTomlRelevantToPreferredRoot(uri, options?.preferredRoot))
+            );
+        });
+        const shouldSkipDisjointToml = (uri: Uri): boolean =>
+            !!options?.deduplicateProjectPackages &&
+            !isTomlRelevantToPreferredRoot(uri, options.preferredRoot) &&
+            (tomlValidationErrors.has(uri.fsPath) || hasRelevantTomlFailure);
 
         const selectedTomls = new Map<string, Uri>();
         const ambiguousProjectNames = new Set<string>();
@@ -400,9 +506,12 @@ export async function getProjectInstallable(
                 if (!uri.fsPath.endsWith('.toml')) {
                     continue;
                 }
-                const toml = parsedTomls.get(uri.fsPath) ?? {};
-                const projectName = getTomlProjectName(toml);
-                if (!projectName || getTomlInstallable(toml, uri).length === 0) {
+                const parsed = parsedTomls.get(uri.fsPath);
+                if (!parsed || 'error' in parsed || shouldSkipDisjointToml(uri)) {
+                    continue;
+                }
+                const projectName = getTomlProjectName(parsed.toml);
+                if (!projectName || getTomlInstallable(parsed.toml, uri).length === 0) {
                     continue;
                 }
                 const normalizedName = normalizePackageName(projectName);
@@ -447,9 +556,33 @@ export async function getProjectInstallable(
 
         for (const uri of filtered) {
             if (uri.fsPath.endsWith('.toml')) {
-                const toml = parsedTomls.get(uri.fsPath) ?? {};
-                const tomlInstallables = getTomlInstallable(toml, uri);
+                const parsed = parsedTomls.get(uri.fsPath);
+                if (!parsed) {
+                    continue;
+                }
+                if ('error' in parsed) {
+                    if (isTomlRelevantToPreferredRoot(uri, options?.preferredRoot)) {
+                        validationErrors.push({ message: parsed.error, fileUri: uri });
+                    } else {
+                        traceInfo(
+                            `Ignoring invalid pyproject.toml outside the environment creation root: ${uri.fsPath}`,
+                        );
+                    }
+                    continue;
+                }
 
+                const validationError = tomlValidationErrors.get(uri.fsPath);
+                if (shouldSkipDisjointToml(uri)) {
+                    traceInfo(
+                        validationError
+                            ? `Ignoring invalid pyproject.toml outside the environment creation root: ${uri.fsPath}`
+                            : `Skipping project dependencies outside the creation root because the owning pyproject.toml is invalid: ${uri.fsPath}`,
+                    );
+                    continue;
+                }
+
+                const toml = parsed.toml;
+                const tomlInstallables = getTomlInstallable(toml, uri);
                 const projectName = getTomlProjectName(toml);
                 if (options?.deduplicateProjectPackages && projectName && tomlInstallables.length > 0) {
                     const normalizedName = normalizePackageName(projectName);
@@ -466,17 +599,9 @@ export async function getProjectInstallable(
                     }
                 }
 
-                // Validate pyproject.toml (report only the first error found).
-                if (!validationError) {
-                    const error = validatePyprojectToml(toml);
-                    if (error) {
-                        validationError = {
-                            message: error,
-                            fileUri: uri,
-                        };
-                    }
+                if (validationError) {
+                    validationErrors.push({ message: validationError, fileUri: uri });
                 }
-
                 installable.push(...tomlInstallables);
             } else {
                 const name = path.basename(uri.fsPath);
@@ -491,6 +616,7 @@ export async function getProjectInstallable(
         }
         throwIfCancelled(options?.token);
     };
+
     if (options?.runHeadless) {
         await search(options.token);
     } else {
@@ -500,33 +626,47 @@ export async function getProjectInstallable(
         );
     }
 
-    return {
-        installables: installable,
-        validationError,
-    };
+    return { installables: installable, validationErrors };
 }
 
+export interface PyprojectValidationSelectionOptions {
+    /** Treat every relevant pyproject.toml as selected, as Quick Create does. */
+    allPyprojectTomlsSelected?: boolean;
+    /** Exact dependency files selected in the configurable package picker. */
+    selectedPyprojectTomls?: readonly Uri[];
+}
+
+function validationMatchesSelectedToml(
+    validationError: ValidationError,
+    selectedPyprojectTomls: readonly Uri[] | undefined,
+): boolean {
+    const validationPath = normalizePath(path.resolve(validationError.fileUri.fsPath));
+    return (selectedPyprojectTomls ?? []).some(
+        (uri) => normalizePath(path.resolve(uri.fsPath)) === validationPath,
+    );
+}
+
+/**
+ * Prompts before continuing with a selected pyproject.toml that failed parsing or validation.
+ * Returns false for Open, Cancel, or dismissal so callers can stop before creating an environment.
+ */
 export async function shouldProceedAfterPyprojectValidation(
-    validationError: ValidationError | undefined,
-    install: string[],
+    validationErrors: readonly ValidationError[],
+    options?: PyprojectValidationSelectionOptions,
 ): Promise<boolean> {
-    // 1. If no validation error or no installables selected, proceed
-    if (!validationError || install.length === 0) {
+    const validationError = options?.allPyprojectTomlsSelected
+        ? validationErrors[0]
+        : validationErrors.find((error) =>
+              validationMatchesSelectedToml(error, options?.selectedPyprojectTomls),
+          );
+    if (!validationError) {
         return true;
     }
 
-    const selectedTomlInstallables = install.some((arg, index, arr) => arg === '-e' && index + 1 < arr.length);
-    if (!selectedTomlInstallables) {
-        // 2. If no toml installables selected, proceed
-        return true;
-    }
-
-    // 3. Otherwise, show error message and ask user what to do
     const openButton = { title: Pickers.pyProject.openFile };
     const continueButton = { title: Pickers.pyProject.continueAnyway };
     const cancelButton = { title: Pickers.pyProject.cancel, isCloseAffordance: true };
-
-    const selection = await window.showErrorMessage(
+    const selection = await showErrorMessage(
         validationError.message + Pickers.pyProject.validationErrorAction,
         openButton,
         continueButton,
@@ -536,10 +676,8 @@ export async function shouldProceedAfterPyprojectValidation(
     if (selection === continueButton) {
         return true;
     }
-
     if (selection === openButton) {
-        await window.showTextDocument(validationError.fileUri);
+        await showTextDocument(validationError.fileUri);
     }
-
     return false;
 }
