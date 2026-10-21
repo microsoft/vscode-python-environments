@@ -485,18 +485,9 @@ export async function getProjectInstallable(
             }
         }
 
-        const hasRelevantTomlFailure = filtered.some((uri) => {
-            const parsed = parsedTomls.get(uri.fsPath);
-            return (
-                !!parsed &&
-                (('error' in parsed || tomlValidationErrors.has(uri.fsPath)) &&
-                    isTomlRelevantToPreferredRoot(uri, options?.preferredRoot))
-            );
-        });
         const shouldSkipDisjointToml = (uri: Uri): boolean =>
             !!options?.deduplicateProjectPackages &&
-            !isTomlRelevantToPreferredRoot(uri, options.preferredRoot) &&
-            (tomlValidationErrors.has(uri.fsPath) || hasRelevantTomlFailure);
+            !isTomlRelevantToPreferredRoot(uri, options.preferredRoot);
 
         const selectedTomls = new Map<string, Uri>();
         const ambiguousProjectNames = new Set<string>();
@@ -573,18 +564,14 @@ export async function getProjectInstallable(
 
                 const validationError = tomlValidationErrors.get(uri.fsPath);
                 if (shouldSkipDisjointToml(uri)) {
-                    traceInfo(
-                        validationError
-                            ? `Ignoring invalid pyproject.toml outside the environment creation root: ${uri.fsPath}`
-                            : `Skipping project dependencies outside the creation root because the owning pyproject.toml is invalid: ${uri.fsPath}`,
-                    );
+                    traceInfo(`Skipping pyproject.toml outside the environment creation root: ${uri.fsPath}`);
                     continue;
                 }
 
                 const toml = parsed.toml;
                 const tomlInstallables = getTomlInstallable(toml, uri);
                 const projectName = getTomlProjectName(toml);
-                if (options?.deduplicateProjectPackages && projectName && tomlInstallables.length > 0) {
+                if (options?.deduplicateProjectPackages && projectName) {
                     const normalizedName = normalizePackageName(projectName);
                     const selected = selectedTomls.get(normalizedName);
                     if (ambiguousProjectNames.has(normalizedName)) {

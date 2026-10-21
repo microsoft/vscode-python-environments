@@ -756,6 +756,85 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         assert.deepStrictEqual(result.validationErrors, []);
     });
 
+    test('prefers a valid same-name descendant over a disjoint sibling before duplicate selection', async () => {
+        const owningToml = await writeToml(path.join('main', 'pkg'), 'shared');
+        const siblingToml = await writeToml('copilot', 'shared');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
+            path.join(projectRoot, 'main', 'pkg'),
+        ]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
+    test('ignores a same-name invalid ancestor that emits no installable when an exact owner is selected', async () => {
+        const ancestorToml = await writeTomlContent(
+            'main',
+            ['[project]', 'name = "shared"', 'optional-dependencies = ["pytest"]', ''].join('\n'),
+        );
+        const owningToml = await writeToml(path.join('main', 'pkg'), 'shared');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(ancestorToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main', 'pkg')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
+            path.join(projectRoot, 'main', 'pkg'),
+        ]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
+    test('lets an exact valid owner replace an invalid ancestor without changing disjoint eligibility', async () => {
+        const ancestorToml = await writeTomlContent(
+            'main',
+            [
+                '[project]',
+                'name = "shared"',
+                'dependencies = "requests"',
+                '',
+                '[build-system]',
+                'requires = ["setuptools"]',
+                'build-backend = "setuptools.build_meta"',
+                '',
+            ].join('\n'),
+        );
+        const owningToml = await writeToml(path.join('main', 'pkg'), 'shared');
+        const siblingToml = await writeToml('copilot', 'other-package');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(ancestorToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main', 'pkg')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
+            path.join(projectRoot, 'main', 'pkg'),
+        ]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
     test('keeps a schema-invalid same-name descendant eligible before duplicate selection', async () => {
         const owningToml = await writeTomlContent(
             path.join('main', 'pkg'),
