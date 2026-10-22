@@ -615,7 +615,7 @@ export async function quickCreateVenv(
         allPackages.push(...additionalPackages);
     }
 
-    const validationError = result.validationError;
+    const validationError = result.validationErrors[0];
     if (operation && validationError) {
         throw new PythonToolError(
             'INVALID_PROJECT',
@@ -626,7 +626,11 @@ export async function quickCreateVenv(
             ),
         );
     }
-    const shouldProceed = operation || (await shouldProceedAfterPyprojectValidation(validationError, allPackages));
+    const shouldProceed =
+        operation ||
+        (await shouldProceedAfterPyprojectValidation(result.validationErrors, {
+            allPyprojectTomlsSelected: true,
+        }));
     if (!shouldProceed) {
         return undefined;
     }

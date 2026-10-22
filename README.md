@@ -17,6 +17,8 @@ The "Python Projects" fold shows you all of the projects that are currently in y
 
 The "Environment Managers" fold shows you all of the environment managers that are available on your machine with all related environments nested below. From this view, you can create new environments, delete old environments, and manage packages.
 
+The PEP 723 inline-script preview can create and select cached environments from dependency metadata embedded in standalone Python files. The preview is controlled by `python-envs.inlineScripts.enabled`, defaults to `false`, and requires a window reload after the effective value changes.
+
 <img src="https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/python-envs-overview.gif" width=734 height=413>
 
 ### Environment Management
@@ -72,7 +74,20 @@ The extension uses `pip` as the default package manager, but you can use the pac
 | Id                     | Name    | Description                                                                                                                                                                                               |
 | ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
+| ms-python.python:uv    | `uv`    | Uses [uv](https://docs.astral.sh/uv/) to manage packages in the selected environment, without requiring pip in that environment. |
 | ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
+
+Set `"python-envs.defaultPackageManager": "ms-python.python:uv"` to select uv for package operations.
+Environment-only API calls still use the environment manager's preferred package manager
+(for example, pip for venv); project-scoped UI operations use the selected package manager.
+Tool operations use the selected project manager only when its ID matches the environment manager's
+preferred package manager ID; otherwise, they use the environment's preferred manager.
+Automatic routing preserves the existing uv selection rules: when the configured or preferred
+manager is pip, `python-envs.alwaysUseUv` and whether the environment was created by uv determine
+whether the router selects pip or uv. Each manager executes only its own commands. Selecting the uv
+manager explicitly always uses uv, independently of that setting. The uv package manager resolves
+uv from PATH, a current-session installation, or the owning trusted workspace's `.pyprojectx/main/uv`
+(`uv.exe` on Windows). If uv is unavailable, it reports an error rather than falling back to pip.
 
 #### Default Package Manager by Environment Manager
 
@@ -118,6 +133,8 @@ All commands can be accessed via the Command Palette (`ctrl/cmd + Shift + P`):
 | Deactivate Environment in Current Terminal | Deactivates environment in currently opened terminal.                                                                                  |
 | Run as Task                                | Runs Python module as a task.                                                                                                          |
 | Create New Project from Template           | Creates scaffolded project with virtual environments based on a template.                                                              |
+| Set Up Environments for Inline Script Files | Selects PEP 723 scripts and creates or reuses their declared environments when the inline-script preview is enabled.                   |
+| Clear Inline Script Environment Cache      | Deletes cached PEP 723 script environments and clears their known associations after confirmation.                                    |
 
 ## Settings Reference
 
@@ -128,6 +145,7 @@ All commands can be accessed via the Command Palette (`ctrl/cmd + Shift + P`):
 | defaultEnvManager            | `"ms-python.python:venv"` | The default environment manager used for creating and managing environments.                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | defaultPackageManager        | `"ms-python.python:pip"`  | The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized.                                                                                                                                                                                                                                                                                                                                        |
 | pythonProjects               | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`.                                                                                                                                                                                                           |
+| inlineScripts.enabled        | `false`                   | (preview) Enables creating and selecting environments from PEP 723 inline script metadata. The effective default may be enabled through gradual rollout; an explicit user or workspace value takes precedence. Reload the window after changing this setting.                                                                                                                                                                                                                                   |
 | terminal.showActivateButton  | `false`                   | (experimental) Show a button in the terminal to activate/deactivate the current environment for the terminal. This button is only shown if the active terminal is associated with a project that has an activatable environment.                                                                                                                                                                                                                                                                 |
 | terminal.autoActivationType  | `"command"`               | Specifies how the extension can activate an environment in a terminal. Accepted values: `command` (execute activation command in terminal), `shellStartup` (`terminal.integrated.shellIntegration.enabled` successfully enabled or we may modify shell startup scripts ), `off` (no auto-activation). Shell startup is only supported for: zsh, fish, pwsh, bash, cmd. **Takes precedence over** `python.terminal.activateEnvironment`. Restart terminals after changing this setting. To revert shell startup changes, run `Python Envs: Revert Shell Startup Script Changes`. |                                                                                        
 | alwaysUseUv                  | `true`                    | When `true`, [uv](https://github.com/astral-sh/uv) will be used to manage all virtual environments if available. When `false`, uv will only manage virtual environments explicitly created by uv. The extension uses `uv` on its PATH, or the executable it installed during the current session. If unavailable in a trusted workspace, it also checks that workspace's `.pyprojectx/main/uv` (`uv.exe` on Windows) for environments inside that workspace. External environments require uv on PATH or a current-session installation. This does not alter the integrated terminal's PATH. |

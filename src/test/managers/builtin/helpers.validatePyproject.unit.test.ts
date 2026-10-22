@@ -1,5 +1,8 @@
 import assert from 'assert';
+import * as path from 'path';
+import * as sinon from 'sinon';
 import { Uri } from 'vscode';
+import * as windowApis from '../../../common/window.apis';
 import {
     PyprojectToml,
     shouldProceedAfterPyprojectValidation,
@@ -9,66 +12,103 @@ import {
 
 suite('pipUtils - validatePyproject', () => {
     suite('shouldProceedAfterPyprojectValidation', () => {
+        const invalidRoot = path.join(process.cwd(), 'test-data', 'invalid-project');
+        const otherRoot = path.join(process.cwd(), 'test-data', 'other-project');
         const mockValidationError: ValidationError = {
             message: 'Invalid package name "my package" in pyproject.toml.',
-            fileUri: Uri.file('/test/path/pyproject.toml'),
+            fileUri: Uri.file(path.join(invalidRoot, 'pyproject.toml')),
         };
+        let showErrorMessage: sinon.SinonStub;
+        let showTextDocument: sinon.SinonStub;
 
-        test('should return true when no validation error exists', async () => {
-            // Arrange: no validation error
-            const validationError = undefined;
-            const install = ['-e', '/test/path'];
-
-            // Act
-            const result = await shouldProceedAfterPyprojectValidation(validationError, install);
-
-            // Assert
-            assert.strictEqual(result, true, 'Should proceed when no validation error');
+        setup(() => {
+            showErrorMessage = sinon.stub(windowApis, 'showErrorMessage');
+            showTextDocument = sinon.stub(windowApis, 'showTextDocument').resolves({} as never);
         });
 
-        test('should return true when install array is empty', async () => {
-            // Arrange: validation error exists but no packages selected
-            const install: string[] = [];
+        teardown(() => sinon.restore());
 
-            // Act
-            const result = await shouldProceedAfterPyprojectValidation(mockValidationError, install);
-
-            // Assert
-            assert.strictEqual(result, true, 'Should proceed when no packages selected');
+        test('returns true when no validation error exists', async () => {
+            assert.strictEqual(await shouldProceedAfterPyprojectValidation([]), true);
+            assert.ok(showErrorMessage.notCalled);
         });
 
-        test('should return true when only requirements.txt packages selected (no -e flag)', async () => {
-            // Arrange: validation error exists but only requirements.txt packages selected
-            const install = ['-r', '/test/requirements.txt'];
-
-            // Act
-            const result = await shouldProceedAfterPyprojectValidation(mockValidationError, install);
-
-            // Assert
-            assert.strictEqual(result, true, 'Should proceed when no TOML packages selected');
+        test('does not block when no pyproject.toml or a different file was selected', async () => {
+            assert.strictEqual(await shouldProceedAfterPyprojectValidation([mockValidationError]), true);
+            assert.strictEqual(
+                await shouldProceedAfterPyprojectValidation([mockValidationError], {
+                    selectedPyprojectTomls: [Uri.file(path.join(otherRoot, 'pyproject.toml'))],
+                }),
+                true,
+            );
+            assert.ok(showErrorMessage.notCalled);
         });
 
-        test('should return true when only PyPI packages selected (no flags at all)', async () => {
-            // Arrange: only PyPI package names, no flags
-            const install = ['numpy', 'pandas', 'requests'];
+        test('does not confuse a bracketed sibling directory with extras from the invalid project', async () => {
+            const bracketedSibling = Uri.file(`${invalidRoot}[docs]` + path.sep + 'pyproject.toml');
 
-            // Act
-            const result = await shouldProceedAfterPyprojectValidation(mockValidationError, install);
+            const result = await shouldProceedAfterPyprojectValidation([mockValidationError], {
+                selectedPyprojectTomls: [bracketedSibling],
+            });
 
-            // Assert
-            assert.strictEqual(result, true, 'Should proceed when only PyPI packages selected');
+            assert.strictEqual(result, true);
+            assert.ok(showErrorMessage.notCalled);
         });
 
-        test('should not trigger on -e flag at end of array without following argument', async () => {
-            // Arrange: -e flag is last item (malformed, but should not crash)
-            const install = ['numpy', '-e'];
-            // This is edge case - -e at end means no path follows, so index + 1 < arr.length is false
+        test('continues when Continue Anyway is selected for the matching pyproject', async () => {
+            showErrorMessage.callsFake(async (...args: unknown[]) => args[2] as never);
 
-            // Act
-            const result = await shouldProceedAfterPyprojectValidation(mockValidationError, install);
+            const result = await shouldProceedAfterPyprojectValidation([mockValidationError], {
+                selectedPyprojectTomls: [mockValidationError.fileUri],
+            });
 
-            // Assert
-            assert.strictEqual(result, true, 'Should not crash on malformed -e flag at end');
+            assert.strictEqual(result, true);
+            assert.ok(showErrorMessage.calledOnce);
+            assert.ok(showTextDocument.notCalled);
+        });
+
+        test('opens the matching pyproject and stops creation when Open is selected', async () => {
+            showErrorMessage.callsFake(async (...args: unknown[]) => args[1] as never);
+
+            const result = await shouldProceedAfterPyprojectValidation([mockValidationError], {
+                selectedPyprojectTomls: [mockValidationError.fileUri],
+            });
+
+            assert.strictEqual(result, false);
+            assert.ok(showTextDocument.calledOnceWithExactly(mockValidationError.fileUri));
+        });
+
+        test('stops creation without opening the file when Cancel is selected', async () => {
+            showErrorMessage.callsFake(async (...args: unknown[]) => args[3] as never);
+
+            const result = await shouldProceedAfterPyprojectValidation([mockValidationError], {
+                selectedPyprojectTomls: [mockValidationError.fileUri],
+            });
+
+            assert.strictEqual(result, false);
+            assert.ok(showTextDocument.notCalled);
+        });
+
+        test('stops creation when the validation dialog is dismissed', async () => {
+            showErrorMessage.resolves(undefined);
+
+            const result = await shouldProceedAfterPyprojectValidation([mockValidationError], {
+                selectedPyprojectTomls: [mockValidationError.fileUri],
+            });
+
+            assert.strictEqual(result, false);
+            assert.ok(showTextDocument.notCalled);
+        });
+
+        test('prompts for an invalid-file-only Quick Create selection', async () => {
+            showErrorMessage.callsFake(async (...args: unknown[]) => args[3] as never);
+
+            const result = await shouldProceedAfterPyprojectValidation([mockValidationError], {
+                allPyprojectTomlsSelected: true,
+            });
+
+            assert.strictEqual(result, false);
+            assert.ok(showErrorMessage.calledOnce);
         });
     });
 
@@ -193,6 +233,65 @@ suite('pipUtils - validatePyproject', () => {
         test('should accept when no project section exists', () => {
             const toml: PyprojectToml = {};
             verifyValidationError(toml, undefined);
+        });
+    });
+
+    suite('validatePyprojectToml - Dependency Values', () => {
+        test('accepts dependency arrays containing strings', () => {
+            verifyValidationError(
+                {
+                    project: {
+                        name: 'test',
+                        dependencies: ['requests>=2', 'httpx'],
+                        'optional-dependencies': { test: ['pytest'] },
+                    },
+                    'build-system': { requires: ['setuptools'] },
+                },
+                undefined,
+            );
+        });
+
+        test('rejects project dependencies that are not an array of strings', () => {
+            const toml = {
+                project: { name: 'test', dependencies: 'requests' },
+            } as PyprojectToml;
+            assert.match(validatePyprojectToml(toml) ?? '', /dependencies.*array of strings/i);
+        });
+
+        test('rejects non-string entries in project dependencies', () => {
+            const toml = {
+                project: { name: 'test', dependencies: ['requests', 42] },
+            } as PyprojectToml;
+            assert.match(validatePyprojectToml(toml) ?? '', /dependencies.*array of strings/i);
+        });
+
+        test('rejects optional dependencies that are not a table', () => {
+            const toml = {
+                project: { name: 'test', 'optional-dependencies': ['pytest'] },
+            } as PyprojectToml;
+            assert.match(validatePyprojectToml(toml) ?? '', /optional-dependencies.*table/i);
+        });
+
+        test('rejects invalid optional dependency group names', () => {
+            const toml = {
+                project: { name: 'test', 'optional-dependencies': { 'bad extra': ['pytest'] } },
+            } as PyprojectToml;
+            assert.match(validatePyprojectToml(toml) ?? '', /invalid optional dependency group name/i);
+        });
+
+        test('rejects optional dependency groups that are not arrays of strings', () => {
+            const toml = {
+                project: { name: 'test', 'optional-dependencies': { test: 'pytest' } },
+            } as PyprojectToml;
+            assert.match(validatePyprojectToml(toml) ?? '', /group.*array of strings/i);
+        });
+
+        test('rejects build-system requirements that are not arrays of strings', () => {
+            const toml = {
+                project: { name: 'test' },
+                'build-system': { requires: 'setuptools' },
+            } as PyprojectToml;
+            assert.match(validatePyprojectToml(toml) ?? '', /requires.*array of strings/i);
         });
     });
 
