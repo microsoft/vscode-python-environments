@@ -608,6 +608,7 @@ export async function quickCreateVenv(
         token: operation?.token,
         runHeadless: !!operation,
     });
+    throwIfCancelled(operation?.token);
     const installables = result.installables;
     const allPackages = [];
     allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
@@ -637,7 +638,10 @@ export async function quickCreateVenv(
 
     // Check if .venv already exists
     let venvPath = path.join(venvRoot.fsPath, '.venv');
-    if (await fsapi.pathExists(venvPath)) {
+    throwIfCancelled(operation?.token);
+    const venvExists = await fsapi.pathExists(venvPath);
+    throwIfCancelled(operation?.token);
+    if (venvExists) {
         if (operation) {
             throw new PythonToolError(
                 'ENVIRONMENT_EXISTS',
@@ -649,7 +653,11 @@ export async function quickCreateVenv(
         }
         // increment to create a unique name, e.g. .venv-1
         let i = 1;
-        while (await fsapi.pathExists(`${venvPath}-${i}`)) {
+        while (true) {
+            const candidateExists = await fsapi.pathExists(`${venvPath}-${i}`);
+            if (!candidateExists) {
+                break;
+            }
             i++;
         }
         venvPath = `${venvPath}-${i}`;

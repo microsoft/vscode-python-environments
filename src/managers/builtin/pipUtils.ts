@@ -3,6 +3,7 @@ import { valid as pep440Valid } from '@renovatebot/pep440';
 import * as fse from 'fs-extra';
 import * as path from 'path';
 import {
+    CancellationError,
     CancellationToken,
     l10n,
     LogOutputChannel,
@@ -18,7 +19,7 @@ import { traceInfo, traceWarn } from '../../common/logging';
 import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showQuickPickWithButtons, showTextDocument, withProgress } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
-import { throwIfCancelled } from '../../internal/pythonToolSupport';
+import { throwIfCancelled, waitForToolRead } from '../../internal/pythonToolSupport';
 import { ListCommand } from '../base/commands/index';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { normalizePackageName } from '../common/packageUtils';
@@ -146,11 +147,23 @@ function conciseError(error: unknown): string {
     return message.split(/\r?\n/, 1)[0].trim() || l10n.t('Unknown error');
 }
 
-async function tomlParse(fsPath: string): Promise<TomlParseResult> {
+async function yieldForCancellation(token?: CancellationToken): Promise<void> {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    throwIfCancelled(token);
+}
+
+async function tomlParse(fsPath: string, token?: CancellationToken): Promise<TomlParseResult> {
+    throwIfCancelled(token);
     try {
         const content = await fse.readFile(fsPath, 'utf-8');
-        return { toml: tomljs.parse(content) };
+        await yieldForCancellation(token);
+        const toml = tomljs.parse(content);
+        await yieldForCancellation(token);
+        return { toml };
     } catch (error) {
+        if (error instanceof CancellationError) {
+            throw error;
+        }
         traceWarn(`Failed to read or parse pyproject.toml at ${fsPath}:`, error);
         return {
             error: l10n.t('Could not read or parse pyproject.toml: {0}', conciseError(error)),
@@ -414,6 +427,7 @@ export async function getProjectInstallable(
     projects?: PythonProject[],
     options?: ProjectInstallableOptions,
 ): Promise<ProjectInstallableResult> {
+    throwIfCancelled(options?.token);
     if (!projects) {
         return { installables: [], validationErrors: [] };
     }
@@ -422,63 +436,169 @@ export async function getProjectInstallable(
     const validationErrors: ValidationError[] = [];
 
     const search = async (token?: CancellationToken) => {
-        throwIfCancelled(options?.token);
-        const results: Uri[] = (
-            await Promise.all([
-                findFiles('**/*requirements*.txt', exclude, undefined, token),
-                findFiles('*requirements*.txt', exclude, undefined, token),
-                findFiles('**/requirements/*.txt', exclude, undefined, token),
-                findFiles('**/pyproject.toml', exclude, undefined, token),
-            ])
-        ).flat();
+        const cancellationToken = token ?? options?.token;
+        const throwIfSearchCancelled = () => {
+            throwIfCancelled(options?.token);
+            if (token !== options?.token) {
+                throwIfCancelled(token);
+            }
+        };
+        const waitForSearch = <T>(promise: PromiseLike<T>): Promise<T> =>
+            cancellationToken ? waitForToolRead(promise, cancellationToken, null) : Promise.resolve(promise);
+        const yieldForSearchCancellation = async () => {
+            await yieldForCancellation(cancellationToken);
+            throwIfSearchCancelled();
+        };
+        const cancellationBatchSize = 64;
+        const shouldYieldForSearchCancellation = (index: number) =>
+            index > 0 && index % cancellationBatchSize === 0;
 
-        const uniqueResults = Array.from(new Map(results.map((uri) => [uri.fsPath, uri])).values());
-        const fsPaths = projects.map((project) => project.uri.fsPath);
-        const depthFromProject = (uri: Uri): number => {
+        throwIfSearchCancelled();
+        const resultSets = await waitForSearch(
+            Promise.all([
+                findFiles('**/*requirements*.txt', exclude, undefined, cancellationToken),
+                findFiles('*requirements*.txt', exclude, undefined, cancellationToken),
+                findFiles('**/requirements/*.txt', exclude, undefined, cancellationToken),
+                findFiles('**/pyproject.toml', exclude, undefined, cancellationToken),
+            ]),
+        );
+        await yieldForSearchCancellation();
+
+        const uniqueResults: Uri[] = [];
+        const seenResults = new Set<string>();
+        let processedResults = 0;
+        for (const resultSet of resultSets) {
+            for (const uri of resultSet) {
+                if (shouldYieldForSearchCancellation(processedResults++)) {
+                    await yieldForSearchCancellation();
+                } else {
+                    throwIfSearchCancelled();
+                }
+                if (!seenResults.has(uri.fsPath)) {
+                    seenResults.add(uri.fsPath);
+                    uniqueResults.push(uri);
+                }
+            }
+        }
+        await yieldForSearchCancellation();
+
+        const fsPaths = new Set<string>();
+        for (const [index, project] of projects.entries()) {
+            if (shouldYieldForSearchCancellation(index)) {
+                await yieldForSearchCancellation();
+            } else {
+                throwIfSearchCancelled();
+            }
+            fsPaths.add(project.uri.fsPath);
+        }
+        const filteredResults: Uri[] = [];
+        const sortKeys = new Map<string, { depth: number; normalizedPath: string; order: number }>();
+        for (const [index, uri] of uniqueResults.entries()) {
+            if (shouldYieldForSearchCancellation(index)) {
+                await yieldForSearchCancellation();
+            } else {
+                throwIfSearchCancelled();
+            }
+            if (
+                options?.runHeadless &&
+                options.preferredRoot &&
+                !isSameOrParentPath(options.preferredRoot.fsPath, uri.fsPath)
+            ) {
+                continue;
+            }
             const projectRoot = api.getPythonProject(uri)?.uri.fsPath;
-            if (!projectRoot) {
-                return Number.MAX_SAFE_INTEGER;
+            if (!projectRoot || !fsPaths.has(projectRoot)) {
+                continue;
             }
             const relative = path.relative(projectRoot, uri.fsPath);
-            if (!relative) {
-                return 0;
-            }
-            return relative.split(path.sep).filter((segment) => segment.length > 0).length;
-        };
-        const filtered = uniqueResults
-            .filter((uri) => {
-                if (
-                    options?.runHeadless &&
-                    options.preferredRoot &&
-                    !isSameOrParentPath(options.preferredRoot.fsPath, uri.fsPath)
-                ) {
-                    return false;
-                }
-                const projectRoot = api.getPythonProject(uri)?.uri.fsPath;
-                return projectRoot && fsPaths.includes(projectRoot);
-            })
-            .sort((a, b) => {
-                const depthA = depthFromProject(a);
-                const depthB = depthFromProject(b);
-                if (depthA !== depthB) {
-                    return depthA - depthB;
-                }
-                const pathA = normalizePath(a.fsPath);
-                const pathB = normalizePath(b.fsPath);
-                return pathA < pathB ? -1 : pathA > pathB ? 1 : 0;
+            const depth = relative
+                ? relative.split(path.sep).filter((segment) => segment.length > 0).length
+                : 0;
+            sortKeys.set(uri.fsPath, {
+                depth,
+                normalizedPath: normalizePath(uri.fsPath),
+                order: filteredResults.length,
             });
+            filteredResults.push(uri);
+        }
+        await yieldForSearchCancellation();
+
+        const compareResults = (a: Uri, b: Uri): number => {
+            const keyA = sortKeys.get(a.fsPath)!;
+            const keyB = sortKeys.get(b.fsPath)!;
+            if (keyA.depth !== keyB.depth) {
+                return keyA.depth - keyB.depth;
+            }
+            if (keyA.normalizedPath !== keyB.normalizedPath) {
+                return keyA.normalizedPath < keyB.normalizedPath ? -1 : 1;
+            }
+            return keyA.order - keyB.order;
+        };
+        let sortedChunks: Uri[][] = [];
+        for (let start = 0; start < filteredResults.length; start += cancellationBatchSize) {
+            sortedChunks.push(filteredResults.slice(start, start + cancellationBatchSize).sort(compareResults));
+            await yieldForSearchCancellation();
+        }
+        while (sortedChunks.length > 1) {
+            const mergedChunks: Uri[][] = [];
+            for (let index = 0; index < sortedChunks.length; index += 2) {
+                const left = sortedChunks[index];
+                const right = sortedChunks[index + 1];
+                if (!right) {
+                    mergedChunks.push(left);
+                    continue;
+                }
+                const merged: Uri[] = [];
+                let leftIndex = 0;
+                let rightIndex = 0;
+                while (leftIndex < left.length || rightIndex < right.length) {
+                    if (shouldYieldForSearchCancellation(merged.length)) {
+                        await yieldForSearchCancellation();
+                    } else {
+                        throwIfSearchCancelled();
+                    }
+                    if (
+                        rightIndex >= right.length ||
+                        (leftIndex < left.length && compareResults(left[leftIndex], right[rightIndex]) <= 0)
+                    ) {
+                        merged.push(left[leftIndex++]);
+                    } else {
+                        merged.push(right[rightIndex++]);
+                    }
+                }
+                mergedChunks.push(merged);
+                await yieldForSearchCancellation();
+            }
+            sortedChunks = mergedChunks;
+        }
+        const filtered = sortedChunks[0] ?? [];
+        await yieldForSearchCancellation();
 
         const parsedTomls = new Map<string, TomlParseResult>();
-        await Promise.all(
-            filtered.map(async (uri) => {
-                if (uri.fsPath.endsWith('.toml')) {
-                    parsedTomls.set(uri.fsPath, await tomlParse(uri.fsPath));
-                }
-            }),
-        );
+        for (let start = 0; start < filtered.length; start += cancellationBatchSize) {
+            const tomlUris = filtered
+                .slice(start, start + cancellationBatchSize)
+                .filter((uri) => uri.fsPath.endsWith('.toml'));
+            await waitForSearch(
+                Promise.all(
+                    tomlUris.map(async (uri) => {
+                        throwIfSearchCancelled();
+                        const parsed = await tomlParse(uri.fsPath, cancellationToken);
+                        throwIfSearchCancelled();
+                        parsedTomls.set(uri.fsPath, parsed);
+                    }),
+                ),
+            );
+            await yieldForSearchCancellation();
+        }
 
         const tomlValidationErrors = new Map<string, string>();
-        for (const uri of filtered) {
+        for (const [index, uri] of filtered.entries()) {
+            if (shouldYieldForSearchCancellation(index)) {
+                await yieldForSearchCancellation();
+            } else {
+                throwIfSearchCancelled();
+            }
             const parsed = parsedTomls.get(uri.fsPath);
             if (!parsed || 'error' in parsed) {
                 continue;
@@ -491,6 +611,7 @@ export async function getProjectInstallable(
                 tomlValidationErrors.set(uri.fsPath, error);
             }
         }
+        await yieldForSearchCancellation();
 
         const shouldSkipDisjointToml = (uri: Uri): boolean =>
             !!options?.deduplicateProjectPackages &&
@@ -500,7 +621,12 @@ export async function getProjectInstallable(
         const ambiguousProjectNames = new Set<string>();
         if (options?.deduplicateProjectPackages) {
             const tomlsByProjectName = new Map<string, Uri[]>();
-            for (const uri of filtered) {
+            for (const [index, uri] of filtered.entries()) {
+                if (shouldYieldForSearchCancellation(index)) {
+                    await yieldForSearchCancellation();
+                } else {
+                    throwIfSearchCancelled();
+                }
                 if (!uri.fsPath.endsWith('.toml')) {
                     continue;
                 }
@@ -519,31 +645,48 @@ export async function getProjectInstallable(
                 candidates.push(uri);
                 tomlsByProjectName.set(normalizedName, candidates);
             }
+            await yieldForSearchCancellation();
 
-            tomlsByProjectName.forEach((candidates, projectName) => {
+            let processedProjectNames = 0;
+            for (const [projectName, candidates] of tomlsByProjectName) {
+                if (shouldYieldForSearchCancellation(processedProjectNames++)) {
+                    await yieldForSearchCancellation();
+                } else {
+                    throwIfSearchCancelled();
+                }
                 if (candidates.length === 1) {
                     selectedTomls.set(projectName, candidates[0]);
-                    return;
+                    continue;
                 }
 
                 const preferredRoot = options.preferredRoot?.fsPath;
-                const preferredCandidates = preferredRoot
-                    ? candidates
-                          .filter((candidate) => {
-                              const projectDir = path.dirname(candidate.fsPath);
-                              const relative = path.relative(projectDir, preferredRoot);
-                              return (
-                                  relative === '' ||
-                                  (relative !== '..' &&
-                                      !relative.startsWith(`..${path.sep}`) &&
-                                      !path.isAbsolute(relative))
-                              );
-                          })
-                          .sort((a, b) => path.dirname(b.fsPath).length - path.dirname(a.fsPath).length)
-                    : [];
+                let preferredCandidate: Uri | undefined;
+                if (preferredRoot) {
+                    for (const [index, candidate] of candidates.entries()) {
+                        if (shouldYieldForSearchCancellation(index)) {
+                            await yieldForSearchCancellation();
+                        } else {
+                            throwIfSearchCancelled();
+                        }
+                        const projectDir = path.dirname(candidate.fsPath);
+                        const relative = path.relative(projectDir, preferredRoot);
+                        const containsPreferredRoot =
+                            relative === '' ||
+                            (relative !== '..' &&
+                                !relative.startsWith(`..${path.sep}`) &&
+                                !path.isAbsolute(relative));
+                        if (
+                            containsPreferredRoot &&
+                            (!preferredCandidate ||
+                                projectDir.length > path.dirname(preferredCandidate.fsPath).length)
+                        ) {
+                            preferredCandidate = candidate;
+                        }
+                    }
+                }
 
-                if (preferredCandidates.length > 0) {
-                    selectedTomls.set(projectName, preferredCandidates[0]);
+                if (preferredCandidate) {
+                    selectedTomls.set(projectName, preferredCandidate);
                 } else {
                     ambiguousProjectNames.add(projectName);
                     traceInfo(
@@ -551,10 +694,16 @@ export async function getProjectInstallable(
                             'candidate contains the environment creation root.',
                     );
                 }
-            });
+            }
+            await yieldForSearchCancellation();
         }
 
-        for (const uri of filtered) {
+        for (const [index, uri] of filtered.entries()) {
+            if (shouldYieldForSearchCancellation(index)) {
+                await yieldForSearchCancellation();
+            } else {
+                throwIfSearchCancelled();
+            }
             if (uri.fsPath.endsWith('.toml')) {
                 const parsed = parsedTomls.get(uri.fsPath);
                 if (!parsed) {
@@ -610,14 +759,18 @@ export async function getProjectInstallable(
                 });
             }
         }
-        throwIfCancelled(options?.token);
+        await yieldForSearchCancellation();
     };
 
     if (options?.runHeadless) {
         await search(options.token);
     } else {
         await withProgress(
-            { location: ProgressLocation.Notification, title: VenvManagerStrings.searchingDependencies },
+            {
+                location: ProgressLocation.Notification,
+                title: VenvManagerStrings.searchingDependencies,
+                cancellable: true,
+            },
             (_progress, token) => search(token),
         );
     }

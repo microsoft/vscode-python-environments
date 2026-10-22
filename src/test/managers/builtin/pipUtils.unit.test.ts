@@ -33,7 +33,10 @@ suite('Pip Utils - getProjectInstallable', () => {
             ) => {
                 return await callback(
                     {} as Progress<{ message?: string; increment?: number }>,
-                    { isCancellationRequested: false } as CancellationToken,
+                    {
+                        isCancellationRequested: false,
+                        onCancellationRequested: () => ({ dispose: () => {} }),
+                    } as CancellationToken,
                 );
             },
         );
@@ -55,26 +58,256 @@ suite('Pip Utils - getProjectInstallable', () => {
             sinon.restore();
         });
 
-        test('ordinary search retains its cancellation behavior while tool search rejects cancellation', async () => {
+        test('marks dependency progress cancellable and rejects a pre-cancelled interactive search', async () => {
             const source = new CancellationTokenSource();
             source.cancel();
-            findFilesStub.resolves([]);
-            withProgressStub.callsFake(async (_options, task) => task({ report: () => {} }, source.token));
+            withProgressStub.callsFake(async (options: ProgressOptions, task) => {
+                assert.strictEqual(options.cancellable, true);
+                return task({ report: () => {} }, source.token);
+            });
             const projects = [{ name: 'workspace', uri: Uri.file(process.cwd()) }];
             try {
-                const ordinary = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
-                assert.deepStrictEqual(ordinary.installables, []);
                 await assert.rejects(
-                    getProjectInstallable(mockApi as PythonEnvironmentApi, projects, {
-                        runHeadless: true,
-                        token: source.token,
-                    }),
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, projects),
                     CancellationError,
                 );
-                assert.ok(withProgressStub.calledOnce);
+                assert.ok(findFilesStub.notCalled);
             } finally {
                 source.dispose();
             }
+        });
+
+        test('propagates the progress token and promptly rejects cancellation during file search', async () => {
+            const source = new CancellationTokenSource();
+            let startedCount = 0;
+            let markSearchesStarted!: () => void;
+            const searchesStarted = new Promise<void>((resolve) => {
+                markSearchesStarted = resolve;
+            });
+            findFilesStub.callsFake(
+                (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
+                    assert.strictEqual(token, source.token);
+                    startedCount += 1;
+                    if (startedCount === 4) {
+                        markSearchesStarted();
+                    }
+                    if (startedCount === 1) {
+                        return new Promise<Uri[]>(() => {});
+                    }
+                    return new Promise<Uri[]>((resolve) => {
+                        token.onCancellationRequested(() => resolve([]));
+                    });
+                },
+            );
+            withProgressStub.callsFake(async (options: ProgressOptions, task) => {
+                assert.strictEqual(options.cancellable, true);
+                const pending = task({ report: () => {} }, source.token);
+                await searchesStarted;
+                source.cancel();
+                return pending;
+            });
+
+            let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+            try {
+                await Promise.race([
+                    assert.rejects(
+                        getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                            { name: 'workspace', uri: Uri.file(process.cwd()) },
+                        ]),
+                        CancellationError,
+                    ),
+                    new Promise<void>((_resolve, reject) => {
+                        timeoutHandle = setTimeout(
+                            () => reject(new Error('Dependency search did not cancel promptly')),
+                            1_000,
+                        );
+                    }),
+                ]);
+                assert.strictEqual(findFilesStub.callCount, 4);
+            } finally {
+                clearTimeout(timeoutHandle);
+                source.dispose();
+            }
+        });
+
+        test('rejects cancellation after file searches resolve without processing partial results', async () => {
+            const source = new CancellationTokenSource();
+            const resolutions: Array<(uris: Uri[]) => void> = [];
+            const partialResult = Uri.file(path.join(process.cwd(), 'requirements.txt'));
+            const getPythonProject = sinon.stub().throws(new Error('Unexpected post-search processing'));
+            mockApi.getPythonProject = getPythonProject;
+            findFilesStub.callsFake(
+                (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
+                    assert.strictEqual(token, source.token);
+                    return new Promise<Uri[]>((resolve) => resolutions.push(resolve));
+                },
+            );
+            withProgressStub.callsFake(async (_options: ProgressOptions, task) => {
+                const pending = task({ report: () => {} }, source.token);
+                assert.strictEqual(resolutions.length, 4);
+                resolutions.forEach((resolve, index) => resolve(index === 0 ? [partialResult] : []));
+                source.cancel();
+                return pending;
+            });
+
+            try {
+                await assert.rejects(
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                        { name: 'workspace', uri: Uri.file(process.cwd()) },
+                    ]),
+                    CancellationError,
+                );
+                assert.ok(getPythonProject.notCalled);
+            } finally {
+                source.dispose();
+            }
+        });
+
+        test('observes a queued Cancel click before post-search processing succeeds', async () => {
+            const source = new CancellationTokenSource();
+            const partialResult = Uri.file(path.join(process.cwd(), 'requirements.txt'));
+            const getPythonProject = sinon.stub().throws(new Error('Unexpected post-search processing'));
+            mockApi.getPythonProject = getPythonProject;
+            findFilesStub.callsFake((pattern: string) =>
+                Promise.resolve(pattern === '**/*requirements*.txt' ? [partialResult] : []),
+            );
+            withProgressStub.callsFake(async (_options: ProgressOptions, task) => {
+                const pending = task({ report: () => {} }, source.token);
+                setImmediate(() => source.cancel());
+                return pending;
+            });
+
+            try {
+                await assert.rejects(
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                        { name: 'workspace', uri: Uri.file(process.cwd()) },
+                    ]),
+                    CancellationError,
+                );
+                assert.ok(getPythonProject.notCalled);
+            } finally {
+                source.dispose();
+            }
+        });
+
+        test('rejects cancellation during a TOML read before strict parsing or validation', async () => {
+            const temp = await fse.mkdtemp(path.join(os.tmpdir(), 'piputils-cancel-'));
+            const project = { name: 'workspace', uri: Uri.file(temp) };
+            const pyproject = Uri.file(path.join(temp, 'pyproject.toml'));
+            await fse.outputFile(pyproject.fsPath, '[invalid TOML');
+            mockApi.getPythonProject = () => project;
+            findFilesStub.callsFake((pattern: string) =>
+                Promise.resolve(pattern === '**/pyproject.toml' ? [pyproject] : []),
+            );
+
+            let cancelled = false;
+            let subscriptionCount = 0;
+            let markPostReadCheck!: () => void;
+            const postReadCheck = new Promise<void>((resolve) => {
+                markPostReadCheck = resolve;
+            });
+            const token = {
+                get isCancellationRequested() {
+                    if (cancelled) {
+                        markPostReadCheck();
+                    }
+                    return cancelled;
+                },
+                onCancellationRequested: (listener: () => unknown) => {
+                    subscriptionCount += 1;
+                    if (subscriptionCount === 2) {
+                        queueMicrotask(() => {
+                            cancelled = true;
+                            listener();
+                        });
+                    }
+                    return { dispose: () => {} };
+                },
+            } as unknown as CancellationToken;
+
+            try {
+                await assert.rejects(
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, [project], {
+                        runHeadless: true,
+                        token,
+                    }),
+                    CancellationError,
+                );
+                await postReadCheck;
+                assert.strictEqual(subscriptionCount, 2);
+                assert.ok(withProgressStub.notCalled);
+            } finally {
+                await fse.remove(temp);
+            }
+        });
+
+        test('headless search preserves the caller token and CancellationError semantics', async () => {
+            const source = new CancellationTokenSource();
+            source.cancel();
+            try {
+                await assert.rejects(
+                    getProjectInstallable(
+                        mockApi as PythonEnvironmentApi,
+                        [{ name: 'workspace', uri: Uri.file(process.cwd()) }],
+                        { runHeadless: true, token: source.token },
+                    ),
+                    CancellationError,
+                );
+                assert.ok(withProgressStub.notCalled);
+                assert.ok(findFilesStub.notCalled);
+            } finally {
+                source.dispose();
+            }
+        });
+
+        test('headless search propagates in-flight cancellation and passes the caller token unchanged', async () => {
+            const source = new CancellationTokenSource();
+            let startedCount = 0;
+            let markSearchesStarted!: () => void;
+            const searchesStarted = new Promise<void>((resolve) => {
+                markSearchesStarted = resolve;
+            });
+            findFilesStub.callsFake(
+                (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
+                    assert.strictEqual(token, source.token);
+                    startedCount += 1;
+                    if (startedCount === 4) {
+                        markSearchesStarted();
+                    }
+                    return new Promise<Uri[]>((resolve) => {
+                        token.onCancellationRequested(() => resolve([]));
+                    });
+                },
+            );
+
+            try {
+                const pending = getProjectInstallable(
+                    mockApi as PythonEnvironmentApi,
+                    [{ name: 'workspace', uri: Uri.file(process.cwd()) }],
+                    { runHeadless: true, token: source.token },
+                );
+                await searchesStarted;
+                source.cancel();
+                await assert.rejects(pending, CancellationError);
+                assert.strictEqual(findFilesStub.callCount, 4);
+                assert.ok(withProgressStub.notCalled);
+            } finally {
+                source.dispose();
+            }
+        });
+
+        test('returns an empty result after a successful dependency search with no matches', async () => {
+            findFilesStub.resolves([]);
+            const workspacePath = Uri.file('/test/path/root').fsPath;
+
+            const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                { name: 'workspace', uri: Uri.file(workspacePath) },
+            ]);
+
+            assert.deepStrictEqual(result.installables, []);
+            assert.deepStrictEqual(result.validationErrors, []);
+            assert.strictEqual(findFilesStub.callCount, 4);
+            assert.ok(withProgressStub.calledOnce);
         });
 
         test('opens the package picker when listing installed packages fails', async () => {
@@ -488,7 +721,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             ) => {
                 return await callback(
                     {} as Progress<{ message?: string; increment?: number }>,
-                    { isCancellationRequested: false } as CancellationToken,
+                    {
+                        isCancellationRequested: false,
+                        onCancellationRequested: () => ({ dispose: () => {} }),
+                    } as CancellationToken,
                 );
             },
         );
