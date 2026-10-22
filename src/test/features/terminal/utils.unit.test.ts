@@ -1041,4 +1041,19 @@ suite('Terminal Utils - waitForShellIntegration', () => {
         const result = await racePromise;
         assert.strictEqual(result, true, 'should not regress when detection throws');
     });
+
+    test('detects shell integration that becomes available while listeners are registered', async () => {
+        const shellIntegration = {};
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('bash');
+        onDidChangeTerminalShellIntegrationStub.callsFake(() => {
+            (terminal as { shellIntegration?: unknown }).shellIntegration = shellIntegration;
+            return { dispose: () => undefined };
+        });
+
+        const result = await waitForShellIntegration(terminal, 60_000);
+
+        assert.strictEqual(result, true);
+        assert.strictEqual(terminal.shellIntegration, shellIntegration);
+    });
 });
