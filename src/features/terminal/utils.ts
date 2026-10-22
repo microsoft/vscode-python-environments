@@ -57,7 +57,7 @@ export function getShellIntegrationTimeout(): number {
  *    b. Shell integration becoming available (`window.onDidChangeTerminalShellIntegration`).
  *    c. Detection of common prompt patterns in terminal output.
  */
-export async function waitForShellIntegration(terminal?: Terminal): Promise<boolean> {
+export async function waitForShellIntegration(terminal?: Terminal, timeoutMs?: number): Promise<boolean> {
     if (!terminal) {
         return false;
     }
@@ -76,14 +76,13 @@ export async function waitForShellIntegration(terminal?: Terminal): Promise<bool
         // Detection failed — preserve original behavior by falling through to the race.
     }
 
-    const timeoutMs = getShellIntegrationTimeout();
-
+    const effectiveTimeoutMs = timeoutMs ?? getShellIntegrationTimeout();
     const disposables: Disposable[] = [];
 
     try {
-        const result = await Promise.race([
+        const resultPromise = Promise.race([
             // Condition 1: Shell integration timeout setting
-            timeout(timeoutMs).then(() => false),
+            timeout(effectiveTimeoutMs).then(() => false),
 
             // Condition 2: Shell integration becomes available
             new Promise<boolean>((resolve) => {
@@ -116,7 +115,8 @@ export async function waitForShellIntegration(terminal?: Terminal): Promise<bool
             }),
         ]);
 
-        return result;
+        // Close the gap between the initial check and listener registration.
+        return terminal.shellIntegration ? true : await resultPromise;
     } finally {
         disposables.forEach((d) => d.dispose());
     }
