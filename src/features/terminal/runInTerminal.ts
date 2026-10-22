@@ -9,6 +9,17 @@ import { normalizeShellPath } from './shells/common/shellUtils';
 import { traceLog } from '../../common/logging';
 import { waitForShellIntegration } from './utils';
 
+function quoteZshArgument(arg: string): string {
+    if (arg && /^[\w@%+=:,./-]+$/.test(arg)) {
+        return arg;
+    }
+    return `'${arg.replace(/'/g, "'\\''")}'`;
+}
+
+function getZshCommand(executable: string, args: string[]): string {
+    return [executable, ...args].map(quoteZshArgument).join(' ');
+}
+
 export async function runInTerminal(
     environment: PythonEnvironment,
     terminal: Terminal,
@@ -30,6 +41,7 @@ export async function runInTerminal(
     if (!terminal.shellIntegration) {
         await waitForShellIntegration(terminal);
     }
+    const zshCommand = shellType === ShellConstants.ZSH ? getZshCommand(executable, allArgs) : undefined;
     if (terminal.shellIntegration) {
         let execution: TerminalShellExecution | undefined;
         const deferred = createDeferred<void>();
@@ -40,22 +52,27 @@ export async function runInTerminal(
             }
         });
 
-        const shouldSurroundWithQuotes =
-            executable.includes(' ') && !executable.startsWith('"') && !executable.endsWith('"');
-        // Handle case where executable contains white-spaces.
-        if (shouldSurroundWithQuotes) {
-            executable = `"${executable}"`;
-        }
+        if (zshCommand) {
+            execution = terminal.shellIntegration.executeCommand(zshCommand);
+            traceLog(`runInTerminal: executeCommand ${zshCommand}`);
+        } else {
+            const shouldSurroundWithQuotes =
+                executable.includes(' ') && !executable.startsWith('"') && !executable.endsWith('"');
+            // Handle case where executable contains white-spaces.
+            if (shouldSurroundWithQuotes) {
+                executable = `"${executable}"`;
+            }
 
-        if (shellType === ShellConstants.PWSH && !executable.startsWith('&')) {
-            // PowerShell requires commands to be prefixed with '&' to run them.
-            executable = `& ${executable}`;
+            if (shellType === ShellConstants.PWSH && !executable.startsWith('&')) {
+                // PowerShell requires commands to be prefixed with '&' to run them.
+                executable = `& ${executable}`;
+            }
+            execution = terminal.shellIntegration.executeCommand(executable, allArgs);
+            traceLog(`runInTerminal: executeCommand ${executable} ${allArgs.join(' ')}`);
         }
-        execution = terminal.shellIntegration.executeCommand(executable, allArgs);
-        traceLog(`runInTerminal: executeCommand ${executable} ${allArgs.join(' ')}`);
         await deferred.promise;
     } else {
-        let text = quoteArgs([executable, ...allArgs]).join(' ');
+        let text = zshCommand ?? quoteArgs([executable, ...allArgs]).join(' ');
         if (shellType === ShellConstants.PWSH && !text.startsWith('&')) {
             // PowerShell requires commands to be prefixed with '&' to run them.
             text = `& ${text}`;

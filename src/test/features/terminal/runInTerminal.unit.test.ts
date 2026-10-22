@@ -73,4 +73,60 @@ suite('runInTerminal', () => {
         sinon.assert.calledOnceWithExactly(waitForShellIntegrationStub, terminal);
         sinon.assert.calledOnceWithExactly(sendText, 'python main.py\n');
     });
+
+    test('preserves special characters in zsh script paths with shell integration', async () => {
+        sinon.stub(shellDetector, 'identifyTerminalShell').returns('zsh');
+        const execution = {} as TerminalShellExecution;
+        const executeCommand = sinon.stub().returns(execution);
+        const terminal = {
+            name: 'Python',
+            shellIntegration: { executeCommand },
+            sendText: sinon.stub(),
+        } as unknown as Terminal;
+
+        let endListener: ((event: TerminalShellExecutionEndEvent) => void) | undefined;
+        sinon.stub(windowApis, 'onDidEndTerminalShellExecution').callsFake((listener) => {
+            endListener = listener;
+            return new Disposable(() => undefined);
+        });
+
+        const environment = createMockPythonEnvironment({ envPath: '/env/bin/python' });
+        const cases = [
+            ['/workspace/cost$AUDIT_UNSET.py', "python '/workspace/cost$AUDIT_UNSET.py'"],
+            ["/workspace/it's_python.py", "python '/workspace/it'\\''s_python.py'"],
+        ];
+
+        for (const [script, command] of cases) {
+            const runPromise = runInTerminal(environment, terminal, { cwd: '/workspace', args: [script] });
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            sinon.assert.calledWithExactly(executeCommand, command);
+            assert.ok(endListener, 'shell execution end listener should be registered');
+            endListener!({ terminal, execution } as unknown as TerminalShellExecutionEndEvent);
+            await runPromise;
+        }
+    });
+
+    test('preserves special characters in zsh script paths without shell integration', async () => {
+        sinon.stub(shellDetector, 'identifyTerminalShell').returns('zsh');
+        sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
+        const sendText = sinon.stub();
+        const terminal = {
+            name: 'Python',
+            shellIntegration: undefined,
+            sendText,
+        } as unknown as Terminal;
+        const environment = createMockPythonEnvironment({ envPath: '/env/bin/python' });
+
+        await runInTerminal(environment, terminal, {
+            cwd: '/workspace',
+            args: ['/workspace/cost$AUDIT_UNSET.py'],
+        });
+        await runInTerminal(environment, terminal, {
+            cwd: '/workspace',
+            args: ["/workspace/it's_python.py"],
+        });
+
+        sinon.assert.calledWithExactly(sendText, "python '/workspace/cost$AUDIT_UNSET.py'\n");
+        sinon.assert.calledWithExactly(sendText, "python '/workspace/it'\\''s_python.py'\n");
+    });
 });
