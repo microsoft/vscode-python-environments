@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import {
+    CancellationError,
     CancellationToken,
     EventEmitter,
     l10n,
@@ -411,6 +412,11 @@ export class VenvManager implements EnvironmentManager {
                 showErrorMessage(l10n.t('Failed to create virtual environment: {0}', result.envCreationErr));
             }
             return result?.environment ?? undefined;
+        } catch (error) {
+            if (error instanceof CancellationError) {
+                return undefined;
+            }
+            throw error;
         } finally {
             this.skipWatcherRefresh = false;
         }

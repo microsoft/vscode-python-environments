@@ -6,7 +6,7 @@ import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { LogOutputChannel, Uri } from 'vscode';
+import { CancellationError, LogOutputChannel, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironmentApi, PythonProject } from '../../../api';
 import { VenvManagerStrings } from '../../../common/localize';
 import * as telemetry from '../../../common/telemetry/sender';
@@ -76,6 +76,91 @@ suite('step-based venv creation pyproject preflight', () => {
         assert.ok(preflight.calledOnceWithExactly([validationError], { allPyprojectTomlsSelected: true }));
         assert.ok(createWithProgress.notCalled);
         assert.strictEqual(await fs.pathExists(path.join(tempRoot, '.venv')), false);
+    });
+
+    test('Quick Create cancellation stops before validation prompts or environment creation', async () => {
+        sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items) =>
+            items.find((item) => item.label === VenvManagerStrings.quickCreate),
+        );
+        sinon.stub(pipUtils, 'getProjectInstallable').rejects(new CancellationError());
+        const preflight = sinon
+            .stub(pipUtils, 'shouldProceedAfterPyprojectValidation')
+            .throws(new Error('Unexpected validation prompt'));
+
+        const result = await createStepBasedVenvFlow(
+            {} as NativePythonFinder,
+            api,
+            log,
+            manager,
+            [baseEnvironment],
+            Uri.file(tempRoot),
+            { showQuickAndCustomOptions: true },
+        );
+
+        assert.strictEqual(result, undefined);
+        assert.ok(preflight.notCalled);
+        assert.ok(createWithProgress.notCalled);
+        assert.strictEqual(await fs.pathExists(path.join(tempRoot, '.venv')), false);
+    });
+
+    test('configurable creation cancellation stops before further prompts or environment creation', async () => {
+        const quickPick = sinon.stub(windowApis, 'showQuickPickWithButtons');
+        quickPick.onFirstCall().callsFake(async (items) =>
+            items.find((item) => item.label === VenvManagerStrings.customize),
+        );
+        quickPick.onSecondCall().callsFake(async (items) => items[0]);
+        sinon.stub(windowApis, 'showInputBoxWithButtons').resolves('.custom-venv');
+        sinon.stub(pipUtils, 'getWorkspacePackagesToInstall').rejects(new CancellationError());
+        sinon.stub(pipUtils, 'getProjectInstallable').throws(new Error('Quick Create preflight was unexpected'));
+        sinon
+            .stub(pipUtils, 'shouldProceedAfterPyprojectValidation')
+            .throws(new Error('Unexpected validation prompt'));
+
+        const result = await createStepBasedVenvFlow(
+            {} as NativePythonFinder,
+            api,
+            log,
+            manager,
+            [baseEnvironment],
+            Uri.file(tempRoot),
+            { showQuickAndCustomOptions: true },
+        );
+
+        assert.strictEqual(result, undefined);
+        assert.strictEqual(quickPick.callCount, 2);
+        assert.ok(createWithProgress.notCalled);
+        assert.strictEqual(await fs.pathExists(path.join(tempRoot, '.custom-venv')), false);
+    });
+
+    test('Quick Create still creates an environment after a successful empty search', async () => {
+        sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items) =>
+            items.find((item) => item.label === VenvManagerStrings.quickCreate),
+        );
+        sinon.stub(pipUtils, 'getProjectInstallable').resolves({ installables: [], validationErrors: [] });
+        const preflight = sinon.stub(pipUtils, 'shouldProceedAfterPyprojectValidation').resolves(true);
+        const created = createMockPythonEnvironment({
+            name: '.venv',
+            envPath: path.join(tempRoot, '.venv', 'python.exe'),
+            version: '3.12.0',
+        });
+        createWithProgress.resolves({ environment: created });
+
+        const result = await createStepBasedVenvFlow(
+            {} as NativePythonFinder,
+            api,
+            log,
+            manager,
+            [baseEnvironment],
+            Uri.file(tempRoot),
+            { showQuickAndCustomOptions: true, additionalPackages: ['pytest'] },
+        );
+
+        assert.strictEqual(result?.environment, created);
+        assert.ok(preflight.calledOnceWithExactly([], { allPyprojectTomlsSelected: true }));
+        assert.deepStrictEqual(createWithProgress.firstCall.args[7], {
+            install: ['pytest'],
+            uninstall: [],
+        });
     });
 
     test('configurable creation can skip workspace dependencies and still create the environment', async () => {
