@@ -443,8 +443,11 @@ export class SysPythonManager implements EnvironmentManager {
      */
     async create(
         _scope: CreateEnvironmentScope,
-        _options?: CreateEnvironmentOptions,
+        options?: CreateEnvironmentOptions,
     ): Promise<PythonEnvironment | undefined> {
+        if (options?.quickCreate) {
+            return undefined;
+        }
         const pythonPath = await selectAndInstallPython(this.log);
         return pythonPath ? this.selectInstalledPython(pythonPath) : undefined;
     }
