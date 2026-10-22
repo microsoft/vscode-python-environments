@@ -212,11 +212,16 @@ export class UvPackageManager implements PackageManager, Disposable {
                     this.invalidateCache(environment);
                     this._onDidMutatePackages.fire({ environment });
                 }
+                const cacheVersion = this.getCacheVersion(environment);
                 await updatePackagesAndNotify(
                     this,
                     environment,
                     previousPackages,
-                    (changes) => this._onDidChangePackages.fire({ environment, manager: this, changes }),
+                    (changes) => {
+                        if (this.cacheVersions.get(environment.envId.id) === cacheVersion) {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        }
+                    },
                     () => this.fetchPackages(environment, !options.runHeadless, toolToken),
                     !!toolToken,
                 );
@@ -260,7 +265,11 @@ export class UvPackageManager implements PackageManager, Disposable {
                 const cacheVersion = this.getCacheVersion(environment);
                 const packages = await updatePackagesAndNotify(
                     this, environment, this.getBaselinePackages(environment),
-                    (changes) => this._onDidChangePackages.fire({ environment, manager: this, changes }),
+                    (changes) => {
+                        if (this.cacheVersions.get(environment.envId.id) === cacheVersion) {
+                            this._onDidChangePackages.fire({ environment, manager: this, changes });
+                        }
+                    },
                 );
                 if (packages !== undefined) {
                     this.cachePackages(environment, packages, cacheVersion);

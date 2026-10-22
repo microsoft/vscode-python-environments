@@ -236,12 +236,15 @@ export class PipPackageManager implements PackageManager, Disposable {
                     this._onDidMutatePackages.fire({ environment });
                 }
 
+                const cacheVersion = this.getCacheVersion(environment);
                 await updatePackagesAndNotify(
                     this,
                     environment,
                     previousPackages,
                     (changes) => {
-                        this._onDidChangePackages.fire({ environment, manager: this.packageManagerOwner, changes });
+                        if (this.cacheVersions.get(environment.envId.id) === cacheVersion) {
+                            this._onDidChangePackages.fire({ environment, manager: this.packageManagerOwner, changes });
+                        }
                     },
                     () => this.fetchPackages(environment, !options.runHeadless, toolToken),
                     !!toolToken,
@@ -297,7 +300,9 @@ export class PipPackageManager implements PackageManager, Disposable {
                     environment,
                     this.getBaselinePackages(environment),
                     (changes) => {
-                        this._onDidChangePackages.fire({ environment, manager: this.packageManagerOwner, changes });
+                        if (this.cacheVersions.get(environment.envId.id) === cacheVersion) {
+                            this._onDidChangePackages.fire({ environment, manager: this.packageManagerOwner, changes });
+                        }
                     },
                 );
                 if (packages !== undefined) {

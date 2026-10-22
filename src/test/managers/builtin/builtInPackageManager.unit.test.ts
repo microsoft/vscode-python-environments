@@ -136,15 +136,22 @@ suite('BuiltInPackageManager routing', () => {
                 sinon
                     .stub(windowApis, 'withProgress')
                     .callsFake(async (_options, task) => task({ report: () => undefined }, source.token));
-                const read = refresh ? peer.refresh(environment) : peer.getPackages(environment);
-                await started.promise;
-                await backend.manage(environment, { install: ['new-package'], runHeadless: true }, source.token);
-                pending.resolve(JSON.stringify([{ name: 'old-package', version: '1.0' }]));
-                await read;
+                const changes = sinon.spy();
+                const subscription = peer.onDidChangePackages(changes);
+                try {
+                    const read = refresh ? peer.refresh(environment) : peer.getPackages(environment);
+                    await started.promise;
+                    await backend.manage(environment, { install: ['new-package'], runHeadless: true }, source.token);
+                    pending.resolve(JSON.stringify([{ name: 'old-package', version: '1.0' }]));
+                    await read;
 
-                const packages = await peer.getPackages(environment);
-                assert.deepStrictEqual(packages?.map((pkg) => pkg.name), ['new-package']);
-                assert.strictEqual(run.callCount, 2);
+                    assert.ok(changes.notCalled);
+                    const packages = await peer.getPackages(environment);
+                    assert.deepStrictEqual(packages?.map((pkg) => pkg.name), ['new-package']);
+                    assert.strictEqual(run.callCount, 2);
+                } finally {
+                    subscription.dispose();
+                }
             });
         }
 
