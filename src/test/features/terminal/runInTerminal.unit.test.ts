@@ -92,8 +92,10 @@ suite('runInTerminal', () => {
 
         const environment = createMockPythonEnvironment({ envPath: '/env/bin/python' });
         const cases = [
-            ['/workspace/cost$AUDIT_UNSET.py', "python '/workspace/cost$AUDIT_UNSET.py'"],
-            ["/workspace/it's_python.py", "python '/workspace/it'\\''s_python.py'"],
+            ['/workspace/cost$AUDIT_UNSET.py', 'python /workspace/cost\\$AUDIT_UNSET.py'],
+            ["/workspace/it's_python.py", 'python "/workspace/it\'s_python.py"'],
+            ['=report.py', 'python \\=report.py'],
+            ['/workspace/$(touch marker).py', "python '/workspace/$(touch marker).py'"],
         ];
 
         for (const [script, command] of cases) {
@@ -125,9 +127,19 @@ suite('runInTerminal', () => {
             cwd: '/workspace',
             args: ["/workspace/it's_python.py"],
         });
+        await runInTerminal(environment, terminal, {
+            cwd: '/workspace',
+            args: ['=report.py'],
+        });
+        await runInTerminal(environment, terminal, {
+            cwd: '/workspace',
+            args: ['/workspace/$(touch marker).py'],
+        });
 
-        sinon.assert.calledWithExactly(sendText, "python '/workspace/cost$AUDIT_UNSET.py'\n");
-        sinon.assert.calledWithExactly(sendText, "python '/workspace/it'\\''s_python.py'\n");
+        sinon.assert.calledWithExactly(sendText, 'python /workspace/cost\\$AUDIT_UNSET.py\n');
+        sinon.assert.calledWithExactly(sendText, 'python "/workspace/it\'s_python.py"\n');
+        sinon.assert.calledWithExactly(sendText, 'python \\=report.py\n');
+        sinon.assert.calledWithExactly(sendText, "python '/workspace/$(touch marker).py'\n");
     });
 
     test('does not wait again when reusing a terminal without shell integration', async () => {

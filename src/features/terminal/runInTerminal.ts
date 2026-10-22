@@ -1,4 +1,5 @@
 import { Terminal, TerminalShellExecution } from 'vscode';
+import quote from 'shell-quote/quote';
 import { PythonEnvironment, PythonTerminalExecutionOptions } from '../../api';
 import { createDeferred } from '../../common/utils/deferred';
 import { onDidEndTerminalShellExecution } from '../../common/window.apis';
@@ -20,15 +21,8 @@ async function waitForShellIntegrationBeforeRun(terminal: Terminal): Promise<voi
     await waitPromise;
 }
 
-function quoteZshArgument(arg: string): string {
-    if (arg && /^[\w@%+=:,./-]+$/.test(arg)) {
-        return arg;
-    }
-    return `'${arg.replace(/'/g, "'\\''")}'`;
-}
-
 function getZshCommand(executable: string, args: string[]): string {
-    return [executable, ...args].map(quoteZshArgument).join(' ');
+    return quote([executable, ...args]);
 }
 
 export async function runInTerminal(
