@@ -15,7 +15,9 @@ import {
 import { VENV_MANAGER_ID } from '../../../common/constants';
 import { createDeferred } from '../../../common/utils/deferred';
 import * as windowApis from '../../../common/window.apis';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
@@ -82,11 +84,13 @@ suite('VenvManager - selection during refresh', () => {
                         }
                         return [];
                     });
-                    const manager = new VenvManager(
+                    const manager = new BuiltInEnvironmentManager(
                         typemoq.Mock.ofType<NativePythonFinder>().object,
                         api.object,
                         base.object,
                         typemoq.Mock.ofType<LogOutputChannel>().object,
+                        new VenvEnvironmentManager(),
+                        new UvEnvironmentManager(),
                     );
                     const persisted = new Map<string, string | undefined>([
                         [project.uri.fsPath, oldEnv.environmentPath.fsPath],

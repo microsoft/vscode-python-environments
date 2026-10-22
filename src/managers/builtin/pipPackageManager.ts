@@ -49,7 +49,7 @@ import {
     PipVersionCommand,
 } from './commands/index';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { VenvManager } from './venvManager';
+import { BuiltInEnvironmentManager } from './builtInEnvironmentManager';
 
 /** Manages packages using only the selected environment's pip installation. */
 export class PipPackageManager implements PackageManager, Disposable {
@@ -99,7 +99,7 @@ export class PipPackageManager implements PackageManager, Disposable {
     constructor(
         private readonly api: PythonEnvironmentApi,
         public readonly log: LogOutputChannel,
-        private readonly venv: VenvManager,
+        private readonly venv: BuiltInEnvironmentManager,
     ) {}
     readonly name = 'pip';
     readonly displayName = 'Pip';

@@ -14,7 +14,9 @@ import {
 } from '../../../api';
 import { VENV_MANAGER_ID } from '../../../common/constants';
 import * as windowApis from '../../../common/window.apis';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
@@ -68,11 +70,13 @@ suite('VenvManager - project selection recovery', () => {
                 const baseManager = typemoq.Mock.ofType<EnvironmentManager>();
                 baseManager.setup((m) => m.getEnvironments('global')).returns(async () => [fallback]);
                 const log = typemoq.Mock.ofType<LogOutputChannel>();
-                const manager = new VenvManager(
+                const manager = new BuiltInEnvironmentManager(
                     typemoq.Mock.ofType<NativePythonFinder>().object,
                     api.object,
                     baseManager.object,
                     log.object,
+                    new VenvEnvironmentManager(),
+                    new UvEnvironmentManager(),
                 );
                 sandbox.stub(venvUtils, 'findVirtualEnvironments').callsFake(async () => []);
                 sandbox.stub(venvUtils, 'getVenvForWorkspace').callsFake(async (fsPath) => {

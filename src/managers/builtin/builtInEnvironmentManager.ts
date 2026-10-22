@@ -52,10 +52,14 @@ import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
 import { promptInstallPython } from './pythonInstaller';
 import { getDefaultGlobalPython, resolveSystemPythonEnvironmentPath } from './utils';
+import { UvEnvironmentManager } from './uvEnvironmentManager';
+import { VenvEnvironmentManager } from './venvEnvironmentManager';
 import {
     clearVenvCache,
     CreateEnvironmentResult,
     createPythonVenv,
+    EnvironmentBackendSelector,
+    EnvironmentLifecycleBackends,
     findVirtualEnvironments,
     getDefaultGlobalVenvLocation,
     getGlobalVenvLocation,
@@ -64,12 +68,13 @@ import {
     quickCreateVenv,
     removeVenv,
     resolveVenvPythonEnvironmentPath,
+    selectEnvironmentBackend,
     setVenvForGlobal,
     setVenvForWorkspace,
     setVenvForWorkspaces,
 } from './venvUtils';
 
-export class VenvManager implements EnvironmentManager {
+export class BuiltInEnvironmentManager implements EnvironmentManager {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         [EnvironmentCapability.List]: supportedCapability,
         [EnvironmentCapability.Resolve]: supportedCapability,
@@ -104,6 +109,8 @@ export class VenvManager implements EnvironmentManager {
         private readonly api: PythonEnvironmentApi,
         private readonly baseManager: EnvironmentManager,
         public readonly log: LogOutputChannel,
+        private readonly venv: VenvEnvironmentManager,
+        private readonly uv: UvEnvironmentManager,
     ) {
         this.name = 'venv';
         this.displayName = 'venv';
@@ -114,6 +121,13 @@ export class VenvManager implements EnvironmentManager {
         this.preferredPackageManagerId = 'ms-python.python:pip';
         this.iconPath = new ThemeIcon('python');
     }
+
+    private get backends(): EnvironmentLifecycleBackends {
+        return { venv: this.venv, uv: this.uv };
+    }
+
+    private readonly selectCreationBackend: EnvironmentBackendSelector = (base, root, token) =>
+        selectEnvironmentBackend(this.log, base, root, token, this.venv, this.uv);
 
     private _initialized: Deferred<void> | undefined;
     private discovery: Deferred<void> | undefined;
@@ -218,6 +232,7 @@ export class VenvManager implements EnvironmentManager {
                 scope,
                 undefined,
                 operation,
+                this.selectCreationBackend,
             );
             if (!result?.environment) {
                 throw new PythonToolError(
@@ -345,14 +360,23 @@ export class VenvManager implements EnvironmentManager {
                         this.globalEnv,
                         venvRoot,
                         options?.additionalPackages,
+                        undefined,
+                        this.selectCreationBackend,
                     );
                 }
             } else {
                 // If quickCreate is not set that means the user triggered this method from
                 // environment manager View, by selecting the venv manager.
-                result = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot, {
-                    showQuickAndCustomOptions: options?.quickCreate === undefined,
-                });
+                result = await createPythonVenv(
+                    this.nativeFinder,
+                    this.api,
+                    this.log,
+                    this,
+                    globals,
+                    venvRoot,
+                    { showQuickAndCustomOptions: options?.quickCreate === undefined },
+                    this.selectCreationBackend,
+                );
             }
 
             if (result?.environment) {
@@ -423,7 +447,7 @@ export class VenvManager implements EnvironmentManager {
         try {
             this.skipWatcherRefresh = true;
 
-            const isRemoved = await removeVenv(environment, this.log, options);
+            const isRemoved = await removeVenv(environment, this.log, options, this.backends);
             if (!isRemoved) {
                 return;
             }
@@ -525,6 +549,7 @@ export class VenvManager implements EnvironmentManager {
                         this.log,
                         this,
                         scope ? [scope] : undefined,
+                        this.backends,
                     )) ?? [];
                 await this.loadEnvMap(selectionRevisions, toolExecution);
 
@@ -559,7 +584,16 @@ export class VenvManager implements EnvironmentManager {
             label: 'venv',
             getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getVenvForWorkspace(fsPath),
-            resolve: (p) => resolveVenvPythonEnvironmentPath(p, this.nativeFinder, this.api, this, this.baseManager),
+            resolve: (p) =>
+                resolveVenvPythonEnvironmentPath(
+                    p,
+                    this.nativeFinder,
+                    this.api,
+                    this,
+                    this.baseManager,
+                    'default',
+                    this.backends,
+                ),
             startBackgroundInit: () => this.initializeWithBase(),
         });
         if (fastResult) {
@@ -684,6 +718,8 @@ export class VenvManager implements EnvironmentManager {
             this.api,
             this,
             this.baseManager,
+            'default',
+            this.backends,
         );
         if (resolved) {
             if (resolved.envId.managerId === `${PYTHON_EXTENSION_ID}:venv`) {
@@ -698,7 +734,7 @@ export class VenvManager implements EnvironmentManager {
     }
 
     async clearCache(): Promise<void> {
-        await clearVenvCache();
+        await clearVenvCache(this.backends);
     }
 
     private addEnvironment(environment: PythonEnvironment, raiseEvent?: boolean): void {
@@ -750,6 +786,8 @@ export class VenvManager implements EnvironmentManager {
                     this.api,
                     this,
                     this.baseManager,
+                    'default',
+                    this.backends,
                 );
 
                 // If the environment is resolved, add it to the collection
@@ -807,6 +845,8 @@ export class VenvManager implements EnvironmentManager {
                         this.api,
                         this,
                         this.baseManager,
+                        'default',
+                        this.backends,
                     );
                     if (!isCurrent(normalizedPath)) {
                         continue;
