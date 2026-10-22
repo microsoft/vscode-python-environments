@@ -351,8 +351,9 @@ export async function createStepBasedVenvFlow(
                 allPackages.push(...options.additionalPackages);
             }
 
-            const validationError = result.validationError;
-            const shouldProceed = await shouldProceedAfterPyprojectValidation(validationError, allPackages);
+            const shouldProceed = await shouldProceedAfterPyprojectValidation(result.validationErrors, {
+                allPyprojectTomlsSelected: true,
+            });
             if (!shouldProceed) {
                 return undefined;
             }

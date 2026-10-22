@@ -18,6 +18,7 @@ import * as windowApis from '../../common/window.apis';
 import * as sysCache from '../../managers/builtin/cache';
 import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import * as sysUtils from '../../managers/builtin/utils';
+import * as pymanager from '../../managers/builtin/pymanagerPythonInstaller';
 import { VenvManager } from '../../managers/builtin/venvManager';
 import * as venvUtils from '../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
@@ -284,6 +285,7 @@ suite('Manager get() fast path', () => {
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        sandbox.stub(pymanager, 'detectPymanager').resolves({ kind: 'absent' });
         sandbox.stub(windowApis, 'withProgress').callsFake((_opts, cb) => cb(undefined as never, undefined as never));
         // fastPath.ts now does a real fs.access on the persisted path; these tests use
         // synthetic paths that don't exist on disk, so pretend every path is present.

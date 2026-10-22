@@ -2,7 +2,6 @@
 // Licensed under the MIT License.
 
 import assert from 'assert';
-import * as sinon from 'sinon';
 import { CodeActionContext, Diagnostic, Position, Range, TextDocument, Uri } from 'vscode';
 import { InlineScriptMetadata, MAX_HEADER_BYTES } from '../../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../../common/inlineScript/routingRegistry';
@@ -11,7 +10,6 @@ import {
     InlineScriptSetupCodeActionProvider,
     isUnresolvedImportDiagnostic,
 } from '../../../features/inlineScript/setupCodeAction';
-import * as helpers from '../../../helpers';
 
 const SETUP_COMMAND = 'python-envs.setupInlineScriptEnv';
 
@@ -60,17 +58,14 @@ suite('Inline script setup code action', () => {
     const scriptUri = Uri.file('/workspace/app.py');
     let routing: InlineScriptRoutingRegistry;
     let provider: InlineScriptSetupCodeActionProvider;
-    let featureEnabledStub: sinon.SinonStub;
 
     setup(() => {
-        featureEnabledStub = sinon.stub(helpers, 'isInlineScriptsFeatureEnabled').returns(true);
         routing = new InlineScriptRoutingRegistry();
         provider = new InlineScriptSetupCodeActionProvider(routing, SETUP_COMMAND);
     });
 
     teardown(() => {
         routing.dispose();
-        sinon.restore();
     });
 
     function provide(document: TextDocument, diagnostics: Diagnostic[]) {
@@ -204,14 +199,6 @@ suite('Inline script setup code action', () => {
             assert.strictEqual(routing.shouldRoute(scriptUri), true);
             routing.setEnvironmentUnavailable(scriptUri, false);
             assert.strictEqual(provide(makeDocument(scriptUri), [makeDiagnostic('reportMissingImports')]).length, 0);
-        });
-
-        test('offers nothing when the inline-scripts feature flag is off', () => {
-            featureEnabledStub.returns(false);
-
-            const actions = provide(makeDocument(scriptUri), [makeDiagnostic('reportMissingImports')]);
-
-            assert.strictEqual(actions.length, 0);
         });
 
         test('offers nothing for a file that cannot carry an inline-script environment', () => {

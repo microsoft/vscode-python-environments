@@ -71,7 +71,8 @@ function getKindName(kind: NativePythonEnvironmentKind | undefined): string | un
     }
 }
 
-function getPythonInfo(env: NativeEnvInfo, uvManaged: boolean = false): PythonEnvironmentInfo {
+/** Create the ordinary System-manager presentation and execution contract from resolved runtime metadata. */
+export function getSystemPythonInfo(env: NativeEnvInfo, uvManaged: boolean = false): PythonEnvironmentInfo {
     if (env.executable && env.version && env.prefix) {
         const kindName = uvManaged ? 'uv' : getKindName(env.kind);
         const sv = shortenVersionString(env.version);
@@ -202,7 +203,7 @@ export async function refreshPythons(
     }
     envs.forEach(({ env, uvManaged }) => {
         try {
-            const envInfo = getPythonInfo(env, uvManaged);
+            const envInfo = getSystemPythonInfo(env, uvManaged);
             const python = api.createPythonEnvironmentItem(envInfo, manager);
             if (uvManaged) {
                 uvManagedPythons.add(python);
@@ -266,7 +267,7 @@ export async function resolveSystemPythonEnvironmentPath(
         // This is supposed to handle a python interpreter as long as we know some basic things about it
         if (resolved.executable && resolved.version && resolved.prefix) {
             const uvManaged = await isUvManagedPythonInstall(resolved);
-            const python = api.createPythonEnvironmentItem(getPythonInfo(resolved, uvManaged), manager);
+            const python = api.createPythonEnvironmentItem(getSystemPythonInfo(resolved, uvManaged), manager);
             if (uvManaged) {
                 uvManagedPythons.add(python);
             }

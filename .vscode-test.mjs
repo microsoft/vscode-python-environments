@@ -15,14 +15,17 @@ const diagnosticMocha = diagnosticsDir
     ? { require: [path.resolve('out', 'test', 'diagnostics.js')] }
     : {};
 
-// Seed user settings.json so the extension actually activates: without
-// `python.useEnvironmentsExtension=true` it short-circuits during activation
-// and the smoke/e2e/integration tests see no registered managers.
+// Seed explicit user values so tests are deterministic even when VS Code applies
+// experimentation defaults. The environments extension must activate, while the
+// inline-script preview stays off unless a dedicated test host opts in.
 const userDir = path.join(userDataDir, 'User');
 fs.mkdirSync(userDir, { recursive: true });
 fs.writeFileSync(
     path.join(userDir, 'settings.json'),
-    JSON.stringify({ 'python.useEnvironmentsExtension': true }) + '\n',
+    JSON.stringify({
+        'python.useEnvironmentsExtension': true,
+        'python-envs.inlineScripts.enabled': false,
+    }) + '\n',
 );
 
 export default defineConfig([

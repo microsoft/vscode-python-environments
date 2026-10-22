@@ -79,6 +79,17 @@
                         }
                     }
                 },
+                "python-envs.inlineScripts.enabled": {
+                    "type": "boolean",
+                    "description": "%python-envs.inlineScripts.enabled.description%",
+                    "default": false,
+                    "scope": "window",
+                    "requiresReload": true,
+                    "tags": [
+                        "onExP",
+                        "preview"
+                    ]
+                },
                 "python-envs.terminal.showActivateButton": {
                     "type": "boolean",
                     "description": "%python-envs.terminal.showActivateButton.description%",
