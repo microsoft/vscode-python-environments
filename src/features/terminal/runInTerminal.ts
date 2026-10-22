@@ -7,7 +7,18 @@ import { identifyTerminalShell } from '../common/shellDetector';
 import { quoteArgs } from '../execution/execUtils';
 import { normalizeShellPath } from './shells/common/shellUtils';
 import { traceLog } from '../../common/logging';
-import { waitForShellIntegration } from './utils';
+import { SHELL_INTEGRATION_TIMEOUT, waitForShellIntegration } from './utils';
+
+const shellIntegrationWaits = new WeakMap<Terminal, Promise<boolean>>();
+
+async function waitForShellIntegrationBeforeRun(terminal: Terminal): Promise<void> {
+    let waitPromise = shellIntegrationWaits.get(terminal);
+    if (!waitPromise) {
+        waitPromise = waitForShellIntegration(terminal, SHELL_INTEGRATION_TIMEOUT);
+        shellIntegrationWaits.set(terminal, waitPromise);
+    }
+    await waitPromise;
+}
 
 function quoteZshArgument(arg: string): string {
     if (arg && /^[\w@%+=:,./-]+$/.test(arg)) {
@@ -39,7 +50,7 @@ export async function runInTerminal(
         executable = normalizeShellPath(executable, shellType);
     }
     if (!terminal.shellIntegration) {
-        await waitForShellIntegration(terminal);
+        await waitForShellIntegrationBeforeRun(terminal);
     }
     const zshCommand = shellType === ShellConstants.ZSH ? getZshCommand(executable, allArgs) : undefined;
     if (terminal.shellIntegration) {

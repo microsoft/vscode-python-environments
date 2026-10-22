@@ -41,7 +41,7 @@ suite('runInTerminal', () => {
         const runPromise = runInTerminal(environment, terminal, { cwd: '/workspace', args: ['main.py'] });
         await new Promise<void>((resolve) => setImmediate(resolve));
 
-        sinon.assert.calledOnce(waitForShellIntegrationStub);
+        sinon.assert.calledOnceWithExactly(waitForShellIntegrationStub, terminal, terminalUtils.SHELL_INTEGRATION_TIMEOUT);
         sinon.assert.notCalled(terminal.sendText as sinon.SinonStub);
         sinon.assert.notCalled(shellIntegration.executeCommand);
 
@@ -70,7 +70,7 @@ suite('runInTerminal', () => {
         const environment = createMockPythonEnvironment({ envPath: '/env/bin/python' });
         await runInTerminal(environment, terminal, { cwd: '/workspace', args: ['main.py'] });
 
-        sinon.assert.calledOnceWithExactly(waitForShellIntegrationStub, terminal);
+        sinon.assert.calledOnceWithExactly(waitForShellIntegrationStub, terminal, terminalUtils.SHELL_INTEGRATION_TIMEOUT);
         sinon.assert.calledOnceWithExactly(sendText, 'python main.py\n');
     });
 
@@ -128,5 +128,24 @@ suite('runInTerminal', () => {
 
         sinon.assert.calledWithExactly(sendText, "python '/workspace/cost$AUDIT_UNSET.py'\n");
         sinon.assert.calledWithExactly(sendText, "python '/workspace/it'\\''s_python.py'\n");
+    });
+
+    test('does not wait again when reusing a terminal without shell integration', async () => {
+        sinon.stub(shellDetector, 'identifyTerminalShell').returns('fish');
+        const waitForShellIntegrationStub = sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
+        const sendText = sinon.stub();
+        const terminal = {
+            name: 'Python',
+            shellIntegration: undefined,
+            sendText,
+        } as unknown as Terminal;
+
+        const environment = createMockPythonEnvironment({ envPath: '/env/bin/python' });
+        const options = { cwd: '/workspace', args: ['main.py'] };
+        await runInTerminal(environment, terminal, options);
+        await runInTerminal(environment, terminal, options);
+        sinon.assert.calledOnceWithExactly(waitForShellIntegrationStub, terminal, terminalUtils.SHELL_INTEGRATION_TIMEOUT);
+        sinon.assert.calledTwice(sendText);
+        sinon.assert.calledTwice(sendText);
     });
 });
