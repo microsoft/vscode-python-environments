@@ -19,6 +19,7 @@ import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils'
 import { showErrorMessage, showQuickPickWithButtons, showTextDocument, withProgress } from '../../common/window.apis';
 import { findFiles } from '../../common/workspace.apis';
 import { throwIfCancelled } from '../../internal/pythonToolSupport';
+import { ListCommand } from '../base/commands/index';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
 import { normalizePackageName } from '../common/packageUtils';
 import { Installable } from '../common/types';
@@ -376,6 +377,7 @@ export async function getWorkspacePackagesToInstall(
     project?: PythonProject[],
     environment?: PythonEnvironment,
     log?: LogOutputChannel,
+    listPackages?: ListCommand['execute'],
 ): Promise<PipPackages | undefined> {
     const installableResult = await getProjectInstallable(api, project);
     let common = await getCommonPackages();
@@ -384,13 +386,18 @@ export async function getWorkspacePackagesToInstall(
         const pythonExecutable = environment.execInfo?.run?.executable;
         if (pythonExecutable) {
             try {
-                const listCmd: PipListCommand | UvListCommand = await createPipOrUvCommand(
-                    { pythonExecutable, log },
-                    environment.environmentPath.fsPath,
-                    PipListCommand,
-                    UvListCommand,
-                );
-                const data = await withProgress({ location: ProgressLocation.Notification }, () => listCmd.execute());
+                let listInstalledPackages = listPackages;
+                if (!listInstalledPackages) {
+                    const listCmd: PipListCommand | UvListCommand = await createPipOrUvCommand(
+                        { pythonExecutable, log },
+                        environment.environmentPath.fsPath,
+                        PipListCommand,
+                        UvListCommand,
+                    );
+                    listInstalledPackages = () => listCmd.execute();
+                }
+                const executeList = listInstalledPackages;
+                const data = await withProgress({ location: ProgressLocation.Notification }, () => executeList());
                 installed = data.map((pkg) => pkg.name);
             } catch (error) {
                 log?.error('Error listing installed packages', error);

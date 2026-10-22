@@ -4,8 +4,10 @@ import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
 import { getPythonApi } from '../../extensionApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { BuiltInPackageManager } from './builtInPackageManager';
 import { PipPackageManager } from './pipPackageManager';
 import { SysPythonManager } from './sysPythonManager';
+import { UvPackageManager } from './uvPackageManager';
 import { VenvManager } from './venvManager';
 
 export async function registerSystemPythonFeatures(
@@ -16,10 +18,13 @@ export async function registerSystemPythonFeatures(
 ): Promise<void> {
     const api: PythonEnvironmentApi = await getPythonApi();
     const venvManager = new VenvManager(nativeFinder, api, envManager, log);
-    const pkgManager = new PipPackageManager(api, log, venvManager);
+    const uvPackageManager = new UvPackageManager(api, log, venvManager);
+    const pipPackageManager = new PipPackageManager(api, log, venvManager);
+    const pkgManager = new BuiltInPackageManager(pipPackageManager, uvPackageManager);
 
     disposables.push(
         api.registerPackageManager(pkgManager),
+        api.registerPackageManager(uvPackageManager),
         api.registerEnvironmentManager(envManager),
         api.registerEnvironmentManager(venvManager),
     );

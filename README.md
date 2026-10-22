@@ -74,7 +74,20 @@ The extension uses `pip` as the default package manager, but you can use the pac
 | Id                     | Name    | Description                                                                                                                                                                                               |
 | ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
+| ms-python.python:uv    | `uv`    | Uses [uv](https://docs.astral.sh/uv/) to manage packages in the selected environment, without requiring pip in that environment. |
 | ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
+
+Set `"python-envs.defaultPackageManager": "ms-python.python:uv"` to select uv for package operations.
+Environment-only API calls still use the environment manager's preferred package manager
+(for example, pip for venv); project-scoped UI operations use the selected package manager.
+Tool operations use the selected project manager only when its ID matches the environment manager's
+preferred package manager ID; otherwise, they use the environment's preferred manager.
+Automatic routing preserves the existing uv selection rules: when the configured or preferred
+manager is pip, `python-envs.alwaysUseUv` and whether the environment was created by uv determine
+whether the router selects pip or uv. Each manager executes only its own commands. Selecting the uv
+manager explicitly always uses uv, independently of that setting. The uv package manager resolves
+uv from PATH, a current-session installation, or the owning trusted workspace's `.pyprojectx/main/uv`
+(`uv.exe` on Windows). If uv is unavailable, it reports an error rather than falling back to pip.
 
 #### Default Package Manager by Environment Manager
 
