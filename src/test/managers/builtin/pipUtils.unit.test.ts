@@ -6,6 +6,7 @@ import * as fse from 'fs-extra';
 import * as os from 'os';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
 import { PackageManagement } from '../../../common/localize';
+import { normalizePath } from '../../../common/utils/pathUtils';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
 import { PipListCommand } from '../../../managers/builtin/commands/list';
@@ -663,6 +664,76 @@ suite('Pip Utils - getProjectInstallable', () => {
             [rootReqPath, subdirReqPath, deepReqPath],
             'Files should be ordered by depth relative to the project root',
         );
+    });
+
+    test('preserves complete depth-then-path order across multiple merge rounds', async () => {
+        const workspacePath = Uri.file('/test/path/root').fsPath;
+        const dependencyPaths = Array.from({ length: 129 }, (_, index) => {
+            const directories = Array.from(
+                { length: index % 5 },
+                (_value, level) => `group-${(index + level) % 11}`,
+            );
+            return path.join(
+                workspacePath,
+                ...directories,
+                `requirements-${index.toString().padStart(3, '0')}.txt`,
+            );
+        });
+        findFilesStub.callsFake((pattern: string) =>
+            Promise.resolve(pattern === '**/*requirements*.txt' ? [...dependencyPaths].reverse().map(Uri.file) : []),
+        );
+
+        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [
+            { name: 'workspace', uri: Uri.file(workspacePath) },
+        ]);
+
+        const expected = [...dependencyPaths].sort((a, b) => {
+            const depthA = path.relative(workspacePath, a).split(path.sep).filter(Boolean).length;
+            const depthB = path.relative(workspacePath, b).split(path.sep).filter(Boolean).length;
+            if (depthA !== depthB) {
+                return depthA - depthB;
+            }
+            const normalizedA = normalizePath(a);
+            const normalizedB = normalizePath(b);
+            return normalizedA < normalizedB ? -1 : normalizedA > normalizedB ? 1 : 0;
+        });
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.uri?.fsPath),
+            expected,
+        );
+    });
+
+    test('cancels after batched processing starts without returning partial multi-chunk results', async () => {
+        const workspacePath = Uri.file('/test/path/root').fsPath;
+        const dependencyFiles = Array.from({ length: 129 }, (_, index) =>
+            Uri.file(
+                path.join(
+                    workspacePath,
+                    `group-${index % 7}`,
+                    `requirements-${index.toString().padStart(3, '0')}.txt`,
+                ),
+            ),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            Promise.resolve(pattern === '**/*requirements*.txt' ? dependencyFiles : []),
+        );
+        const source = new CancellationTokenSource();
+        withProgressStub.callsFake(async (_options: ProgressOptions, task) => {
+            const pending = task({ report: () => {} }, source.token);
+            setImmediate(() => setImmediate(() => source.cancel()));
+            return pending;
+        });
+
+        try {
+            await assert.rejects(
+                getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                    { name: 'workspace', uri: Uri.file(workspacePath) },
+                ]),
+                CancellationError,
+            );
+        } finally {
+            source.dispose();
+        }
     });
 });
 
