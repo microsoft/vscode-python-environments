@@ -28,8 +28,26 @@ async function waitForShellIntegrationBeforeRun(terminal: Terminal): Promise<voi
     await waitPromise;
 }
 
-function getPosixShellCommand(shellType: string, executable: string, args: string[]): string | undefined {
-    return posixShells.has(shellType) ? quote([executable, ...args]) : undefined;
+function getCommandLine(shellType: string, executable: string, args: string[]): string {
+    let command = posixShells.has(shellType)
+        ? quote([executable, ...args])
+        : quoteArgs([executable, ...args]).join(' ');
+
+    if (shellType === ShellConstants.PWSH && !command.startsWith('&')) {
+        command = `& ${command}`;
+    }
+    return command;
+}
+
+function getShellIntegrationExecutable(shellType: string, executable: string): string {
+    let command = executable;
+    if (command.includes(' ') && !command.startsWith('"') && !command.endsWith('"')) {
+        command = `"${command}"`;
+    }
+    if (shellType === ShellConstants.PWSH && !command.startsWith('&')) {
+        command = `& ${command}`;
+    }
+    return command;
 }
 
 export async function runInTerminal(
@@ -53,7 +71,6 @@ export async function runInTerminal(
     if (!terminal.shellIntegration) {
         await waitForShellIntegrationBeforeRun(terminal);
     }
-    const posixShellCommand = getPosixShellCommand(shellType, executable, allArgs);
     if (terminal.shellIntegration) {
         let execution: TerminalShellExecution | undefined;
         const deferred = createDeferred<void>();
@@ -64,31 +81,18 @@ export async function runInTerminal(
             }
         });
 
-        if (posixShellCommand !== undefined) {
-            execution = terminal.shellIntegration.executeCommand(posixShellCommand);
-            traceLog(`runInTerminal: executeCommand ${posixShellCommand}`);
+        if (posixShells.has(shellType)) {
+            const commandLine = getCommandLine(shellType, executable, allArgs);
+            execution = terminal.shellIntegration.executeCommand(commandLine);
+            traceLog(`runInTerminal: executeCommand ${commandLine}`);
         } else {
-            const shouldSurroundWithQuotes =
-                executable.includes(' ') && !executable.startsWith('"') && !executable.endsWith('"');
-            // Handle case where executable contains white-spaces.
-            if (shouldSurroundWithQuotes) {
-                executable = `"${executable}"`;
-            }
-
-            if (shellType === ShellConstants.PWSH && !executable.startsWith('&')) {
-                // PowerShell requires commands to be prefixed with '&' to run them.
-                executable = `& ${executable}`;
-            }
-            execution = terminal.shellIntegration.executeCommand(executable, allArgs);
-            traceLog(`runInTerminal: executeCommand ${executable} ${allArgs.join(' ')}`);
+            const shellExecutable = getShellIntegrationExecutable(shellType, executable);
+            execution = terminal.shellIntegration.executeCommand(shellExecutable, allArgs);
+            traceLog(`runInTerminal: executeCommand ${shellExecutable} ${allArgs.join(' ')}`);
         }
         await deferred.promise;
     } else {
-        let text = posixShellCommand ?? quoteArgs([executable, ...allArgs]).join(' ');
-        if (shellType === ShellConstants.PWSH && !text.startsWith('&')) {
-            // PowerShell requires commands to be prefixed with '&' to run them.
-            text = `& ${text}`;
-        }
+        const text = getCommandLine(shellType, executable, allArgs);
         terminal.sendText(`${text}\n`);
         traceLog(`runInTerminal: sendText ${text}`);
     }
