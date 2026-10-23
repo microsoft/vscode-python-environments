@@ -763,3 +763,176 @@ suite('TerminalManager - initialize() skips pseudoterminals', () => {
         assert.strictEqual(terminalActivation.activateCalls, 0, 'Should not activate any pseudoterminals');
     });
 });
+
+
+suite('Concurrent terminal creation and live cache retention (Fixes #1868)', () => {
+    let terminalActivation: TestTerminalActivation;
+    let onDidCloseEmitter: EventEmitter<Terminal>;
+    let terminalManager: TerminalManagerImpl;
+    let tempRoot: string;
+    let projectDir: string;
+    let projectUri: Uri;
+
+    setup(async () => {
+        terminalActivation = new TestTerminalActivation();
+        onDidCloseEmitter = new EventEmitter<Terminal>();
+
+        sinon.stub(terminalUtils, 'getAutoActivationType').returns(terminalUtils.ACT_TYPE_OFF);
+        sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
+        sinon.stub(activationUtils, 'isActivatableEnvironment').returns(true);
+        sinon.stub(shellDetector, 'identifyTerminalShell').returns('bash');
+        sinon.stub(windowApis, 'onDidOpenTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidCloseTerminal').callsFake((listener) => onDidCloseEmitter.event(listener));
+        sinon.stub(windowApis, 'onDidChangeWindowState').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'terminals').returns([]);
+        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => {}));
+
+        tempRoot = await fsapi.mkdtemp(path.join(os.tmpdir(), 'py-envs-1868-'));
+        projectDir = path.join(tempRoot, 'workspace');
+        await fsapi.ensureDir(projectDir);
+        projectUri = Uri.file(projectDir);
+
+        terminalManager = new TerminalManagerImpl(terminalActivation, [], []);
+    });
+
+    teardown(async () => {
+        sinon.restore();
+        terminalActivation.dispose();
+        onDidCloseEmitter.dispose();
+        await fsapi.remove(tempRoot);
+    });
+
+    function createMockEnv(id = 'test-env'): PythonEnvironment {
+        return {
+            envId: { id, managerId: 'test-manager' },
+            name: 'Test Env',
+            displayName: 'Test Env',
+            displayPath: '/bin/python',
+            version: '3.12.0',
+            environmentPath: Uri.file('/bin/python'),
+            sysPrefix: '/bin',
+            execInfo: {
+                run: { executable: '/bin/python' },
+                activation: [{ executable: '/bin/activate' }],
+            },
+        };
+    }
+
+    test('Deduplicates concurrent getProjectTerminal calls for same project into a single terminal creation', async () => {
+        let createCount = 0;
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => {
+            createCount++;
+            return {
+                name: `Python ${createCount}`,
+                creationOptions: {},
+                show: sinon.stub(),
+                sendText: sinon.stub(),
+                exitStatus: undefined,
+            } as unknown as Terminal;
+        });
+
+        const env = createMockEnv();
+
+        // Launch multiple concurrent requests simultaneously
+        const [t1, t2, t3] = await Promise.all([
+            terminalManager.getProjectTerminal(projectUri, env),
+            terminalManager.getProjectTerminal(projectUri, env),
+            terminalManager.getProjectTerminal(projectUri, env),
+        ]);
+
+        assert.strictEqual(createCount, 1, 'Only one terminal should be created for concurrent calls');
+        assert.strictEqual(t1, t2, 'Concurrent calls must return the identical terminal');
+        assert.strictEqual(t2, t3, 'Concurrent calls must return the identical terminal');
+    });
+
+    test('Deduplicates concurrent getDedicatedTerminal calls for same file into a single terminal creation', async () => {
+        let createCount = 0;
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => {
+            createCount++;
+            return {
+                name: `Python: file ${createCount}`,
+                creationOptions: {},
+                show: sinon.stub(),
+                sendText: sinon.stub(),
+                exitStatus: undefined,
+            } as unknown as Terminal;
+        });
+
+        const env = createMockEnv();
+        const scriptPath = path.join(projectDir, 'app.py');
+        await fsapi.writeFile(scriptPath, 'print(1)');
+        const fileUri = Uri.file(scriptPath);
+
+        const config = { get: sinon.stub().returns(false) } as unknown as WorkspaceConfiguration;
+        sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+        const [t1, t2] = await Promise.all([
+            terminalManager.getDedicatedTerminal(fileUri, projectUri, env),
+            terminalManager.getDedicatedTerminal(fileUri, projectUri, env),
+        ]);
+
+        assert.strictEqual(createCount, 1, 'Only one dedicated terminal should be created');
+        assert.strictEqual(t1, t2, 'Both concurrent calls must receive the same terminal instance');
+    });
+
+    test('Closing an older terminal does not evict a newer live terminal under the same key', async () => {
+        let createCount = 0;
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => {
+            createCount++;
+            return {
+                name: `Python ${createCount}`,
+                creationOptions: {},
+                show: sinon.stub(),
+                sendText: sinon.stub(),
+                exitStatus: undefined,
+            } as unknown as Terminal;
+        });
+
+        const env = createMockEnv();
+
+        // 1. Create first terminal
+        const olderTerminal = await terminalManager.getProjectTerminal(projectUri, env);
+        assert.strictEqual(olderTerminal.name, 'Python 1');
+
+        // 2. Create second terminal with createNew: true, overwriting cache with live terminal 2
+        const newerTerminal = await terminalManager.getProjectTerminal(projectUri, env, true);
+        assert.strictEqual(newerTerminal.name, 'Python 2');
+        assert.notStrictEqual(olderTerminal, newerTerminal);
+
+        // 3. Close the older terminal
+        onDidCloseEmitter.fire(olderTerminal);
+
+        // 4. Verify that the cache still holds the newer terminal and does NOT create a 3rd terminal
+        const cached = await terminalManager.getProjectTerminal(projectUri, env);
+        assert.strictEqual(cached, newerTerminal, 'Newer live terminal must remain cached after older terminal closes');
+        assert.strictEqual(createCount, 2, 'No third terminal should be created');
+    });
+
+    test('Concurrent requests for different projects create distinct terminals', async () => {
+        let createCount = 0;
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => {
+            createCount++;
+            return {
+                name: `Python ${createCount}`,
+                creationOptions: {},
+                show: sinon.stub(),
+                sendText: sinon.stub(),
+                exitStatus: undefined,
+            } as unknown as Terminal;
+        });
+
+        const env = createMockEnv();
+        const projectA = Uri.file(path.join(tempRoot, 'projectA'));
+        const projectB = Uri.file(path.join(tempRoot, 'projectB'));
+        await fsapi.ensureDir(projectA.fsPath);
+        await fsapi.ensureDir(projectB.fsPath);
+
+        const [termA, termB] = await Promise.all([
+            terminalManager.getProjectTerminal(projectA, env),
+            terminalManager.getProjectTerminal(projectB, env),
+        ]);
+
+        assert.strictEqual(createCount, 2, 'Distinct projects should create separate terminals');
+        assert.notStrictEqual(termA, termB, 'Terminals for different projects should be distinct');
+    });
+});
