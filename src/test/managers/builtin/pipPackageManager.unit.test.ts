@@ -18,7 +18,7 @@ import { pythonToolSupport } from '../../../internal/pythonToolSupport';
 import { PipListCommand } from '../../../managers/builtin/commands/list';
 import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
 import * as packageChanges from '../../../managers/common/packageChanges';
 import { createMockLogOutputChannel } from '../../mocks/helper';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
@@ -38,7 +38,7 @@ suite('PipPackageManager', () => {
             error: sinon.stub(),
             info: sinon.stub(),
         } as unknown as LogOutputChannel;
-        const manager = new PipPackageManager(api, log, {} as VenvManager);
+        const manager = new PipPackageManager(api, log, {} as BuiltInEnvironmentManager);
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
         const listPackages = sinon.stub(PipListCommand.prototype, 'execute');
         listPackages
@@ -58,7 +58,7 @@ suite('PipPackageManager', () => {
         const manager = new PipPackageManager(
             { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
             { error: sinon.stub(), info: sinon.stub() } as unknown as LogOutputChannel,
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
         const listPackages = sinon.stub(PipListCommand.prototype, 'execute').rejects(new Error('pip list failed'));
@@ -77,7 +77,7 @@ suite('PipPackageManager', () => {
         const manager = new PipPackageManager(
             { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
             log,
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
         sinon.stub(PipListCommand.prototype, 'execute').rejects(new Error('pip list failed'));
@@ -238,7 +238,11 @@ suite('PipPackageManager', () => {
             version: '2.7.18',
             managerId: 'ms-python.python:venv',
         });
-        const manager = new PipPackageManager({} as PythonEnvironmentApi, {} as LogOutputChannel, {} as VenvManager);
+        const manager = new PipPackageManager(
+            {} as PythonEnvironmentApi,
+            {} as LogOutputChannel,
+            {} as BuiltInEnvironmentManager,
+        );
 
         for (const capability of [PackageCapability.Install, PackageCapability.Uninstall, PackageCapability.Upgrade]) {
             assert.deepStrictEqual(await manager.capabilities[capability]({ environment }), {
@@ -277,7 +281,7 @@ suite('PipPackageManager', () => {
         const manager = new PipPackageManager(
             {} as PythonEnvironmentApi,
             createMockLogOutputChannel(),
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
 
         await manager.manage(environment, { uninstall: ['flask'] });
@@ -296,7 +300,7 @@ suite('PipPackageManager', () => {
         const manager = new PipPackageManager(
             { createPackageItem: sinon.stub().callsFake((info) => info) } as unknown as PythonEnvironmentApi,
             createMockLogOutputChannel(),
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
         const changes = sinon.spy();
         manager.onDidChangePackages(changes);
@@ -332,7 +336,7 @@ suite('PipPackageManager', () => {
         return new PipPackageManager(
             { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
             { error: sinon.stub(), info: sinon.stub() } as unknown as LogOutputChannel,
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
     }
 

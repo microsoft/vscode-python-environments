@@ -102,6 +102,62 @@ suite('createWithProgress uv tracking', () => {
         );
     });
 
+    for (const toolExecution of [false, true]) {
+        test(`prepares shared execution options and preserves facade ownership (tool execution: ${toolExecution})`, async () => {
+            const source = new CancellationTokenSource();
+            const create = sinon.stub().resolves();
+            const selectBackend = sinon.stub().resolves({ usesUv: false, create });
+            const operation: PythonToolOperation | undefined = toolExecution
+                ? {
+                      token: source.token,
+                      managePackages: sinon.stub().resolves(),
+                      getGlobalEnvironments: async () => [baseEnvironment],
+                  }
+                : undefined;
+            try {
+                const result = await createWithProgress(
+                    nativeFinder,
+                    api,
+                    log,
+                    manager,
+                    baseEnvironment,
+                    Uri.file(tempRoot),
+                    envPath,
+                    undefined,
+                    true,
+                    { selectBackend, operation },
+                );
+
+                assert.ok(result?.environment);
+                sinon.assert.calledOnceWithExactly(
+                    selectBackend,
+                    baseEnvironment,
+                    Uri.file(tempRoot),
+                    operation?.token,
+                );
+                sinon.assert.calledOnceWithExactly(create, {
+                    executable: baseEnvironment.execInfo.run.executable,
+                    environmentPath: envPath,
+                    cwd: Uri.file(tempRoot).fsPath,
+                    log,
+                    token: operation?.token,
+                    timeout: toolExecution ? 300_000 : undefined,
+                    toolExecution,
+                });
+                sinon.assert.calledWithExactly(
+                    api.createPythonEnvironmentItem as sinon.SinonStub,
+                    sinon.match.object,
+                    manager,
+                );
+                sinon.assert.notCalled(builtinHelpers.shouldUseUv as sinon.SinonStub);
+                sinon.assert.notCalled(builtinHelpers.runUV as sinon.SinonStub);
+                sinon.assert.notCalled(addUvEnvironmentStub);
+            } finally {
+                source.dispose();
+            }
+        });
+    }
+
     test('skips workspace-scoped uv tracking when explicitly disabled', async () => {
         const result = await createWithProgress(
             nativeFinder,

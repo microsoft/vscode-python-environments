@@ -65,6 +65,8 @@ The following environment managers are supported out of the box:
 
 Environment managers are responsible for specifying which package manager will be used by default to install and manage Python packages within the environment (`venv` uses `pip` by default). This ensures that packages are managed consistently according to the preferred tools and settings of the chosen environment manager.
 
+The built-in `venv` environment manager (`BuiltInEnvironmentManager`) composes separate `VenvEnvironmentManager` and `UvEnvironmentManager` backends. Creation automatically routes to uv when the existing uv policy allows it and uv is available to the creation scope; otherwise it uses `python -m venv`. Each backend owns its own environment classification, presentation, and persistent state, while both kinds of virtual environment retain the `ms-python.python:venv` manager identity, discovery, selection, and removal behavior.
+
 ### Package Management
 
 The extension also provides an interface to install and uninstall Python packages, and provides APIs for extension developers to contribute package managers of their choice.

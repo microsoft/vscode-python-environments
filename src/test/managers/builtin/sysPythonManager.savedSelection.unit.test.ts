@@ -80,4 +80,14 @@ suite('SysPythonManager saved selections', () => {
         assert.strictEqual((await manager.getEnvironments('all')).length, 1);
         assert.strictEqual(added.length, 0);
     });
+
+    test('create returns undefined when quickCreate is requested without prompting for version selection', async () => {
+        const selectAndInstallStub = sinon.stub(pythonInstaller, 'selectAndInstallPython');
+        const manager = createManager();
+
+        const created = await manager.create('global', { quickCreate: true });
+
+        assert.strictEqual(created, undefined);
+        assert.strictEqual(selectAndInstallStub.called, false);
+    });
 });
