@@ -20,6 +20,8 @@ import * as managerReady from '../../features/common/managerReady';
 import { pythonToolSupport } from '../../internal/pythonToolSupport';
 import * as helpers from '../../managers/builtin/helpers';
 import { PipPackageManager } from '../../managers/builtin/pipPackageManager';
+import { UvPackageManager } from '../../managers/builtin/uvPackageManager';
+import { BuiltInPackageManager } from '../../managers/builtin/builtInPackageManager';
 import { VenvManager } from '../../managers/builtin/venvManager';
 import * as packageChanges from '../../managers/common/packageChanges';
 import { InternalPackageManager } from '../../managers/common/registeredManagers';
@@ -159,7 +161,12 @@ suite('Public package API execution policy', () => {
             }
             sinon.stub(helpers, 'shouldUseUv').resolves(kind === 'uv');
             sinon.stub(helpers, 'getUvExecutable').resolves(path.join(temp, '.pyprojectx', 'main', 'uv'));
-            return new PipPackageManager(api, log, {} as VenvManager);
+            return kind === 'uv'
+                ? new BuiltInPackageManager(
+                    new PipPackageManager(api, log, {} as VenvManager),
+                    new UvPackageManager(api, log, {} as VenvManager),
+                )
+                : new PipPackageManager(api, log, {} as VenvManager);
         }
 
         test(`${kind}: public progress tokens do not enable agent process policy`, async () => {

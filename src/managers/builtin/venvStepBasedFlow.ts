@@ -1,6 +1,6 @@
 import * as fse from 'fs-extra';
 import * as path from 'path';
-import { LogOutputChannel, QuickInputButtons, Uri } from 'vscode';
+import { CancellationError, LogOutputChannel, QuickInputButtons, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import { Pickers, VenvManagerStrings } from '../../common/localize';
 import { EventNames } from '../../common/telemetry/constants';
@@ -351,8 +351,9 @@ export async function createStepBasedVenvFlow(
                 allPackages.push(...options.additionalPackages);
             }
 
-            const validationError = result.validationError;
-            const shouldProceed = await shouldProceedAfterPyprojectValidation(validationError, allPackages);
+            const shouldProceed = await shouldProceedAfterPyprojectValidation(result.validationErrors, {
+                allPyprojectTomlsSelected: true,
+            });
             if (!shouldProceed) {
                 return undefined;
             }
@@ -415,6 +416,9 @@ export async function createStepBasedVenvFlow(
         // Return undefined to indicate no environment was created
         return undefined;
     } catch (ex) {
+        if (ex instanceof CancellationError) {
+            return undefined;
+        }
         if (ex === QuickInputButtons.Back) {
             // This should not happen as back navigation is handled within each step
             // But if it does, restart the flow
