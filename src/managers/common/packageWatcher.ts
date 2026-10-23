@@ -26,16 +26,45 @@ const MAX_MISSING_EXECUTABLE_REFRESH_RETRIES = 60;
  * @returns An array of RelativePattern objects, one per discoverable package location.
  *          Empty if the environment has no `sysPrefix` or discoverable paths.
  */
-function getDefaultPackageWatchTargets(env: PythonEnvironment): RelativePattern[] {
+/**
+ * Derives the file system watch targets for a given Python environment.
+ *
+ * Targets include site-packages `.dist-info` directories and their contents for pip-style installs.
+ * For system Python on Linux, the base is scoped to the specific Python directory (e.g. `/usr/lib/python3.14`)
+ * rather than watching `/usr/lib` recursively, avoiding inotify watch exhaustion.
+ *
+ * @param env - The Python environment to derive watch targets for.
+ * @returns An array of RelativePattern objects, one per discoverable package location.
+ *          Empty if the environment has no `sysPrefix` or discoverable paths.
+ */
+export function getDefaultPackageWatchTargets(env: PythonEnvironment): RelativePattern[] {
     if (!env.sysPrefix) {
         return [];
     }
 
     const isWindows = process.platform === 'win32';
     const libraryPath = path.join(env.sysPrefix, isWindows ? 'Lib' : 'lib');
-    const pattern = isWindows
-        ? 'site-packages/{*.dist-info,*.dist-info/**}'
-        : 'python*/site-packages/{*.dist-info,*.dist-info/**}';
+    if (isWindows) {
+        return [new RelativePattern(libraryPath, 'site-packages/{*.dist-info,*.dist-info/**}')];
+    }
+
+    const normalizedPrefix = env.sysPrefix.replace(/\\/g, '/').toLowerCase();
+    const isSystem =
+        normalizedPrefix === '/usr' ||
+        normalizedPrefix === '/usr/local' ||
+        normalizedPrefix === '/' ||
+        normalizedPrefix.endsWith('/usr') ||
+        normalizedPrefix.endsWith('/usr/local');
+    const versionMatch = env.version?.match(/^(\d+\.\d+)/);
+
+    if (isSystem && versionMatch) {
+        // For system Python on Linux, avoid watching all of /usr/lib recursively which exhausts inotify watches.
+        // Instead, scope the watch base to the specific python version and watch both site-packages and dist-packages.
+        const pyDir = path.join(libraryPath, `python${versionMatch[1]}`);
+        return [new RelativePattern(pyDir, '{site-packages,dist-packages}/{*.dist-info,*.dist-info/**}')];
+    }
+
+    const pattern = 'python*/site-packages/{*.dist-info,*.dist-info/**}';
     return [new RelativePattern(libraryPath, pattern)];
 }
 

@@ -18,6 +18,7 @@ import type { EnvironmentManagers } from '../../../features/envManagers';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 import {
     PackageWatcherTerminalActivation,
+    getDefaultPackageWatchTargets,
     registerPackageWatchers,
     watchPackageChangesForEnvironment,
 } from '../../../managers/common/packageWatcher';
@@ -182,6 +183,67 @@ suite('Package Watcher', () => {
                     pattern.pattern,
                     'python*/site-packages/{*.dist-info,*.dist-info/**}',
                     'Should watch .dist-info directories and their contents with python* glob',
+                );
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
+        });
+
+        test('should scope watch pattern to specific python version for /usr system Python (Fixes #1883)', () => {
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+            try {
+                const env = createMockEnvironment({
+                    sysPrefix: '/usr',
+                    version: '3.14.4',
+                });
+
+                const targets = getDefaultPackageWatchTargets(env);
+                assert.strictEqual(targets.length, 1);
+
+                const pattern = targets[0];
+                const basePath = pattern.baseUri.fsPath.replace(/\\/g, '/');
+                assert.ok(
+                    basePath.endsWith('/usr/lib/python3.14'),
+                    'Expected base path to end with /usr/lib/python3.14, got ' + basePath,
+                );
+                assert.notStrictEqual(
+                    basePath,
+                    '/usr/lib',
+                    'Must not watch all of /usr/lib recursively to prevent inotify exhaustion',
+                );
+                assert.strictEqual(
+                    pattern.pattern,
+                    '{site-packages,dist-packages}/{*.dist-info,*.dist-info/**}',
+                );
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
+        });
+
+        test('should scope watch pattern for /usr/local system Python', () => {
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+            try {
+                const env = createMockEnvironment({
+                    sysPrefix: '/usr/local',
+                    version: '3.13.2',
+                });
+
+                const targets = getDefaultPackageWatchTargets(env);
+                assert.strictEqual(targets.length, 1);
+
+                const pattern = targets[0];
+                const basePath = pattern.baseUri.fsPath.replace(/\\/g, '/');
+                assert.ok(
+                    basePath.endsWith('/usr/local/lib/python3.13'),
+                    'Expected base path to end with /usr/local/lib/python3.13, got ' + basePath,
+                );
+                assert.strictEqual(
+                    pattern.pattern,
+                    '{site-packages,dist-packages}/{*.dist-info,*.dist-info/**}',
                 );
             } finally {
                 Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
