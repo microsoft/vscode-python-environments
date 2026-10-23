@@ -48,10 +48,6 @@ function isGlobalSelectionCacheEntry(value: unknown): value is GlobalSelectionCa
     );
 }
 
-function hasStoredGlobalSelection(value: unknown): boolean {
-    return (typeof value === 'string' && value.length > 0) || isGlobalSelectionCacheEntry(value);
-}
-
 function getStoredGlobalSelectionPath(value: unknown): string | undefined {
     if (typeof value === 'string') {
         return value || undefined;
@@ -187,8 +183,8 @@ export async function getSystemEnvForGlobal(): Promise<string | undefined> {
     ) {
         return globalSelection.path;
     }
-    if (hasStoredGlobalSelection(workspace.selection)) {
-        return getStoredGlobalSelectionPath(workspace.selection);
+    if (workspace.revision) {
+        return undefined;
     }
     return getStoredGlobalSelectionPath(globalSelection);
 }

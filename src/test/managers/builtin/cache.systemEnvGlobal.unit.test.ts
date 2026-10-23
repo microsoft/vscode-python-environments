@@ -151,12 +151,12 @@ suite('System global environment cache persistence', () => {
             assert.strictEqual(await getSystemEnvForGlobal(), globalPath);
         });
 
-        test('keeps the workspace value when neither layer completed the marked update', async () => {
+        test('misses when neither layer completed the marked update', async () => {
             workspaceState.get.withArgs(SYSTEM_GLOBAL_KEY).resolves(entry(workspacePath, 'old'));
             workspaceState.get.withArgs(SYSTEM_GLOBAL_REVISION_KEY).resolves('new');
             globalState.get.withArgs(SYSTEM_GLOBAL_KEY).resolves(entry(workspacePath, 'old'));
 
-            assert.strictEqual(await getSystemEnvForGlobal(), workspacePath);
+            assert.strictEqual(await getSystemEnvForGlobal(), undefined);
         });
 
         test('honors a workspace tombstone without resurrecting an older global value', async () => {
@@ -172,6 +172,14 @@ suite('System global environment cache persistence', () => {
             workspaceState.get.withArgs(SYSTEM_GLOBAL_KEY).resolves(entry(workspacePath, 'old'));
             workspaceState.get.withArgs(SYSTEM_GLOBAL_REVISION_KEY).resolves('clear');
             globalState.get.withArgs(SYSTEM_GLOBAL_KEY).resolves(entry(undefined, 'clear'));
+
+            assert.strictEqual(await getSystemEnvForGlobal(), undefined);
+        });
+
+        test('does not resurrect a cleared workspace entry after globalState becomes cold', async () => {
+            workspaceState.get.withArgs(SYSTEM_GLOBAL_KEY).resolves(entry(workspacePath, 'old'));
+            workspaceState.get.withArgs(SYSTEM_GLOBAL_REVISION_KEY).resolves('clear');
+            globalState.get.withArgs(SYSTEM_GLOBAL_KEY).resolves(undefined);
 
             assert.strictEqual(await getSystemEnvForGlobal(), undefined);
         });
