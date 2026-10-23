@@ -1,5 +1,6 @@
 import { Disposable, Event, EventEmitter, ProviderResult, TreeDataProvider, TreeItem, TreeView } from 'vscode';
 import { DidChangeEnvironmentEventArgs, EnvironmentGroupInfo, PythonEnvironment } from '../../api';
+import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createTreeView } from '../../common/window.apis';
@@ -37,19 +38,55 @@ function getBaseName(displayName: string): string {
 }
 
 /**
+ * Checks if an environment is a virtual environment (project-scoped venv/poetry/pipenv).
+ */
+function isVirtualEnv(env: PythonEnvironment): boolean {
+    if (env.envId.managerId === SYSTEM_MANAGER_ID) {
+        return false;
+    }
+    if (
+        env.envId.managerId === VENV_MANAGER_ID ||
+        env.envId.managerId.includes('venv') ||
+        env.envId.managerId.includes('pipenv') ||
+        env.envId.managerId.includes('poetry')
+    ) {
+        return true;
+    }
+    const envPath = (env.environmentPath.fsPath || '').replace(/\\/g, '/');
+    const parts = envPath.split('/').filter((p) => p.length > 0);
+    if (parts.some((p) => /^(appdata|local|\.local|usr|opt)$/i.test(p))) {
+        return false;
+    }
+    let binIndex = -1;
+    for (let i = parts.length - 1; i >= 0; i--) {
+        const lower = parts[i].toLowerCase();
+        if (lower === 'bin' || lower === 'scripts') {
+            binIndex = i;
+            break;
+        }
+    }
+    if (binIndex > 0) {
+        const folder = parts[binIndex - 1].toLowerCase();
+        if (folder === '.venv' || folder === 'venv' || folder === 'env' || folder === '.env' || folder === 'virtualenv') {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Computes disambiguation suffixes for environments with similar base names.
  *
  * When multiple environments share the same base name (ignoring version numbers),
- * this function returns a map from environment ID to the parent folder name,
- * which can be displayed to help users distinguish between them.
- *
- * @example Two environments '.venv (3.12)' in folders 'alice' and 'bob' would
- * return suffixes 'alice' and 'bob' respectively.
+ * this function returns a map from environment ID to a distinguishing suffix:
+ * - For virtual environments, returns the parent project directory name.
+ * - For non-virtual environments (such as global/system interpreters), uses the distinguishing
+ *   executable folder, or the executable name when environments share the same directory.
  *
  * @param envs List of environments to analyze
- * @returns Map from environment ID to disambiguation suffix (parent folder name)
+ * @returns Map from environment ID to disambiguation suffix
  */
-function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<string, string> {
+export function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<string, string> {
     const suffixes = new Map<string, string>();
 
     // Group environments by their base name (ignoring version)
@@ -64,9 +101,81 @@ function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<string, s
 
     // For base names with multiple environments, compute suffixes
     for (const [, similarEnvs] of baseNameToEnvs) {
-        if (similarEnvs.length > 1) {
-            for (const env of similarEnvs) {
-                suffixes.set(env.envId.id, getEnvironmentParentDirName(env));
+        if (similarEnvs.length <= 1) {
+            continue;
+        }
+
+        const venvs: PythonEnvironment[] = [];
+        const nonVenvs: PythonEnvironment[] = [];
+
+        for (const env of similarEnvs) {
+            if (isVirtualEnv(env)) {
+                venvs.push(env);
+            } else {
+                nonVenvs.push(env);
+            }
+        }
+
+        for (const env of venvs) {
+            suffixes.set(env.envId.id, getEnvironmentParentDirName(env));
+        }
+
+        if (nonVenvs.length > 0) {
+            const envWithPaths = nonVenvs.map((env) => {
+                const execPath = (env.execInfo?.run?.executable || env.environmentPath.fsPath).replace(/\\/g, '/');
+                const parts = execPath.split('/').filter((p) => p.length > 0);
+                const execName = parts[parts.length - 1] || '';
+                const dirParts = parts.slice(0, -1);
+                const dirPath = dirParts.join('/');
+                return { env, execPath, execName, dirParts, dirPath };
+            });
+
+            // Group non-venvs by their directory path
+            const dirMap = new Map<string, typeof envWithPaths>();
+            for (const item of envWithPaths) {
+                const list = dirMap.get(item.dirPath) ?? [];
+                list.push(item);
+                dirMap.set(item.dirPath, list);
+            }
+
+            const candidateSuffixes = new Map<string, string>();
+            for (const item of envWithPaths) {
+                const sameDirItems = dirMap.get(item.dirPath);
+                if (sameDirItems && sameDirItems.length > 1) {
+                    // Interpreters in the same directory: disambiguate using executable name
+                    candidateSuffixes.set(item.env.envId.id, item.execName);
+                } else {
+                    // Different directories: use distinguishing folder
+                    const lastDir = item.dirParts[item.dirParts.length - 1] || '';
+                    if (lastDir.toLowerCase() === 'bin' || lastDir.toLowerCase() === 'scripts') {
+                        const parentOfLast = item.dirParts.length >= 2 ? item.dirParts[item.dirParts.length - 2] : '';
+                        candidateSuffixes.set(item.env.envId.id, parentOfLast ? `${parentOfLast}/${lastDir}` : lastDir);
+                    } else {
+                        candidateSuffixes.set(item.env.envId.id, lastDir);
+                    }
+                }
+            }
+
+            // Verify candidates do not collide across different directories
+            const counts = new Map<string, number>();
+            for (const suffix of candidateSuffixes.values()) {
+                counts.set(suffix, (counts.get(suffix) ?? 0) + 1);
+            }
+
+            for (const item of envWithPaths) {
+                const cand = candidateSuffixes.get(item.env.envId.id)!;
+                if ((counts.get(cand) ?? 0) > 1) {
+                    // Suffix collision across directories: include distinguishing folder and executable
+                    const lastDir = item.dirParts[item.dirParts.length - 1] || '';
+                    const parentOfLast = item.dirParts.length >= 2 ? item.dirParts[item.dirParts.length - 2] : '';
+                    const folder =
+                        lastDir.toLowerCase() === 'bin' || lastDir.toLowerCase() === 'scripts'
+                            ? (parentOfLast ? `${parentOfLast}/${lastDir}` : lastDir)
+                            : lastDir;
+                    suffixes.set(item.env.envId.id, `${folder}/${item.execName}`);
+                } else {
+                    suffixes.set(item.env.envId.id, cand);
+                }
             }
         }
     }
