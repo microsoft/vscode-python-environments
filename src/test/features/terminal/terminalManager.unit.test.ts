@@ -763,3 +763,209 @@ suite('TerminalManager - initialize() skips pseudoterminals', () => {
         assert.strictEqual(terminalActivation.activateCalls, 0, 'Should not activate any pseudoterminals');
     });
 });
+
+
+suite('Terminal closed during activation lifecycle (Fixes #1867)', () => {
+    let terminalActivation: TestTerminalActivation;
+    let onDidCloseEmitter: EventEmitter<Terminal>;
+    let terminalManager: TerminalManagerImpl;
+    let tempRoot: string;
+    let projectDir: string;
+    let projectUri: Uri;
+
+    setup(async () => {
+        terminalActivation = new TestTerminalActivation();
+        onDidCloseEmitter = new EventEmitter<Terminal>();
+
+        sinon.stub(terminalUtils, 'getAutoActivationType').returns(terminalUtils.ACT_TYPE_COMMAND);
+        sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
+        sinon.stub(activationUtils, 'isActivatableEnvironment').returns(true);
+        sinon.stub(shellDetector, 'identifyTerminalShell').returns('bash');
+        sinon.stub(windowApis, 'onDidOpenTerminal').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'onDidCloseTerminal').callsFake((listener) => onDidCloseEmitter.event(listener));
+        sinon.stub(windowApis, 'onDidChangeWindowState').returns(new Disposable(() => {}));
+        sinon.stub(windowApis, 'terminals').returns([]);
+        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => {
+            const mockProgress = { report: () => {} };
+            const mockCancellationToken = {
+                isCancellationRequested: false,
+                onCancellationRequested: () => new Disposable(() => {}),
+            };
+            return task(mockProgress as never, mockCancellationToken as never);
+        });
+        sinon.stub(workspaceApis, 'onDidChangeConfiguration').returns(new Disposable(() => {}));
+
+        tempRoot = await fsapi.mkdtemp(path.join(os.tmpdir(), 'py-envs-1867-'));
+        projectDir = path.join(tempRoot, 'workspace');
+        await fsapi.ensureDir(projectDir);
+        projectUri = Uri.file(projectDir);
+
+        terminalManager = new TerminalManagerImpl(terminalActivation, [], []);
+    });
+
+    teardown(async () => {
+        sinon.restore();
+        terminalActivation.dispose();
+        onDidCloseEmitter.dispose();
+        await fsapi.remove(tempRoot);
+    });
+
+    function createMockEnv(): PythonEnvironment {
+        return {
+            envId: { id: 'test-env', managerId: 'test-manager' },
+            name: 'Test Env',
+            displayName: 'Test Env',
+            displayPath: '/bin/python',
+            version: '3.12.0',
+            environmentPath: Uri.file('/bin/python'),
+            sysPrefix: '/bin',
+            execInfo: {
+                run: { executable: '/bin/python' },
+                activation: [{ executable: '/bin/activate' }],
+            },
+        };
+    }
+
+    test('create() rejects if terminal is closed while activation is in progress', async () => {
+        let createdTerminal: Terminal | undefined;
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => {
+            const t = {
+                name: 'Python',
+                creationOptions: {},
+                show: sinon.stub(),
+                sendText: sinon.stub(),
+                exitStatus: undefined,
+            } as unknown as Terminal;
+            createdTerminal = t;
+            return t;
+        });
+
+        // Simulate terminal close during activation
+        sinon.stub(terminalActivation, 'activate').callsFake(async (t) => {
+            (t as { exitStatus?: { reason: number } }).exitStatus = { reason: 1 };
+            onDidCloseEmitter.fire(t);
+        });
+
+        const env = createMockEnv();
+        await assert.rejects(
+            async () => {
+                await terminalManager.create(env, { cwd: projectDir });
+            },
+            (error: Error) => error.message.includes('disposed'),
+        );
+        assert.ok(createdTerminal);
+    });
+
+    test('getProjectTerminal creates fresh replacement after terminal was closed during activation', async () => {
+        let createCount = 0;
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => {
+            createCount++;
+            return {
+                name: `Python ${createCount}`,
+                creationOptions: {},
+                show: sinon.stub(),
+                sendText: sinon.stub(),
+                exitStatus: undefined,
+            } as unknown as Terminal;
+        });
+
+        let shouldFailActivation = true;
+        sinon.stub(terminalActivation, 'activate').callsFake(async (t) => {
+            if (shouldFailActivation) {
+                (t as { exitStatus?: { reason: number } }).exitStatus = { reason: 1 };
+                onDidCloseEmitter.fire(t);
+            }
+        });
+
+        const env = createMockEnv();
+
+        // First attempt fails because terminal was closed during activation
+        await assert.rejects(async () => {
+            await terminalManager.getProjectTerminal(projectUri, env);
+        });
+
+        // Second attempt: activation succeeds, fresh terminal should be created and cached
+        shouldFailActivation = false;
+        const liveTerminal = await terminalManager.getProjectTerminal(projectUri, env);
+        assert.strictEqual(createCount, 2);
+        assert.strictEqual(liveTerminal.name, 'Python 2');
+
+        // Third attempt: should reuse the live cached terminal without creating a 3rd
+        const reusedTerminal = await terminalManager.getProjectTerminal(projectUri, env);
+        assert.strictEqual(reusedTerminal, liveTerminal);
+        assert.strictEqual(createCount, 2);
+    });
+
+    test('getDedicatedTerminal creates fresh replacement after terminal was closed during activation', async () => {
+        let createCount = 0;
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => {
+            createCount++;
+            return {
+                name: `Python: file ${createCount}`,
+                creationOptions: {},
+                show: sinon.stub(),
+                sendText: sinon.stub(),
+                exitStatus: undefined,
+            } as unknown as Terminal;
+        });
+
+        let shouldFailActivation = true;
+        sinon.stub(terminalActivation, 'activate').callsFake(async (t) => {
+            if (shouldFailActivation) {
+                (t as { exitStatus?: { reason: number } }).exitStatus = { reason: 1 };
+                onDidCloseEmitter.fire(t);
+            }
+        });
+
+        const env = createMockEnv();
+        const scriptPath = path.join(projectDir, 'script.py');
+        await fsapi.writeFile(scriptPath, 'print(1)');
+        const fileUri = Uri.file(scriptPath);
+
+        const config = { get: sinon.stub().returns(false) } as unknown as WorkspaceConfiguration;
+        sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+        // First attempt fails
+        await assert.rejects(async () => {
+            await terminalManager.getDedicatedTerminal(fileUri, projectUri, env);
+        });
+
+        // Second attempt succeeds with new terminal
+        shouldFailActivation = false;
+        const liveTerminal = await terminalManager.getDedicatedTerminal(fileUri, projectUri, env);
+        assert.strictEqual(createCount, 2);
+        assert.strictEqual(liveTerminal.name, 'Python: file 2');
+
+        // Subsequent attempt reuses the live terminal
+        const reused = await terminalManager.getDedicatedTerminal(fileUri, projectUri, env);
+        assert.strictEqual(reused, liveTerminal);
+        assert.strictEqual(createCount, 2);
+    });
+
+    test('getProjectTerminal evicts cached terminal if exitStatus is defined and recreates replacement', async () => {
+        let createCount = 0;
+        sinon.stub(windowApis, 'createTerminal').callsFake(() => {
+            createCount++;
+            return {
+                name: `Python ${createCount}`,
+                creationOptions: {},
+                show: sinon.stub(),
+                sendText: sinon.stub(),
+                exitStatus: undefined,
+            } as unknown as Terminal;
+        });
+
+        const env = createMockEnv();
+
+        const term1 = await terminalManager.getProjectTerminal(projectUri, env);
+        assert.strictEqual(term1.name, 'Python 1');
+
+        // Mark term1 as exited without close event
+        (term1 as { exitStatus?: { reason: number } }).exitStatus = { reason: 0 };
+
+        // Next call should evict exited term1 and create replacement
+        const term2 = await terminalManager.getProjectTerminal(projectUri, env);
+        assert.strictEqual(createCount, 2);
+        assert.strictEqual(term2.name, 'Python 2');
+    });
+});
