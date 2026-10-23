@@ -32,6 +32,8 @@ export interface FastPathOptions {
     startBackgroundInit: () => Promise<void> | Thenable<void>;
     /** Optional: reads the persisted env path for global scope (when scope is undefined). */
     getGlobalPersistedPath?: () => Promise<string | undefined>;
+    /** Optional: removes a definitively stale persisted path for global scope. */
+    invalidateGlobalPersistedPath?: (persistedPath: string) => Promise<void>;
 }
 
 /**
@@ -68,6 +70,17 @@ async function persistedPathExists(persistedPath: string): Promise<boolean> {
         }
         // Unknown error (e.g. EACCES) — don't treat as missing; let resolve() decide.
         return true;
+    }
+}
+
+async function invalidateGlobalPersistedPath(opts: FastPathOptions, persistedPath: string): Promise<void> {
+    if (!opts.invalidateGlobalPersistedPath) {
+        return;
+    }
+    try {
+        await opts.invalidateGlobalPersistedPath(persistedPath);
+    } catch (error) {
+        traceError(`[${opts.label}] Failed to invalidate stale global path '${persistedPath}':`, error);
     }
 }
 
@@ -133,6 +146,7 @@ export async function tryFastPathGet(opts: FastPathOptions): Promise<FastPathRes
                 traceVerbose(
                     `[${opts.label}] Fast path: persisted path '${persistedPath}' does not exist, falling through to slow path`,
                 );
+                await invalidateGlobalPersistedPath(opts, persistedPath);
                 return undefined;
             }
             try {

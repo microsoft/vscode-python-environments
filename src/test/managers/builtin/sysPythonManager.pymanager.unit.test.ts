@@ -112,6 +112,15 @@ suite('System Python PyManager integration', () => {
         sinon.assert.notCalled(list);
     });
 
+    test('clears the persisted selection when global system Python is reset', async () => {
+        await manager.getEnvironments('global');
+
+        await manager.set(undefined);
+
+        sinon.assert.calledOnceWithExactly(setGlobal, undefined);
+        assert.strictEqual(await manager.get(undefined), native);
+    });
+
     test('delegates missing-Python acquisition without re-entering the environment API', async () => {
         nativeRefresh.resolves([]);
         const installed = environment(path.join(root, 'installed', 'python.exe'), '3.14.6');

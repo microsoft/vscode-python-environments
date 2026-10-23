@@ -302,6 +302,29 @@ suite('Manager get() fast path', () => {
         });
     });
 
+    suite('SysPythonManager global cache', () => {
+        test('invalidates a definitively missing global selection through both cache layers', async () => {
+            const persistedPath = path.resolve('missing', 'global-python');
+            sandbox.stub(sysCache, 'getSystemEnvForGlobal').resolves(persistedPath);
+            const invalidate = sandbox.stub(sysCache, 'invalidateSystemEnvForGlobal').resolves();
+            const resolve = sandbox.stub(sysUtils, 'resolveSystemPythonEnvironmentPath').resolves(undefined);
+            (fs.promises.access as sinon.SinonStub).withArgs(persistedPath).rejects(
+                Object.assign(new Error('missing'), { code: 'ENOENT' }),
+            );
+            sandbox.stub(sysUtils, 'refreshPythons').resolves([]);
+            const manager = new SysPythonManager(createMockNativeFinder(), createMockApi(), createMockLog());
+            sandbox
+                .stub(manager as unknown as { initializeDiscovery: () => Promise<void> }, 'initializeDiscovery')
+                .resolves();
+            sandbox.stub(manager, 'initialize').resolves();
+
+            assert.strictEqual(await manager.get(undefined), undefined);
+
+            sinon.assert.notCalled(resolve);
+            sinon.assert.calledOnceWithExactly(invalidate, persistedPath);
+        });
+    });
+
     suite('VenvManager specific', () => {
         test('fast path: background init failure resets _initialized for retry', async () => {
             const persistedPath = path.resolve('test-workspace', '.venv');

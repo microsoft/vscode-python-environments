@@ -10,10 +10,12 @@ export interface PersistentState {
 
 class PersistentStateImpl implements PersistentState {
     private clearing: Deferred<void>;
+
     constructor(private readonly momento: Memento) {
         this.clearing = createDeferred<void>();
         this.clearing.resolve();
     }
+
     async get<T>(key: string, defaultValue?: T): Promise<T | undefined> {
         await this.clearing.promise;
         if (defaultValue === undefined) {
@@ -21,6 +23,7 @@ class PersistentStateImpl implements PersistentState {
         }
         return this.momento.get<T>(key, defaultValue);
     }
+
     async set<T>(key: string, value: T): Promise<void> {
         await this.clearing.promise;
         await this.momento.update(key, value);
@@ -32,12 +35,22 @@ class PersistentStateImpl implements PersistentState {
             traceError('Error while updating state for key:', key);
         }
     }
+
     async clear(keys?: string[]): Promise<void> {
         if (this.clearing.completed) {
-            this.clearing = createDeferred<void>();
-            const _keys = keys ?? this.momento.keys();
-            await Promise.all(_keys.map((key) => this.momento.update(key, undefined)));
-            this.clearing.resolve();
+            const clearing = (this.clearing = createDeferred<void>());
+            try {
+                const _keys = keys ?? this.momento.keys();
+                const results = await Promise.allSettled(
+                    _keys.map((key) => this.momento.update(key, undefined)),
+                );
+                const failure = results.find((result) => result.status === 'rejected');
+                if (failure?.status === 'rejected') {
+                    throw failure.reason;
+                }
+            } finally {
+                clearing.resolve();
+            }
         }
         return this.clearing.promise;
     }
@@ -46,9 +59,14 @@ class PersistentStateImpl implements PersistentState {
 const _workspace = createDeferred<PersistentState>();
 const _global = createDeferred<PersistentState>();
 
+/** Creates a persistent-state wrapper for the provided VS Code Memento. */
+export function createPersistentState(memento: Memento): PersistentState {
+    return new PersistentStateImpl(memento);
+}
+
 export function setPersistentState(context: ExtensionContext): void {
-    _workspace.resolve(new PersistentStateImpl(context.workspaceState));
-    _global.resolve(new PersistentStateImpl(context.globalState));
+    _workspace.resolve(createPersistentState(context.workspaceState));
+    _global.resolve(createPersistentState(context.globalState));
 }
 
 export function getWorkspacePersistentState(): Promise<PersistentState> {

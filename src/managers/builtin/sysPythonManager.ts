@@ -33,6 +33,7 @@ import {
     clearSystemEnvCache,
     getSystemEnvForGlobal,
     getSystemEnvForWorkspace,
+    invalidateSystemEnvForGlobal,
     setSystemEnvForGlobal,
     setSystemEnvForWorkspace,
     setSystemEnvForWorkspaces,
@@ -321,6 +322,7 @@ export class SysPythonManager implements EnvironmentManager {
             getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getSystemEnvForWorkspace(fsPath),
             getGlobalPersistedPath: () => getSystemEnvForGlobal(),
+            invalidateGlobalPersistedPath: (stalePath) => invalidateSystemEnvForGlobal(stalePath),
             resolve: (p) => resolveSystemPythonEnvironmentPath(p, this.nativeFinder, this.api, this),
             startBackgroundInit: () => this.initializeDiscovery(),
         });
@@ -340,9 +342,7 @@ export class SysPythonManager implements EnvironmentManager {
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
         if (scope === undefined) {
             this.globalEnv = environment ?? getDefaultGlobalPython(this.collection);
-            if (environment) {
-                await setSystemEnvForGlobal(environment.environmentPath.fsPath);
-            }
+            await setSystemEnvForGlobal(environment?.environmentPath.fsPath);
         }
 
         if (scope instanceof Uri) {

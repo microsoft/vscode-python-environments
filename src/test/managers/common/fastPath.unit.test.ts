@@ -115,32 +115,38 @@ suite('tryFastPathGet', () => {
         assert.strictEqual(props.result, 'miss');
     });
 
-    test('reports stale when global cached path resolves to undefined', async () => {
+    test('reports stale without invalidating when global cached path resolves to undefined', async () => {
         const globalPath = __filename;
+        const invalidateGlobalPersistedPath = sinon.stub().resolves();
         const { opts } = createOpts({
             scope: undefined,
             getGlobalPersistedPath: sinon.stub().resolves(globalPath),
+            invalidateGlobalPersistedPath,
             resolve: sinon.stub().resolves(undefined),
         });
         const result = await tryFastPathGet(opts);
 
         assert.strictEqual(result, undefined, 'Should fall through when cached env resolves to undefined');
+        sinon.assert.notCalled(invalidateGlobalPersistedPath);
         assert.ok(sendTelemetryStub.calledOnce, 'Should send telemetry for stale cache');
         const [eventName, , props] = sendTelemetryStub.firstCall.args;
         assert.strictEqual(eventName, EventNames.GLOBAL_ENV_CACHE);
         assert.strictEqual(props.result, 'stale');
     });
 
-    test('returns undefined for global scope when cached path resolve fails', async () => {
+    test('returns undefined without invalidating when cached path resolve throws', async () => {
         const globalPath = __filename;
+        const invalidateGlobalPersistedPath = sinon.stub().resolves();
         const { opts } = createOpts({
             scope: undefined,
             getGlobalPersistedPath: sinon.stub().resolves(globalPath),
-            resolve: sinon.stub().rejects(new Error('python was uninstalled')),
+            invalidateGlobalPersistedPath,
+            resolve: sinon.stub().rejects(new Error('transient resolve failure')),
         });
         const result = await tryFastPathGet(opts);
 
-        assert.strictEqual(result, undefined, 'Should fall through when cached global env is stale');
+        assert.strictEqual(result, undefined, 'Should fall through when cached global env cannot be resolved');
+        sinon.assert.notCalled(invalidateGlobalPersistedPath);
 
         // Verify cache stale telemetry
         assert.ok(sendTelemetryStub.calledOnce, 'Should send telemetry for stale global cache');
@@ -201,31 +207,37 @@ suite('tryFastPathGet', () => {
         assert.strictEqual(result, undefined);
     });
 
-    test('skips resolve and falls through when workspace persisted path no longer exists on disk', async () => {
+    test('skips resolve without invalidating global state when a workspace path is missing', async () => {
         const missingPath = path.resolve('does', 'not', 'exist', 'python-missing');
         const resolve = sinon.stub().resolves(createMockEnv(missingPath));
+        const invalidateGlobalPersistedPath = sinon.stub().resolves();
         const { opts } = createOpts({
             getPersistedPath: sinon.stub().resolves(missingPath),
+            invalidateGlobalPersistedPath,
             resolve,
         });
         const result = await tryFastPathGet(opts);
 
         assert.strictEqual(result, undefined, 'Should fall through when cached path is missing');
         assert.ok(resolve.notCalled, 'Should not invoke resolve (and thus PET) when path is missing');
+        sinon.assert.notCalled(invalidateGlobalPersistedPath);
     });
 
-    test('skips resolve and reports stale when global persisted path no longer exists on disk', async () => {
+    test('skips resolve, reports stale, and invalidates when global persisted path is missing', async () => {
         const missingPath = path.resolve('does', 'not', 'exist', 'python-missing');
         const resolve = sinon.stub().resolves(createMockEnv(missingPath));
+        const invalidateGlobalPersistedPath = sinon.stub().resolves();
         const { opts } = createOpts({
             scope: undefined,
             getGlobalPersistedPath: sinon.stub().resolves(missingPath),
+            invalidateGlobalPersistedPath,
             resolve,
         });
         const result = await tryFastPathGet(opts);
 
         assert.strictEqual(result, undefined, 'Should fall through when cached global path is missing');
         assert.ok(resolve.notCalled, 'Should not invoke resolve (and thus PET) when path is missing');
+        sinon.assert.calledOnceWithExactly(invalidateGlobalPersistedPath, missingPath);
         assert.ok(sendTelemetryStub.calledOnce, 'Should send telemetry for stale global cache');
         const [eventName, , props] = sendTelemetryStub.firstCall.args;
         assert.strictEqual(eventName, EventNames.GLOBAL_ENV_CACHE);

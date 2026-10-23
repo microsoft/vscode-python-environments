@@ -46,11 +46,12 @@ python environments extension begins activation
 - **If P3 won:** environment is already resolved → done, no `get()` call needed.
 - **Otherwise:** calls `manager.get(scope)`, which has two internal paths:
 
-  **Fast path** (`tryFastPathGet` in `fastPath.ts`) — entered when `_initialized` hasn't completed and scope is a `Uri`:
+  **Fast path** (`tryFastPathGet` in `fastPath.ts`) — entered when `_initialized` hasn't completed and the manager has a persisted path for the requested scope:
   1. Synchronously create `_initialized` deferred + kick off `startBackgroundInit()` (fire-and-forget full PET discovery)
-  2. Read persisted env path from workspace state
-  3. If persisted path exists → `resolve(path)` → return immediately (background init continues in parallel)
-  4. If no persisted path or resolve fails → fall through to slow path
+  2. Read the workspace-scoped path, or for the global system Python read the workspace-state mirror first and global state as a compatibility/recovery fallback
+  3. If the persisted path exists → `resolve(path)` → return immediately (background init continues in parallel)
+  4. If no persisted path or resolve fails → fall through to slow path; definitively missing global paths are invalidated in both stores
+  - Global mirror writes carry a revision and tombstone so partial Memento failures cannot resurrect or overwrite a newer selection
   - *On background init failure:* clears `_initialized` so next `get()` retries
 
   **Slow path** — fast path skipped or failed:
