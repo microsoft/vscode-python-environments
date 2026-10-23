@@ -4,7 +4,7 @@ import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { Uri } from 'vscode';
+import { CancellationError, Uri } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     DidChangeEnvironmentsEventArgs,
@@ -156,6 +156,27 @@ suite('VenvManager.create - orchestration', () => {
         assert.strictEqual(quickCreateVenvStub.firstCall.args[4], globalEnv);
         assert.strictEqual(quickCreateVenvStub.firstCall.args[5].fsPath, scope.fsPath);
         assert.deepStrictEqual(quickCreateVenvStub.firstCall.args[6], ['pytest']);
+    });
+
+    test('dependency-search cancellation returns quietly without environment side effects', async () => {
+        const globalEnv = createMockPythonEnvironment({
+            name: 'global',
+            envPath: testPath('global', 'python3'),
+            version: '3.12.0',
+        });
+        const manager = createManager({ getEnvironments: sinon.stub().resolves([globalEnv]) });
+        (manager as any).globalEnv = globalEnv;
+        quickCreateVenvStub.rejects(new CancellationError());
+        const scope = Uri.file(path.join(tmpRoot, 'cancelled-project'));
+
+        const result = await manager.create(scope, { quickCreate: true });
+
+        assert.strictEqual(result, undefined);
+        assert.deepStrictEqual((manager as any).collection, []);
+        assert.strictEqual(await fse.pathExists(path.join(scope.fsPath, '.venv')), false);
+        assert.ok(showErrorStub.notCalled);
+        assert.ok(executeCommandStub.notCalled);
+        assert.strictEqual((manager as any).skipWatcherRefresh, false);
     });
 
     test('reports creation errors without adding an environment', async () => {

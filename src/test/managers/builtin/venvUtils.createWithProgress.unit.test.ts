@@ -402,6 +402,79 @@ suite('createWithProgress uv tracking', () => {
             requirements,
         ]);
     });
+
+    test('private quick create preserves cancellation when no project resolves and .venv exists', async () => {
+        const source = new CancellationTokenSource();
+        const manage = sinon.stub().resolves();
+        const operation: PythonToolOperation = {
+            token: source.token,
+            managePackages: manage,
+            getGlobalEnvironments: async () => [baseEnvironment],
+        };
+        api.getPythonProject = sinon.stub().returns(undefined);
+        await fs.ensureDir(path.join(tempRoot, '.venv'));
+        try {
+            const pending = quickCreateVenv(
+                nativeFinder,
+                api,
+                log,
+                manager,
+                baseEnvironment,
+                Uri.file(tempRoot),
+                undefined,
+                operation,
+            );
+            queueMicrotask(() => source.cancel());
+
+            await assert.rejects(pending, CancellationError);
+            assert.ok((builtinHelpers.runUV as sinon.SinonStub).notCalled);
+            assert.ok(manage.notCalled);
+        } finally {
+            source.dispose();
+        }
+    });
+
+    test('private quick create preserves cancellation over a discovered validation error', async () => {
+        const source = new CancellationTokenSource();
+        const operation: PythonToolOperation = {
+            token: source.token,
+            managePackages: sinon.stub().resolves(),
+            getGlobalEnvironments: async () => [baseEnvironment],
+        };
+        api.getPythonProject = sinon.stub().returns({ name: 'project', uri: Uri.file(tempRoot) });
+        const validationError = {
+            message: 'Invalid build-system',
+            fileUri: Uri.file(path.join(tempRoot, 'pyproject.toml')),
+        };
+        const discoveryResult = Promise.resolve({ installables: [], validationErrors: [validationError] });
+        sinon.stub(pipUtils, 'getProjectInstallable').callsFake(() => {
+            void discoveryResult.then(() => source.cancel());
+            return discoveryResult;
+        });
+        const question = sinon
+            .stub(pipUtils, 'shouldProceedAfterPyprojectValidation')
+            .throws(new Error('Unexpected question'));
+        try {
+            await assert.rejects(
+                quickCreateVenv(
+                    nativeFinder,
+                    api,
+                    log,
+                    manager,
+                    baseEnvironment,
+                    Uri.file(tempRoot),
+                    undefined,
+                    operation,
+                ),
+                CancellationError,
+            );
+            assert.ok(question.notCalled);
+            assert.ok((builtinHelpers.runUV as sinon.SinonStub).notCalled);
+        } finally {
+            source.dispose();
+        }
+    });
+
     test('private quick create rejects pyproject validation errors without Continue Anyway', async () => {
         const source = new CancellationTokenSource();
         const operation: PythonToolOperation = {

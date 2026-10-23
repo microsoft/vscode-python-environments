@@ -36,11 +36,13 @@ import {
     onDidChangeTerminalShellIntegration,
     withProgress,
 } from './common/window.apis';
+import { getPythonApi, setPythonApi } from './extensionApi';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
 import { NewPackageProject } from './features/creators/newPackageProject';
 import { NewScriptProject } from './features/creators/newScriptProject';
+import type { ProjectCreators } from './features/creators/projectCreators';
 import { ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
@@ -65,6 +67,7 @@ import {
     setEnvManagerCommand,
     setPackageManagerCommand,
 } from './features/envCommands';
+import type { EnvironmentManagers } from './features/envManagers';
 import { PythonEnvironmentManagers } from './features/envManagers';
 import { EnvVarManager, PythonEnvVariableManager } from './features/execution/envVariableManager';
 import { latchInlineScriptFeatureActivation } from './features/inlineScript/activation';
@@ -75,9 +78,9 @@ import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
 } from './features/interpreterSelection';
+import type { PythonProjectManager } from './features/projectManager';
 import { PythonProjectManagerImpl } from './features/projectManager';
 import { reportIssue } from './features/reportIssue';
-import { getPythonApi, setPythonApi } from './extensionApi';
 import { registerCompletionProvider } from './features/settings/settingCompletions';
 import {
     isEnvironmentsExtensionEnabled,
@@ -99,13 +102,11 @@ import { PythonStatusBarImpl } from './features/views/pythonStatusBar';
 import { updateViewsAndStatus } from './features/views/revealHandler';
 import { TemporaryStateManager } from './features/views/temporaryStateManager';
 import { PythonEnvTreeItem } from './features/views/treeViewItems';
+import { registerWorkspacePythonContext } from './features/views/workspacePythonContext';
 import {
     getEnvManagerAndPackageManagerConfigLevels,
     runPetInTerminalImpl,
 } from './helpers';
-import type { ProjectCreators } from './features/creators/projectCreators';
-import type { EnvironmentManagers } from './features/envManagers';
-import type { PythonProjectManager } from './features/projectManager';
 import { registerInlineScriptFeatures } from './managers/builtin/inlineScript/main';
 import { registerSystemPythonFeatures } from './managers/builtin/main';
 import { SysPythonManager } from './managers/builtin/sysPythonManager';
@@ -139,6 +140,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
     context.subscriptions.push(outputChannel, registerLogger(outputChannel));
+
+    // Track whether this is a Python workspace (drives the activity bar icon). Registered after the
+    // `useEnvironmentsExtension` guard and the logger so failures are reported.
+    registerWorkspacePythonContext(context.subscriptions);
 
     ensureCorrectVersion();
 
