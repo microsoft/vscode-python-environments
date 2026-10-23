@@ -2,12 +2,21 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { Disposable, Terminal, TerminalShellExecution, TerminalShellExecutionEndEvent } from 'vscode';
 import * as windowApis from '../../../common/window.apis';
+import { ShellConstants } from '../../../features/common/shellConstants';
 import * as shellDetector from '../../../features/common/shellDetector';
 import { runInTerminal } from '../../../features/terminal/runInTerminal';
 import * as terminalUtils from '../../../features/terminal/utils';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 
 suite('runInTerminal', () => {
+    const posixShells = [
+        ShellConstants.SH,
+        ShellConstants.BASH,
+        ShellConstants.ZSH,
+        ShellConstants.KSH,
+        ShellConstants.GITBASH,
+    ];
+
     teardown(() => {
         sinon.restore();
     });
@@ -50,7 +59,7 @@ suite('runInTerminal', () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
 
         sinon.assert.notCalled(terminal.sendText as sinon.SinonStub);
-        sinon.assert.calledOnce(shellIntegration.executeCommand);
+        sinon.assert.calledOnceWithExactly(shellIntegration.executeCommand, 'python', ['main.py']);
         assert.ok(endListener, 'shell execution end listener should be registered');
 
         endListener!({ terminal, execution } as unknown as TerminalShellExecutionEndEvent);
@@ -74,8 +83,8 @@ suite('runInTerminal', () => {
         sinon.assert.calledOnceWithExactly(sendText, 'python main.py\n');
     });
 
-    test('preserves special characters in zsh script paths with shell integration', async () => {
-        sinon.stub(shellDetector, 'identifyTerminalShell').returns('zsh');
+    test('preserves special characters in POSIX shell arguments with shell integration', async () => {
+        const identifyTerminalShellStub = sinon.stub(shellDetector, 'identifyTerminalShell');
         const execution = {} as TerminalShellExecution;
         const executeCommand = sinon.stub().returns(execution);
         const terminal = {
@@ -98,48 +107,49 @@ suite('runInTerminal', () => {
             ['/workspace/$(touch marker).py', "python '/workspace/$(touch marker).py'"],
         ];
 
-        for (const [script, command] of cases) {
-            const runPromise = runInTerminal(environment, terminal, { cwd: '/workspace', args: [script] });
-            await new Promise<void>((resolve) => setImmediate(resolve));
-            sinon.assert.calledWithExactly(executeCommand, command);
-            assert.ok(endListener, 'shell execution end listener should be registered');
-            endListener!({ terminal, execution } as unknown as TerminalShellExecutionEndEvent);
-            await runPromise;
+        let callIndex = 0;
+        for (const shell of posixShells) {
+            identifyTerminalShellStub.returns(shell);
+            for (const [script, command] of cases) {
+                const runPromise = runInTerminal(environment, terminal, { cwd: '/workspace', args: [script] });
+                await new Promise<void>((resolve) => setImmediate(resolve));
+                assert.deepStrictEqual(executeCommand.getCall(callIndex).args, [command]);
+                assert.ok(endListener, 'shell execution end listener should be registered');
+                endListener!({ terminal, execution } as unknown as TerminalShellExecutionEndEvent);
+                await runPromise;
+                callIndex += 1;
+            }
         }
+        sinon.assert.callCount(executeCommand, posixShells.length * cases.length);
     });
 
-    test('preserves special characters in zsh script paths without shell integration', async () => {
-        sinon.stub(shellDetector, 'identifyTerminalShell').returns('zsh');
+    test('preserves special characters in POSIX shell arguments without shell integration', async () => {
+        const identifyTerminalShellStub = sinon.stub(shellDetector, 'identifyTerminalShell');
         sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
         const sendText = sinon.stub();
-        const terminal = {
-            name: 'Python',
-            shellIntegration: undefined,
-            sendText,
-        } as unknown as Terminal;
         const environment = createMockPythonEnvironment({ envPath: '/env/bin/python' });
+        const cases = [
+            ['/workspace/cost$AUDIT_UNSET.py', 'python /workspace/cost\\$AUDIT_UNSET.py\n'],
+            ["/workspace/it's_python.py", 'python "/workspace/it\'s_python.py"\n'],
+            ['=report.py', 'python \\=report.py\n'],
+            ['/workspace/$(touch marker).py', "python '/workspace/$(touch marker).py'\n"],
+        ];
 
-        await runInTerminal(environment, terminal, {
-            cwd: '/workspace',
-            args: ['/workspace/cost$AUDIT_UNSET.py'],
-        });
-        await runInTerminal(environment, terminal, {
-            cwd: '/workspace',
-            args: ["/workspace/it's_python.py"],
-        });
-        await runInTerminal(environment, terminal, {
-            cwd: '/workspace',
-            args: ['=report.py'],
-        });
-        await runInTerminal(environment, terminal, {
-            cwd: '/workspace',
-            args: ['/workspace/$(touch marker).py'],
-        });
-
-        sinon.assert.calledWithExactly(sendText, 'python /workspace/cost\\$AUDIT_UNSET.py\n');
-        sinon.assert.calledWithExactly(sendText, 'python "/workspace/it\'s_python.py"\n');
-        sinon.assert.calledWithExactly(sendText, 'python \\=report.py\n');
-        sinon.assert.calledWithExactly(sendText, "python '/workspace/$(touch marker).py'\n");
+        let callIndex = 0;
+        for (const shell of posixShells) {
+            identifyTerminalShellStub.returns(shell);
+            const terminal = {
+                name: 'Python',
+                shellIntegration: undefined,
+                sendText,
+            } as unknown as Terminal;
+            for (const [script, command] of cases) {
+                await runInTerminal(environment, terminal, { cwd: '/workspace', args: [script] });
+                assert.deepStrictEqual(sendText.getCall(callIndex).args, [command]);
+                callIndex += 1;
+            }
+        }
+        sinon.assert.callCount(sendText, posixShells.length * cases.length);
     });
 
     test('does not wait again when reusing a terminal without shell integration', async () => {

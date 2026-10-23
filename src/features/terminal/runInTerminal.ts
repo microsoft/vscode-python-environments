@@ -11,6 +11,13 @@ import { traceLog } from '../../common/logging';
 import { SHELL_INTEGRATION_TIMEOUT, waitForShellIntegration } from './utils';
 
 const shellIntegrationWaits = new WeakMap<Terminal, Promise<boolean>>();
+const posixShells = new Set([
+    ShellConstants.SH,
+    ShellConstants.BASH,
+    ShellConstants.ZSH,
+    ShellConstants.KSH,
+    ShellConstants.GITBASH,
+]);
 
 async function waitForShellIntegrationBeforeRun(terminal: Terminal): Promise<void> {
     let waitPromise = shellIntegrationWaits.get(terminal);
@@ -21,8 +28,8 @@ async function waitForShellIntegrationBeforeRun(terminal: Terminal): Promise<voi
     await waitPromise;
 }
 
-function getZshCommand(executable: string, args: string[]): string {
-    return quote([executable, ...args]);
+function getPosixShellCommand(shellType: string, executable: string, args: string[]): string | undefined {
+    return posixShells.has(shellType) ? quote([executable, ...args]) : undefined;
 }
 
 export async function runInTerminal(
@@ -46,7 +53,7 @@ export async function runInTerminal(
     if (!terminal.shellIntegration) {
         await waitForShellIntegrationBeforeRun(terminal);
     }
-    const zshCommand = shellType === ShellConstants.ZSH ? getZshCommand(executable, allArgs) : undefined;
+    const posixShellCommand = getPosixShellCommand(shellType, executable, allArgs);
     if (terminal.shellIntegration) {
         let execution: TerminalShellExecution | undefined;
         const deferred = createDeferred<void>();
@@ -57,9 +64,9 @@ export async function runInTerminal(
             }
         });
 
-        if (zshCommand) {
-            execution = terminal.shellIntegration.executeCommand(zshCommand);
-            traceLog(`runInTerminal: executeCommand ${zshCommand}`);
+        if (posixShellCommand !== undefined) {
+            execution = terminal.shellIntegration.executeCommand(posixShellCommand);
+            traceLog(`runInTerminal: executeCommand ${posixShellCommand}`);
         } else {
             const shouldSurroundWithQuotes =
                 executable.includes(' ') && !executable.startsWith('"') && !executable.endsWith('"');
@@ -77,7 +84,7 @@ export async function runInTerminal(
         }
         await deferred.promise;
     } else {
-        let text = zshCommand ?? quoteArgs([executable, ...allArgs]).join(' ');
+        let text = posixShellCommand ?? quoteArgs([executable, ...allArgs]).join(' ');
         if (shellType === ShellConstants.PWSH && !text.startsWith('&')) {
             // PowerShell requires commands to be prefixed with '&' to run them.
             text = `& ${text}`;
