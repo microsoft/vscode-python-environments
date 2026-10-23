@@ -18,7 +18,6 @@ import type { EnvironmentManagers } from '../../../features/envManagers';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 import {
     PackageWatcherTerminalActivation,
-    getDefaultPackageWatchTargets,
     registerPackageWatchers,
     watchPackageChangesForEnvironment,
 } from '../../../managers/common/packageWatcher';
@@ -190,6 +189,9 @@ suite('Package Watcher', () => {
         });
 
         test('should scope watch pattern to specific python version for /usr system Python (Fixes #1883)', () => {
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+
             const originalPlatform = process.platform;
             Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
 
@@ -198,12 +200,18 @@ suite('Package Watcher', () => {
                     sysPrefix: '/usr',
                     version: '3.14.4',
                 });
+                const packageManager = createMockPackageManager();
 
-                const targets = getDefaultPackageWatchTargets(env);
-                assert.strictEqual(targets.length, 1);
+                watchPackageChangesForEnvironment(
+                    env,
+                    packageManager as PackageManager,
+                    mockLogOutputChannel as LogOutputChannel,
+                );
 
-                const pattern = targets[0];
+                const firstCall = createFileSystemWatcherStub.getCall(0);
+                const pattern = firstCall.args[0] as RelativePattern;
                 const basePath = pattern.baseUri.fsPath.replace(/\\/g, '/');
+
                 assert.ok(
                     basePath.endsWith('/usr/lib/python3.14'),
                     'Expected base path to end with /usr/lib/python3.14, got ' + basePath,
@@ -223,6 +231,9 @@ suite('Package Watcher', () => {
         });
 
         test('should scope watch pattern for /usr/local system Python', () => {
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+
             const originalPlatform = process.platform;
             Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
 
@@ -231,12 +242,18 @@ suite('Package Watcher', () => {
                     sysPrefix: '/usr/local',
                     version: '3.13.2',
                 });
+                const packageManager = createMockPackageManager();
 
-                const targets = getDefaultPackageWatchTargets(env);
-                assert.strictEqual(targets.length, 1);
+                watchPackageChangesForEnvironment(
+                    env,
+                    packageManager as PackageManager,
+                    mockLogOutputChannel as LogOutputChannel,
+                );
 
-                const pattern = targets[0];
+                const firstCall = createFileSystemWatcherStub.getCall(0);
+                const pattern = firstCall.args[0] as RelativePattern;
                 const basePath = pattern.baseUri.fsPath.replace(/\\/g, '/');
+
                 assert.ok(
                     basePath.endsWith('/usr/local/lib/python3.13'),
                     'Expected base path to end with /usr/local/lib/python3.13, got ' + basePath,
