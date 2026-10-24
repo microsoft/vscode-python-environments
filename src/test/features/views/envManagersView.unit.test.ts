@@ -4,7 +4,8 @@ import * as typeMoq from 'typemoq';
 import { EventEmitter, TreeView, Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
-import { EnvManagerView } from '../../../features/views/envManagersView';
+import { EnvManagerView, computeDisambiguationSuffixes } from '../../../features/views/envManagersView';
+import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../../common/constants';
 import { ITemporaryStateManager } from '../../../features/views/temporaryStateManager';
 import { EnvTreeItem } from '../../../features/views/treeViewItems';
 import type {
@@ -241,5 +242,344 @@ suite('EnvManagerView.reveal Tests', () => {
         assert.ok(changed.calledOnce);
         listener.dispose();
         view.dispose();
+    });
+});
+
+
+suite('computeDisambiguationSuffixes Tests', () => {
+    function createTestEnv(options: {
+        id: string;
+        managerId: string;
+        name: string;
+        displayName?: string;
+        execPath: string;
+        environmentPath?: string;
+        version?: string;
+    }): PythonEnvironment {
+        const envPath = options.environmentPath ?? options.execPath;
+        return {
+            envId: {
+                id: options.id,
+                managerId: options.managerId,
+            },
+            name: options.name,
+            displayName: options.displayName ?? options.name,
+            displayPath: options.execPath,
+            version: options.version ?? '3.13.0',
+            environmentPath: Uri.file(envPath),
+            execInfo: {
+                run: { executable: options.execPath },
+            },
+            sysPrefix: envPath,
+        };
+    }
+
+    test('Differentiates multiple uv global launchers in same directory by executable name (Fixes #1893)', () => {
+        const env1 = createTestEnv({
+            id: 'uv-python',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.15',
+            execPath: 'C:\\Users\\kanadig\\.local\\bin\\python.exe',
+        });
+        const env2 = createTestEnv({
+            id: 'uv-python3',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.15',
+            execPath: 'C:\\Users\\kanadig\\.local\\bin\\python3.exe',
+        });
+        const env3 = createTestEnv({
+            id: 'uv-python3.13',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.15',
+            execPath: 'C:\\Users\\kanadig\\.local\\bin\\python3.13.exe',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2, env3]);
+
+        assert.strictEqual(suffixes.get('uv-python'), 'python.exe');
+        assert.strictEqual(suffixes.get('uv-python3'), 'python3.exe');
+        assert.strictEqual(suffixes.get('uv-python3.13'), 'python3.13.exe');
+        for (const suffix of suffixes.values()) {
+            assert.notStrictEqual(suffix, 'kanadig');
+            assert.notStrictEqual(suffix, 'bin');
+        }
+    });
+
+    test('Differentiates regular and free-threaded system interpreters in /usr/bin by executable name', () => {
+        const envRegular = createTestEnv({
+            id: 'fedora-regular',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.13',
+            execPath: '/usr/bin/python3.13',
+        });
+        const envFreeThreaded = createTestEnv({
+            id: 'fedora-freethreaded',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.13',
+            execPath: '/usr/bin/python3.13t',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([envRegular, envFreeThreaded]);
+
+        assert.strictEqual(suffixes.get('fedora-regular'), 'python3.13');
+        assert.strictEqual(suffixes.get('fedora-freethreaded'), 'python3.13t');
+        assert.notStrictEqual(suffixes.get('fedora-regular'), 'bin');
+        assert.notStrictEqual(suffixes.get('fedora-freethreaded'), 'bin');
+    });
+
+    test('Differentiates pythoncore installations by distinguishing directory without AppData', () => {
+        const env1 = createTestEnv({
+            id: 'core-64',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.14.0',
+            execPath: 'C:\\Users\\test\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe',
+        });
+        const env2 = createTestEnv({
+            id: 'core-64t',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.14.0',
+            execPath: 'C:\\Users\\test\\AppData\\Local\\Python\\pythoncore-3.14t-64\\python3.14t.exe',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('core-64'), 'pythoncore-3.14-64');
+        assert.strictEqual(suffixes.get('core-64t'), 'pythoncore-3.14t-64');
+        assert.notStrictEqual(suffixes.get('core-64'), 'AppData');
+        assert.notStrictEqual(suffixes.get('core-64t'), 'AppData');
+    });
+
+    test('Differentiates global interpreters across bin locations using distinguishing path', () => {
+        const env1 = createTestEnv({
+            id: 'usr-bin',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: '/usr/bin/python3.13',
+        });
+        const env2 = createTestEnv({
+            id: 'usr-local-bin',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: '/usr/local/bin/python3.13',
+        });
+        const env3 = createTestEnv({
+            id: 'opt-homebrew-bin',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: '/opt/homebrew/bin/python3.13',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2, env3]);
+
+        assert.strictEqual(suffixes.get('usr-bin'), 'usr/bin');
+        assert.strictEqual(suffixes.get('usr-local-bin'), 'local/bin');
+        assert.strictEqual(suffixes.get('opt-homebrew-bin'), 'homebrew/bin');
+        for (const suffix of suffixes.values()) {
+            assert.notStrictEqual(suffix, 'usr');
+            assert.notStrictEqual(suffix, 'bin');
+            assert.notStrictEqual(suffix, 'opt');
+        }
+    });
+
+    test('Preserves project parent folder names for virtual environments', () => {
+        const env1 = createTestEnv({
+            id: 'project-a-venv',
+            managerId: VENV_MANAGER_ID,
+            name: '.venv (3.12)',
+            execPath: '/home/user/alice/.venv/bin/python',
+        });
+        const env2 = createTestEnv({
+            id: 'project-b-venv',
+            managerId: VENV_MANAGER_ID,
+            name: '.venv (3.12)',
+            execPath: '/home/user/bob/.venv/bin/python',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('project-a-venv'), 'alice');
+        assert.strictEqual(suffixes.get('project-b-venv'), 'bob');
+    });
+
+    test('Does not add suffix for environments with unique base names', () => {
+        const env1 = createTestEnv({
+            id: 'python-312',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.12.0',
+            execPath: '/usr/bin/python3.12',
+        });
+        const env2 = createTestEnv({
+            id: 'python-313',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: '/usr/bin/python3.13',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.size, 0);
+    });
+    test('Preserves project parent folder names for virtual environments resolved through system manager (Finding A)', () => {
+        const env1 = createTestEnv({
+            id: 'sys-venv-alice',
+            managerId: SYSTEM_MANAGER_ID,
+            name: '.venv (3.12)',
+            execPath: '/home/user/alice/.venv/bin/python',
+        });
+        const env2 = createTestEnv({
+            id: 'sys-venv-bob',
+            managerId: SYSTEM_MANAGER_ID,
+            name: '.venv (3.12)',
+            execPath: '/home/user/bob/.venv/bin/python',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('sys-venv-alice'), 'alice');
+        assert.strictEqual(suffixes.get('sys-venv-bob'), 'bob');
+        assert.notStrictEqual(suffixes.get('sys-venv-alice'), '.venv/bin/python');
+        assert.notStrictEqual(suffixes.get('sys-venv-bob'), '.venv/bin/python');
+    });
+
+    test('Differentiates distinct Python-less Conda environments sharing Conda launcher executable (Finding B)', () => {
+        const env1 = createTestEnv({
+            id: 'conda-project1',
+            managerId: 'conda',
+            name: '',
+            displayName: ' (no-python)',
+            version: 'no-python',
+            execPath: '/home/user/miniconda3/bin/conda',
+            environmentPath: '/home/user/miniconda3/envs/project1',
+        });
+        const env2 = createTestEnv({
+            id: 'conda-project2',
+            managerId: 'conda',
+            name: '',
+            displayName: ' (no-python)',
+            version: 'no-python',
+            execPath: '/home/user/miniconda3/bin/conda',
+            environmentPath: '/home/user/miniconda3/envs/project2',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('conda-project1'), 'project1');
+        assert.strictEqual(suffixes.get('conda-project2'), 'project2');
+        assert.notStrictEqual(suffixes.get('conda-project1'), 'conda');
+        assert.notStrictEqual(suffixes.get('conda-project2'), 'conda');
+    });
+
+    test('Differentiates same-name Python-less Conda environments across different locations', () => {
+        const env1 = createTestEnv({
+            id: 'conda-myenv-1',
+            managerId: 'conda',
+            name: 'myenv',
+            displayName: 'myenv (no-python)',
+            version: 'no-python',
+            execPath: '/home/user/miniconda3/bin/conda',
+            environmentPath: '/home/user/miniconda3/envs/myenv',
+        });
+        const env2 = createTestEnv({
+            id: 'conda-myenv-2',
+            managerId: 'conda',
+            name: 'myenv',
+            displayName: 'myenv (no-python)',
+            version: 'no-python',
+            execPath: '/home/user/miniconda3/bin/conda',
+            environmentPath: '/opt/conda/envs/myenv',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('conda-myenv-1'), 'miniconda3/envs/myenv');
+        assert.strictEqual(suffixes.get('conda-myenv-2'), 'conda/envs/myenv');
+        assert.notStrictEqual(suffixes.get('conda-myenv-1'), suffixes.get('conda-myenv-2'));
+        assert.notStrictEqual(suffixes.get('conda-myenv-1'), 'conda');
+    });
+
+    test('Differentiates identical folder names on different Windows drive roots (Finding C)', () => {
+        const env1 = createTestEnv({
+            id: 'c-py313',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: 'C:\\Python313\\python.exe',
+        });
+        const env2 = createTestEnv({
+            id: 'd-py313',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: 'D:\\Python313\\python.exe',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('c-py313'), 'C:/Python313');
+        assert.strictEqual(suffixes.get('d-py313'), 'D:/Python313');
+        assert.notStrictEqual(suffixes.get('c-py313'), suffixes.get('d-py313'));
+        assert.notStrictEqual(suffixes.get('c-py313'), 'Python313/python.exe');
+        assert.notStrictEqual(suffixes.get('d-py313'), 'Python313/python.exe');
+    });
+
+    test('Resolves multi-level collisions across different drives by including ancestors', () => {
+        const env1 = createTestEnv({
+            id: 'c-tools-py313',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: 'C:\\Tools\\Python313\\python.exe',
+        });
+        const env2 = createTestEnv({
+            id: 'd-tools-py313',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: 'D:\\Tools\\Python313\\python.exe',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('c-tools-py313'), 'C:/Tools/Python313');
+        assert.strictEqual(suffixes.get('d-tools-py313'), 'D:/Tools/Python313');
+        assert.notStrictEqual(suffixes.get('c-tools-py313'), suffixes.get('d-tools-py313'));
+    });
+
+    test('Produces deterministic suffixes regardless of input environment order', () => {
+        const env1 = createTestEnv({
+            id: 'c-py313',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: 'C:\\Python313\\python.exe',
+        });
+        const env2 = createTestEnv({
+            id: 'd-py313',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: 'D:\\Python313\\python.exe',
+        });
+
+        const suffixesForward = computeDisambiguationSuffixes([env1, env2]);
+        const suffixesReversed = computeDisambiguationSuffixes([env2, env1]);
+
+        assert.strictEqual(suffixesForward.get('c-py313'), suffixesReversed.get('c-py313'));
+        assert.strictEqual(suffixesForward.get('d-py313'), suffixesReversed.get('d-py313'));
+    });
+
+    test('Differentiates virtual environments with identical project names in different workspaces', () => {
+        const env1 = createTestEnv({
+            id: 'user1-project',
+            managerId: VENV_MANAGER_ID,
+            name: '.venv (3.12)',
+            execPath: '/home/user1/project/.venv/bin/python',
+        });
+        const env2 = createTestEnv({
+            id: 'user2-project',
+            managerId: VENV_MANAGER_ID,
+            name: '.venv (3.12)',
+            execPath: '/home/user2/project/.venv/bin/python',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('user1-project'), 'user1/project');
+        assert.strictEqual(suffixes.get('user2-project'), 'user2/project');
+        assert.notStrictEqual(suffixes.get('user1-project'), suffixes.get('user2-project'));
     });
 });

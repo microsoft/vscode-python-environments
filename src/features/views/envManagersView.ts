@@ -1,5 +1,6 @@
 import { Disposable, Event, EventEmitter, ProviderResult, TreeDataProvider, TreeItem, TreeView } from 'vscode';
 import { DidChangeEnvironmentEventArgs, EnvironmentGroupInfo, PythonEnvironment } from '../../api';
+import { VENV_MANAGER_ID } from '../../common/constants';
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createTreeView } from '../../common/window.apis';
@@ -33,23 +34,102 @@ const ENV_STATE_KEYS = [COPIED_STATE, SELECTED_STATE];
  * @example getBaseName('myenv (3.14.1)') returns 'myenv'
  */
 function getBaseName(displayName: string): string {
-    return displayName.replace(/\s*\([0-9.]+\)\s*$/, '').trim();
+    return displayName.replace(/\s*\((?:[0-9.]+|no-python)\)\s*$/, '').trim();
+}
+
+/**
+ * Checks if an environment is a virtual environment (project-scoped venv/poetry/pipenv).
+ */
+function isVirtualEnv(env: PythonEnvironment): boolean {
+    if (
+        env.envId.managerId === VENV_MANAGER_ID ||
+        env.envId.managerId.includes('venv') ||
+        env.envId.managerId.includes('pipenv') ||
+        env.envId.managerId.includes('poetry')
+    ) {
+        return true;
+    }
+
+    const envPath = (env.environmentPath.fsPath || '').replace(/\\/g, '/');
+    const parts = envPath.split('/').filter((p) => p.length > 0);
+
+    let binIndex = -1;
+    for (let i = parts.length - 1; i >= 0; i--) {
+        const lower = parts[i].toLowerCase();
+        if (lower === 'bin' || lower === 'scripts') {
+            binIndex = i;
+            break;
+        }
+    }
+
+    if (binIndex > 0) {
+        const folder = parts[binIndex - 1].toLowerCase();
+        if (
+            folder === '.venv' ||
+            folder === 'venv' ||
+            folder === 'env' ||
+            folder === '.env' ||
+            folder === 'virtualenv' ||
+            folder.startsWith('.venv') ||
+            folder.startsWith('venv-') ||
+            folder.includes('virtualenv')
+        ) {
+            return true;
+        }
+    }
+
+    if (parts.length > 0) {
+        const lastPart = parts[parts.length - 1].toLowerCase();
+        if (
+            lastPart === '.venv' ||
+            lastPart === 'venv' ||
+            lastPart === 'env' ||
+            lastPart === '.env' ||
+            lastPart === 'virtualenv' ||
+            lastPart.startsWith('.venv') ||
+            lastPart.startsWith('venv-')
+        ) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Checks if an environment is a Conda environment without Python.
+ */
+function isPythonLessEnv(env: PythonEnvironment): boolean {
+    if (env.version === 'no-python') {
+        return true;
+    }
+    const nameLower = (env.displayName || env.name || '').toLowerCase();
+    if (nameLower.includes('no-python')) {
+        return true;
+    }
+    const exec = (env.execInfo?.run?.executable || '').replace(/\\/g, '/').toLowerCase();
+    if (exec.endsWith('/conda') || exec.endsWith('/conda.exe') || exec.endsWith('/conda.bat')) {
+        return true;
+    }
+    return false;
 }
 
 /**
  * Computes disambiguation suffixes for environments with similar base names.
  *
  * When multiple environments share the same base name (ignoring version numbers),
- * this function returns a map from environment ID to the parent folder name,
- * which can be displayed to help users distinguish between them.
- *
- * @example Two environments '.venv (3.12)' in folders 'alice' and 'bob' would
- * return suffixes 'alice' and 'bob' respectively.
+ * this function returns a map from environment ID to a distinguishing suffix:
+ * - For virtual environments, returns the parent project directory name.
+ * - For non-virtual environments (such as global/system interpreters), uses the distinguishing
+ *   executable folder, or the executable name when environments share the same directory.
+ * - For Python-less Conda environments, uses the environment location/prefix directory.
+ * - When candidate suffixes collide across distinct roots (e.g. C:\Python313 vs D:\Python313),
+ *   additional ancestor segments are included until suffixes are unique and unambiguous.
  *
  * @param envs List of environments to analyze
- * @returns Map from environment ID to disambiguation suffix (parent folder name)
+ * @returns Map from environment ID to disambiguation suffix
  */
-function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<string, string> {
+export function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<string, string> {
     const suffixes = new Map<string, string>();
 
     // Group environments by their base name (ignoring version)
@@ -64,9 +144,156 @@ function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<string, s
 
     // For base names with multiple environments, compute suffixes
     for (const [, similarEnvs] of baseNameToEnvs) {
-        if (similarEnvs.length > 1) {
-            for (const env of similarEnvs) {
-                suffixes.set(env.envId.id, getEnvironmentParentDirName(env));
+        if (similarEnvs.length <= 1) {
+            continue;
+        }
+
+        // Map non-virtual, non-PythonLess interpreters by directory path to identify same-folder executables
+        const dirMap = new Map<string, PythonEnvironment[]>();
+        for (const env of similarEnvs) {
+            if (!isVirtualEnv(env) && !isPythonLessEnv(env)) {
+                const execPath = (env.execInfo?.run?.executable || env.environmentPath.fsPath).replace(/\\/g, '/');
+                const parts = execPath.split('/').filter((p) => p.length > 0);
+                const dirPath = parts.slice(0, -1).join('/');
+                const list = dirMap.get(dirPath) ?? [];
+                list.push(env);
+                dirMap.set(dirPath, list);
+            }
+        }
+
+        interface EnvDisambiguationItem {
+            env: PythonEnvironment;
+            parts: string[];
+            isBinDir: boolean;
+            depth: number;
+            currentSuffix: string;
+        }
+
+        const items: EnvDisambiguationItem[] = similarEnvs.map((env) => {
+            const isVenv = isVirtualEnv(env);
+            const isNoPy = !isVenv && isPythonLessEnv(env);
+
+            if (isVenv) {
+                const envPath = (env.environmentPath.fsPath || '').replace(/\\/g, '/');
+                const parts = envPath.split('/').filter((p) => p.length > 0);
+                let venvIndex = -1;
+                for (let i = parts.length - 1; i >= 0; i--) {
+                    const part = parts[i].toLowerCase();
+                    if (part === 'bin' || part === 'scripts') {
+                        venvIndex = i - 1;
+                        break;
+                    }
+                    if (part.startsWith('python')) {
+                        continue;
+                    }
+                    venvIndex = i;
+                    break;
+                }
+                const projectParts = venvIndex > 0 ? parts.slice(0, venvIndex) : parts;
+                const finalParts = projectParts.length > 0 ? projectParts : [getEnvironmentParentDirName(env)];
+                const initialSuffix = getEnvironmentParentDirName(env);
+                return {
+                    env,
+                    parts: finalParts,
+                    isBinDir: false,
+                    depth: 1,
+                    currentSuffix: initialSuffix,
+                };
+            }
+
+            if (isNoPy) {
+                const envPath = (env.environmentPath.fsPath || env.sysPrefix || '').replace(/\\/g, '/');
+                const parts = envPath.split('/').filter((p) => p.length > 0);
+                return {
+                    env,
+                    parts,
+                    isBinDir: false,
+                    depth: 1,
+                    currentSuffix: parts[parts.length - 1] || '',
+                };
+            }
+
+            const execPath = (env.execInfo?.run?.executable || env.environmentPath.fsPath).replace(/\\/g, '/');
+            const parts = execPath.split('/').filter((p) => p.length > 0);
+            const execName = parts[parts.length - 1] || '';
+            const dirParts = parts.slice(0, -1);
+            const dirPath = dirParts.join('/');
+            const sameDirEnvs = dirMap.get(dirPath);
+            const isSameDir = sameDirEnvs !== undefined && sameDirEnvs.length > 1;
+
+            if (isSameDir) {
+                return {
+                    env,
+                    parts: [...dirParts, execName],
+                    isBinDir: false,
+                    depth: 1,
+                    currentSuffix: execName,
+                };
+            }
+
+            const lastDir = dirParts[dirParts.length - 1] || '';
+            const isBin = lastDir.toLowerCase() === 'bin' || lastDir.toLowerCase() === 'scripts';
+            if (isBin) {
+                const parentOfLast = dirParts.length >= 2 ? dirParts[dirParts.length - 2] : '';
+                return {
+                    env,
+                    parts: dirParts,
+                    isBinDir: true,
+                    depth: 1,
+                    currentSuffix: parentOfLast ? `${parentOfLast}/${lastDir}` : lastDir,
+                };
+            }
+
+            return {
+                env,
+                parts: dirParts,
+                isBinDir: false,
+                depth: 1,
+                currentSuffix: lastDir,
+            };
+        });
+
+        // Iteratively resolve collisions by expanding depth for colliding items
+        let hasCollisions = true;
+        let iteration = 0;
+        const maxIterations = 20;
+
+        while (hasCollisions && iteration < maxIterations) {
+            iteration++;
+            const counts = new Map<string, number>();
+            for (const item of items) {
+                counts.set(item.currentSuffix, (counts.get(item.currentSuffix) ?? 0) + 1);
+            }
+
+            hasCollisions = false;
+            for (const item of items) {
+                if ((counts.get(item.currentSuffix) ?? 0) > 1) {
+                    hasCollisions = true;
+                    const maxParts = item.parts.length;
+                    const neededCount = item.isBinDir ? item.depth + 2 : item.depth + 1;
+                    if (neededCount <= maxParts) {
+                        item.depth++;
+                        item.currentSuffix = item.parts.slice(-neededCount).join('/');
+                    }
+                }
+            }
+        }
+
+        // If identical collisions still remain after exhausting all ancestors (e.g. duplicate paths),
+        // ensure unique suffixes deterministically
+        const finalCounts = new Map<string, number>();
+        for (const item of items) {
+            finalCounts.set(item.currentSuffix, (finalCounts.get(item.currentSuffix) ?? 0) + 1);
+        }
+
+        const seenCounts = new Map<string, number>();
+        for (const item of items) {
+            if ((finalCounts.get(item.currentSuffix) ?? 0) > 1) {
+                const seen = (seenCounts.get(item.currentSuffix) ?? 0) + 1;
+                seenCounts.set(item.currentSuffix, seen);
+                suffixes.set(item.env.envId.id, `${item.currentSuffix} (${seen})`);
+            } else {
+                suffixes.set(item.env.envId.id, item.currentSuffix);
             }
         }
     }
