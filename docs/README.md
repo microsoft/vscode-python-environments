@@ -1358,8 +1358,9 @@ the terminal creates a new one, and multi-root or multi-project scenarios get
 one terminal per project.
 
 In PowerShell, Bash, Git Bash, and Zsh, pass unquoted argument values. The
-extension quotes them for the shell so characters such as `$`, apostrophes,
-and `$(...)` are passed literally, with or without shell integration.
+extension quotes them for the shell so characters such as `$`, apostrophes
+(including PowerShell's typographic single quotes), and `$(...)` are passed
+literally, with or without shell integration.
 
 #### `runInDedicatedTerminal`
 

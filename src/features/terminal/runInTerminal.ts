@@ -30,7 +30,8 @@ async function waitForShellIntegrationBeforeRun(terminal: Terminal): Promise<voi
 
 function getLiteralShellCommand(shellType: string, executable: string, args: string[]): string | undefined {
     if (shellType === ShellConstants.PWSH) {
-        return `& ${[executable, ...args].map((arg) => `'${arg.replace(/'/g, "''")}'`).join(' ')}`;
+        // PowerShell also treats typographic single quotes as string delimiters.
+        return `& ${[executable, ...args].map((arg) => `'${arg.replace(/['\u2018-\u201b]/g, '$&$&')}'`).join(' ')}`;
     }
     return posixShells.has(shellType) ? quote([executable, ...args]) : undefined;
 }

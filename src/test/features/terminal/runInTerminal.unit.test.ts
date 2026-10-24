@@ -138,6 +138,10 @@ suite('runInTerminal', () => {
                         ? [
                               ['cost$AUDIT_UNSET.py', "& 'python' 'cost$AUDIT_UNSET.py'"],
                               ["it's_python.py", "& 'python' 'it''s_python.py'"],
+                              ['O\u2018Connor report.py', "& 'python' 'O\u2018\u2018Connor report.py'"],
+                              ['O\u2019Connor report.py', "& 'python' 'O\u2019\u2019Connor report.py'"],
+                              ['O\u201aConnor report.py', "& 'python' 'O\u201a\u201aConnor report.py'"],
+                              ['O\u201bConnor report.py', "& 'python' 'O\u201b\u201bConnor report.py'"],
                               ['=report.py', "& 'python' '=report.py'"],
                               ['$(touch marker).py', "& 'python' '$(touch marker).py'"],
                               ['`whoami`.py', "& 'python' '`whoami`.py'"],
@@ -197,7 +201,7 @@ suite('runInTerminal', () => {
                         endListener = listener;
                         return new Disposable(() => undefined);
                     });
-                    const executable = path.win32.join('C:\\', "Python's $home", 'python.exe');
+                    const executable = path.win32.join('C:\\', "Python's \u2018\u2019\u201a\u201b $home", 'python.exe');
                     const cwd = Uri.file(path.resolve('workspace'));
                     const base = createMockPythonEnvironment({ envPath: executable });
                     const run = { executable, args: ['-I'] };
@@ -211,8 +215,8 @@ suite('runInTerminal', () => {
                     const runPromise = runInTerminal(environment, terminal, { cwd, args: ['main.py', ''] });
                     const expected =
                         shell === 'pwsh'
-                            ? "& 'C:\\Python''s $home\\python.exe' '-I' 'main.py' ''"
-                            : "\"C:/Python's \\$home/python.exe\" -I main.py ''";
+                            ? "& 'C:\\Python''s \u2018\u2018\u2019\u2019\u201a\u201a\u201b\u201b $home\\python.exe' '-I' 'main.py' ''"
+                            : "\"C:/Python's \u2018\u2019\u201a\u201b \\$home/python.exe\" -I main.py ''";
                     if (integration) {
                         await new Promise<void>((resolve) => setImmediate(resolve));
                         sinon.assert.calledOnceWithExactly(executeCommand, expected);
