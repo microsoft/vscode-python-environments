@@ -1,6 +1,8 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
-import { Disposable, Terminal, TerminalShellExecution, TerminalShellExecutionEndEvent } from 'vscode';
+import { Disposable, Terminal, TerminalShellExecution, TerminalShellExecutionEndEvent, Uri } from 'vscode';
+import * as platformUtils from '../../../common/utils/platformUtils';
 import * as windowApis from '../../../common/window.apis';
 import * as shellDetector from '../../../features/common/shellDetector';
 import { runInTerminal } from '../../../features/terminal/runInTerminal';
@@ -41,7 +43,11 @@ suite('runInTerminal', () => {
         const runPromise = runInTerminal(environment, terminal, { cwd: '/workspace', args: ['main.py'] });
         await new Promise<void>((resolve) => setImmediate(resolve));
 
-        sinon.assert.calledOnceWithExactly(waitForShellIntegrationStub, terminal, terminalUtils.SHELL_INTEGRATION_TIMEOUT);
+        sinon.assert.calledOnceWithExactly(
+            waitForShellIntegrationStub,
+            terminal,
+            terminalUtils.SHELL_INTEGRATION_TIMEOUT,
+        );
         sinon.assert.notCalled(terminal.sendText as sinon.SinonStub);
         sinon.assert.notCalled(shellIntegration.executeCommand);
 
@@ -50,7 +56,7 @@ suite('runInTerminal', () => {
         await new Promise<void>((resolve) => setImmediate(resolve));
 
         sinon.assert.notCalled(terminal.sendText as sinon.SinonStub);
-        sinon.assert.calledOnce(shellIntegration.executeCommand);
+        sinon.assert.calledOnceWithExactly(shellIntegration.executeCommand, 'python', ['main.py']);
         assert.ok(endListener, 'shell execution end listener should be registered');
 
         endListener!({ terminal, execution } as unknown as TerminalShellExecutionEndEvent);
@@ -70,77 +76,148 @@ suite('runInTerminal', () => {
         const environment = createMockPythonEnvironment({ envPath: '/env/bin/python' });
         await runInTerminal(environment, terminal, { cwd: '/workspace', args: ['main.py'] });
 
-        sinon.assert.calledOnceWithExactly(waitForShellIntegrationStub, terminal, terminalUtils.SHELL_INTEGRATION_TIMEOUT);
+        sinon.assert.calledOnceWithExactly(
+            waitForShellIntegrationStub,
+            terminal,
+            terminalUtils.SHELL_INTEGRATION_TIMEOUT,
+        );
         sinon.assert.calledOnceWithExactly(sendText, 'python main.py\n');
     });
 
-    test('preserves special characters in zsh script paths with shell integration', async () => {
-        sinon.stub(shellDetector, 'identifyTerminalShell').returns('zsh');
-        const execution = {} as TerminalShellExecution;
-        const executeCommand = sinon.stub().returns(execution);
-        const terminal = {
-            name: 'Python',
-            shellIntegration: { executeCommand },
-            sendText: sinon.stub(),
-        } as unknown as Terminal;
-
-        let endListener: ((event: TerminalShellExecutionEndEvent) => void) | undefined;
-        sinon.stub(windowApis, 'onDidEndTerminalShellExecution').callsFake((listener) => {
-            endListener = listener;
-            return new Disposable(() => undefined);
+    test('detects the shell after terminal initialization before quoting', async () => {
+        const shellStub = sinon.stub(shellDetector, 'identifyTerminalShell').returns('pwsh');
+        sinon.stub(terminalUtils, 'waitForShellIntegration').callsFake(async () => {
+            shellStub.returns('bash');
+            return false;
         });
-
-        const environment = createMockPythonEnvironment({ envPath: '/env/bin/python' });
-        const cases = [
-            ['/workspace/cost$AUDIT_UNSET.py', 'python /workspace/cost\\$AUDIT_UNSET.py'],
-            ["/workspace/it's_python.py", 'python "/workspace/it\'s_python.py"'],
-            ['=report.py', 'python \\=report.py'],
-            ['/workspace/$(touch marker).py', "python '/workspace/$(touch marker).py'"],
-        ];
-
-        for (const [script, command] of cases) {
-            const runPromise = runInTerminal(environment, terminal, { cwd: '/workspace', args: [script] });
-            await new Promise<void>((resolve) => setImmediate(resolve));
-            sinon.assert.calledWithExactly(executeCommand, command);
-            assert.ok(endListener, 'shell execution end listener should be registered');
-            endListener!({ terminal, execution } as unknown as TerminalShellExecutionEndEvent);
-            await runPromise;
-        }
-    });
-
-    test('preserves special characters in zsh script paths without shell integration', async () => {
-        sinon.stub(shellDetector, 'identifyTerminalShell').returns('zsh');
-        sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
         const sendText = sinon.stub();
         const terminal = {
             name: 'Python',
             shellIntegration: undefined,
             sendText,
         } as unknown as Terminal;
-        const environment = createMockPythonEnvironment({ envPath: '/env/bin/python' });
+        const cwd = Uri.file(path.resolve('workspace'));
+        const environment = createMockPythonEnvironment({ envPath: path.join(cwd.fsPath, 'python') });
 
-        await runInTerminal(environment, terminal, {
-            cwd: '/workspace',
-            args: ['/workspace/cost$AUDIT_UNSET.py'],
-        });
-        await runInTerminal(environment, terminal, {
-            cwd: '/workspace',
-            args: ["/workspace/it's_python.py"],
-        });
-        await runInTerminal(environment, terminal, {
-            cwd: '/workspace',
-            args: ['=report.py'],
-        });
-        await runInTerminal(environment, terminal, {
-            cwd: '/workspace',
-            args: ['/workspace/$(touch marker).py'],
-        });
+        await runInTerminal(environment, terminal, { cwd, args: ['$(touch marker).py'] });
 
-        sinon.assert.calledWithExactly(sendText, 'python /workspace/cost\\$AUDIT_UNSET.py\n');
-        sinon.assert.calledWithExactly(sendText, 'python "/workspace/it\'s_python.py"\n');
-        sinon.assert.calledWithExactly(sendText, 'python \\=report.py\n');
-        sinon.assert.calledWithExactly(sendText, "python '/workspace/$(touch marker).py'\n");
+        sinon.assert.calledOnceWithExactly(sendText, "python '$(touch marker).py'\n");
     });
+
+    for (const shell of ['zsh', 'bash', 'gitbash', 'pwsh']) {
+        for (const integration of [true, false]) {
+            test(`preserves literal arguments in ${shell} with shell integration ${integration}`, async () => {
+                sinon.stub(shellDetector, 'identifyTerminalShell').returns(shell);
+                sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
+                const execution = {} as TerminalShellExecution;
+                const executeCommand = sinon.stub().returns(execution);
+                const sendText = sinon.stub();
+                const terminal = {
+                    name: 'Python',
+                    shellIntegration: integration ? { executeCommand } : undefined,
+                    sendText,
+                } as unknown as Terminal;
+                let endListener: ((event: TerminalShellExecutionEndEvent) => void) | undefined;
+                sinon.stub(windowApis, 'onDidEndTerminalShellExecution').callsFake((listener) => {
+                    endListener = listener;
+                    return new Disposable(() => undefined);
+                });
+                const cwd = Uri.file(path.resolve('workspace'));
+                const environment = createMockPythonEnvironment({ envPath: path.join(cwd.fsPath, 'python') });
+                const cases =
+                    shell === 'pwsh'
+                        ? [
+                              ['cost$AUDIT_UNSET.py', "& 'python' 'cost$AUDIT_UNSET.py'"],
+                              ["it's_python.py", "& 'python' 'it''s_python.py'"],
+                              ['=report.py', "& 'python' '=report.py'"],
+                              ['$(touch marker).py', "& 'python' '$(touch marker).py'"],
+                              ['`whoami`.py', "& 'python' '`whoami`.py'"],
+                              ['"quoted".py', "& 'python' '\"quoted\".py'"],
+                              ['', "& 'python' ''"],
+                              [';', "& 'python' ';'"],
+                          ]
+                        : [
+                              ['cost$AUDIT_UNSET.py', 'python cost\\$AUDIT_UNSET.py'],
+                              ["it's_python.py", 'python "it\'s_python.py"'],
+                              ['=report.py', 'python \\=report.py'],
+                              ['$(touch marker).py', "python '$(touch marker).py'"],
+                              ['`whoami`.py', 'python \\`whoami\\`.py'],
+                              ['"quoted".py', 'python \'"quoted".py\''],
+                              ['', "python ''"],
+                              [';', 'python \\;'],
+                          ];
+
+                for (const [arg, command] of cases) {
+                    executeCommand.resetHistory();
+                    sendText.resetHistory();
+                    const runPromise = runInTerminal(environment, terminal, { cwd, args: [arg] });
+                    if (integration) {
+                        await new Promise<void>((resolve) => setImmediate(resolve));
+                        sinon.assert.calledOnceWithExactly(executeCommand, command);
+                        sinon.assert.notCalled(sendText);
+                        assert.ok(endListener, 'shell execution end listener should be registered');
+                        endListener({ terminal, execution } as TerminalShellExecutionEndEvent);
+                    }
+                    await runPromise;
+                    if (!integration) {
+                        sinon.assert.calledOnceWithExactly(sendText, `${command}\n`);
+                        sinon.assert.notCalled(executeCommand);
+                    }
+                }
+            });
+        }
+    }
+
+    for (const shell of ['gitbash', 'pwsh']) {
+        for (const integration of [true, false]) {
+            for (const activated of [true, false]) {
+                test(`quotes ${shell} executable paths and preserves ${activated ? 'activated' : 'run'} arguments with shell integration ${integration}`, async () => {
+                    sinon.stub(shellDetector, 'identifyTerminalShell').returns(shell);
+                    sinon.stub(platformUtils, 'isWindows').returns(true);
+                    sinon.stub(terminalUtils, 'waitForShellIntegration').resolves(false);
+                    const execution = {} as TerminalShellExecution;
+                    const executeCommand = sinon.stub().returns(execution);
+                    const sendText = sinon.stub();
+                    const terminal = {
+                        name: 'Python',
+                        shellIntegration: integration ? { executeCommand } : undefined,
+                        sendText,
+                    } as unknown as Terminal;
+                    let endListener: ((event: TerminalShellExecutionEndEvent) => void) | undefined;
+                    sinon.stub(windowApis, 'onDidEndTerminalShellExecution').callsFake((listener) => {
+                        endListener = listener;
+                        return new Disposable(() => undefined);
+                    });
+                    const executable = path.win32.join('C:\\', "Python's $home", 'python.exe');
+                    const cwd = Uri.file(path.resolve('workspace'));
+                    const base = createMockPythonEnvironment({ envPath: executable });
+                    const run = { executable, args: ['-I'] };
+                    const environment = {
+                        ...base,
+                        execInfo: {
+                            run: activated ? { executable: 'unused', args: ['--unused'] } : run,
+                            ...(activated ? { activatedRun: run } : {}),
+                        },
+                    };
+                    const runPromise = runInTerminal(environment, terminal, { cwd, args: ['main.py', ''] });
+                    const expected =
+                        shell === 'pwsh'
+                            ? "& 'C:\\Python''s $home\\python.exe' '-I' 'main.py' ''"
+                            : "\"C:/Python's \\$home/python.exe\" -I main.py ''";
+                    if (integration) {
+                        await new Promise<void>((resolve) => setImmediate(resolve));
+                        sinon.assert.calledOnceWithExactly(executeCommand, expected);
+                        assert.ok(endListener);
+                        endListener({ terminal, execution } as TerminalShellExecutionEndEvent);
+                    }
+                    await runPromise;
+                    if (!integration) {
+                        sinon.assert.calledOnceWithExactly(sendText, `${expected}\n`);
+                    }
+                });
+            }
+        }
+    }
 
     test('does not wait again when reusing a terminal without shell integration', async () => {
         sinon.stub(shellDetector, 'identifyTerminalShell').returns('fish');
@@ -156,7 +233,11 @@ suite('runInTerminal', () => {
         const options = { cwd: '/workspace', args: ['main.py'] };
         await runInTerminal(environment, terminal, options);
         await runInTerminal(environment, terminal, options);
-        sinon.assert.calledOnceWithExactly(waitForShellIntegrationStub, terminal, terminalUtils.SHELL_INTEGRATION_TIMEOUT);
+        sinon.assert.calledOnceWithExactly(
+            waitForShellIntegrationStub,
+            terminal,
+            terminalUtils.SHELL_INTEGRATION_TIMEOUT,
+        );
         sinon.assert.calledTwice(sendText);
         sinon.assert.calledTwice(sendText);
     });

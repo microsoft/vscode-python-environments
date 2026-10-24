@@ -21,8 +21,17 @@ async function waitForShellIntegrationBeforeRun(terminal: Terminal): Promise<voi
     await waitPromise;
 }
 
-function getZshCommand(executable: string, args: string[]): string {
-    return quote([executable, ...args]);
+function getLiteralShellCommand(shellType: string, executable: string, args: string[]): string | undefined {
+    switch (shellType) {
+        case ShellConstants.PWSH:
+            return `& ${[executable, ...args].map((arg) => `'${arg.replace(/'/g, "''")}'`).join(' ')}`;
+        case ShellConstants.BASH:
+        case ShellConstants.GITBASH:
+        case ShellConstants.ZSH:
+            return quote([executable, ...args]);
+        default:
+            return undefined;
+    }
 }
 
 export async function runInTerminal(
@@ -37,16 +46,16 @@ export async function runInTerminal(
     let executable = environment.execInfo?.activatedRun?.executable ?? environment.execInfo?.run.executable ?? 'python';
     const args = environment.execInfo?.activatedRun?.args ?? environment.execInfo?.run.args ?? [];
     const allArgs = [...args, ...(options.args ?? [])];
+    if (!terminal.shellIntegration) {
+        await waitForShellIntegrationBeforeRun(terminal);
+    }
     const shellType = identifyTerminalShell(terminal);
 
     // Normalize executable path for Git Bash on Windows
     if (shellType === ShellConstants.GITBASH) {
         executable = normalizeShellPath(executable, shellType);
     }
-    if (!terminal.shellIntegration) {
-        await waitForShellIntegrationBeforeRun(terminal);
-    }
-    const zshCommand = shellType === ShellConstants.ZSH ? getZshCommand(executable, allArgs) : undefined;
+    const literalCommand = getLiteralShellCommand(shellType, executable, allArgs);
     if (terminal.shellIntegration) {
         let execution: TerminalShellExecution | undefined;
         const deferred = createDeferred<void>();
@@ -57,9 +66,9 @@ export async function runInTerminal(
             }
         });
 
-        if (zshCommand) {
-            execution = terminal.shellIntegration.executeCommand(zshCommand);
-            traceLog(`runInTerminal: executeCommand ${zshCommand}`);
+        if (literalCommand !== undefined) {
+            execution = terminal.shellIntegration.executeCommand(literalCommand);
+            traceLog(`runInTerminal: executeCommand ${literalCommand}`);
         } else {
             const shouldSurroundWithQuotes =
                 executable.includes(' ') && !executable.startsWith('"') && !executable.endsWith('"');
@@ -68,20 +77,12 @@ export async function runInTerminal(
                 executable = `"${executable}"`;
             }
 
-            if (shellType === ShellConstants.PWSH && !executable.startsWith('&')) {
-                // PowerShell requires commands to be prefixed with '&' to run them.
-                executable = `& ${executable}`;
-            }
             execution = terminal.shellIntegration.executeCommand(executable, allArgs);
             traceLog(`runInTerminal: executeCommand ${executable} ${allArgs.join(' ')}`);
         }
         await deferred.promise;
     } else {
-        let text = zshCommand ?? quoteArgs([executable, ...allArgs]).join(' ');
-        if (shellType === ShellConstants.PWSH && !text.startsWith('&')) {
-            // PowerShell requires commands to be prefixed with '&' to run them.
-            text = `& ${text}`;
-        }
+        const text = literalCommand ?? quoteArgs([executable, ...allArgs]).join(' ');
         terminal.sendText(`${text}\n`);
         traceLog(`runInTerminal: sendText ${text}`);
     }
