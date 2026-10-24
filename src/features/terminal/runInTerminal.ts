@@ -11,6 +11,13 @@ import { traceLog } from '../../common/logging';
 import { SHELL_INTEGRATION_TIMEOUT, waitForShellIntegration } from './utils';
 
 const shellIntegrationWaits = new WeakMap<Terminal, Promise<boolean>>();
+const posixShells = new Set([
+    ShellConstants.SH,
+    ShellConstants.BASH,
+    ShellConstants.ZSH,
+    ShellConstants.KSH,
+    ShellConstants.GITBASH,
+]);
 
 async function waitForShellIntegrationBeforeRun(terminal: Terminal): Promise<void> {
     let waitPromise = shellIntegrationWaits.get(terminal);
@@ -22,16 +29,10 @@ async function waitForShellIntegrationBeforeRun(terminal: Terminal): Promise<voi
 }
 
 function getLiteralShellCommand(shellType: string, executable: string, args: string[]): string | undefined {
-    switch (shellType) {
-        case ShellConstants.PWSH:
-            return `& ${[executable, ...args].map((arg) => `'${arg.replace(/'/g, "''")}'`).join(' ')}`;
-        case ShellConstants.BASH:
-        case ShellConstants.GITBASH:
-        case ShellConstants.ZSH:
-            return quote([executable, ...args]);
-        default:
-            return undefined;
+    if (shellType === ShellConstants.PWSH) {
+        return `& ${[executable, ...args].map((arg) => `'${arg.replace(/'/g, "''")}'`).join(' ')}`;
     }
+    return posixShells.has(shellType) ? quote([executable, ...args]) : undefined;
 }
 
 export async function runInTerminal(

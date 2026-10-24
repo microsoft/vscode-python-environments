@@ -4,12 +4,21 @@ import * as sinon from 'sinon';
 import { Disposable, Terminal, TerminalShellExecution, TerminalShellExecutionEndEvent, Uri } from 'vscode';
 import * as platformUtils from '../../../common/utils/platformUtils';
 import * as windowApis from '../../../common/window.apis';
+import { ShellConstants } from '../../../features/common/shellConstants';
 import * as shellDetector from '../../../features/common/shellDetector';
 import { runInTerminal } from '../../../features/terminal/runInTerminal';
 import * as terminalUtils from '../../../features/terminal/utils';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 
 suite('runInTerminal', () => {
+    const posixShells = [
+        ShellConstants.SH,
+        ShellConstants.BASH,
+        ShellConstants.ZSH,
+        ShellConstants.KSH,
+        ShellConstants.GITBASH,
+    ];
+
     teardown(() => {
         sinon.restore();
     });
@@ -104,7 +113,7 @@ suite('runInTerminal', () => {
         sinon.assert.calledOnceWithExactly(sendText, "python '$(touch marker).py'\n");
     });
 
-    for (const shell of ['zsh', 'bash', 'gitbash', 'pwsh']) {
+    for (const shell of [...posixShells, ShellConstants.PWSH]) {
         for (const integration of [true, false]) {
             test(`preserves literal arguments in ${shell} with shell integration ${integration}`, async () => {
                 sinon.stub(shellDetector, 'identifyTerminalShell').returns(shell);
