@@ -18,20 +18,40 @@ export interface PackageWatcherTerminalActivation {
 const MAX_MISSING_EXECUTABLE_REFRESH_RETRIES = 60;
 
 /**
- * Derives the file system watch targets for a given Python environment.
+ * Determines whether a Python environment represents a free-threaded CPython build (PEP 703).
  *
- * Targets include site-packages `.dist-info` directories and their contents for pip-style installs.
- *
- * @param env - The Python environment to derive watch targets for.
- * @returns An array of RelativePattern objects, one per discoverable package location.
- *          Empty if the environment has no `sysPrefix` or discoverable paths.
+ * Free-threaded builds use a `t` ABI suffix (e.g. `python3.14t`) in their library directory names.
  */
+function isFreeThreadedEnvironment(env: PythonEnvironment): boolean {
+    if (env.version && (/\d+t\b/i.test(env.version) || /free-?thread/i.test(env.version))) {
+        return true;
+    }
+    const execPath = env.execInfo?.run?.executable || env.environmentPath?.fsPath || env.displayPath || '';
+    if (/[/\\]python\d*(?:\.\d+)?t(?=[/\\.]|$)/i.test(execPath)) {
+        return true;
+    }
+    if ((env.displayName && /free-?thread/i.test(env.displayName)) || (env.name && /free-?thread/i.test(env.name))) {
+        return true;
+    }
+    return false;
+}
+
+/**
+ * Determines the Python library directory name for a system environment (e.g. `python3.14` or `python3.14t`).
+ *
+ * Appends the `t` ABI suffix when free-threaded CPython is detected.
+ */
+function getSystemPythonDirName(env: PythonEnvironment, majorMinor: string): string {
+    const isFreeThreaded = isFreeThreadedEnvironment(env);
+    return `python${majorMinor}${isFreeThreaded ? 't' : ''}`;
+}
+
 /**
  * Derives the file system watch targets for a given Python environment.
  *
- * Targets include site-packages `.dist-info` directories and their contents for pip-style installs.
- * For system Python on Linux, the base is scoped to the specific Python directory (e.g. `/usr/lib/python3.14`)
- * rather than watching `/usr/lib` recursively, avoiding inotify watch exhaustion.
+ * Targets include site-packages and dist-packages `.dist-info` directories and their contents for pip-style installs.
+ * For system Python on Linux (POSIX), watch bases are narrowly scoped to the specific Python version directories
+ * and distribution package locations rather than watching `/usr/lib` recursively, avoiding inotify watch exhaustion.
  *
  * @param env - The Python environment to derive watch targets for.
  * @returns An array of RelativePattern objects, one per discoverable package location.
@@ -55,13 +75,41 @@ export function getDefaultPackageWatchTargets(env: PythonEnvironment): RelativeP
         normalizedPrefix === '/' ||
         normalizedPrefix.endsWith('/usr') ||
         normalizedPrefix.endsWith('/usr/local');
-    const versionMatch = env.version?.match(/^(\d+\.\d+)/);
+
+    const execPath = env.execInfo?.run?.executable || env.environmentPath?.fsPath || env.displayPath || '';
+    const versionMatch = env.version?.match(/^(\d+\.\d+)/) ?? execPath.match(/[/\\]python(\d+\.\d+)/i);
 
     if (isSystem && versionMatch) {
         // For system Python on Linux, avoid watching all of /usr/lib recursively which exhausts inotify watches.
-        // Instead, scope the watch base to the specific python version and watch both site-packages and dist-packages.
-        const pyDir = path.join(libraryPath, `python${versionMatch[1]}`);
-        return [new RelativePattern(pyDir, '{site-packages,dist-packages}/{*.dist-info,*.dist-info/**}')];
+        // Instead, scope the watch bases to the concrete python version directories and distribution packages.
+        const majorMinor = versionMatch[1];
+        const pyDirName = getSystemPythonDirName(env, majorMinor);
+        const targetBases: string[] = [];
+
+        // 1. Primary versioned directory under the environment's own sysPrefix
+        targetBases.push(path.join(libraryPath, pyDirName));
+
+        // 2. On Debian/Ubuntu systems with /usr system Python, packages reside across multiple standard locations:
+        //    - /usr/local/lib/pythonX.Y[t]/{site-packages,dist-packages} (pip / local admin installs)
+        //    - /usr/lib/python3/dist-packages (Debian/Ubuntu OS distribution packages shared across Python 3)
+        if (normalizedPrefix === '/usr' || normalizedPrefix === '/' || normalizedPrefix.endsWith('/usr')) {
+            targetBases.push(path.join('/usr/local', 'lib', pyDirName));
+            targetBases.push(path.join('/usr', 'lib', 'python3'));
+        }
+
+        const pattern = '{site-packages,dist-packages}/{*.dist-info,*.dist-info/**}';
+        const seen = new Set<string>();
+        const targets: RelativePattern[] = [];
+
+        for (const base of targetBases) {
+            const normalized = base.replace(/\\/g, '/').toLowerCase();
+            if (!seen.has(normalized)) {
+                seen.add(normalized);
+                targets.push(new RelativePattern(base, pattern));
+            }
+        }
+
+        return targets;
     }
 
     const pattern = 'python*/site-packages/{*.dist-info,*.dist-info/**}';
