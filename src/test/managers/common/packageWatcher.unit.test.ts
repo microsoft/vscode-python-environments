@@ -20,6 +20,7 @@ import * as workspaceApis from '../../../common/workspace.apis';
 import type { EnvironmentManagers } from '../../../features/envManagers';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 import {
+    getDefaultPackageWatchTargets,
     PackageWatcherTerminalActivation,
     registerPackageWatchers as registerPackageWatchersCore,
     watchPackageChangesForEnvironment,
@@ -381,6 +382,301 @@ suite('Package Watcher', () => {
                     'python*/site-packages/{*.dist-info,*.dist-info/**}',
                     'Should watch .dist-info directories and their contents with python* glob',
                 );
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
+        });
+
+        test('should scope watch pattern to specific python version for /usr system Python (Fixes #1883)', () => {
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+            try {
+                const env = createMockEnvironment({
+                    sysPrefix: '/usr',
+                    version: '3.14.4',
+                });
+                const packageManager = createMockPackageManager();
+
+                watchPackageChangesForEnvironment(
+                    env,
+                    packageManager as PackageManager,
+                    mockLogOutputChannel as LogOutputChannel,
+                );
+
+                const calls = createFileSystemWatcherStub.args;
+                assert.strictEqual(calls.length, 3, 'Expected 3 watch targets for /usr system Python on Linux');
+
+                const targets = calls.map((call) => call[0] as RelativePattern);
+                const basePaths = targets.map((t: RelativePattern) => t.baseUri.fsPath.replace(/\\/g, '/'));
+
+                assert.ok(
+                    basePaths.some((p) => p.endsWith('/usr/lib/python3.14')),
+                    'Expected base path to include /usr/lib/python3.14, got ' + JSON.stringify(basePaths),
+                );
+                assert.ok(
+                    basePaths.some((p) => p.endsWith('/usr/local/lib/python3.14')),
+                    'Expected base path to include /usr/local/lib/python3.14, got ' + JSON.stringify(basePaths),
+                );
+                assert.ok(
+                    basePaths.some((p) => p.endsWith('/usr/lib/python3')),
+                    'Expected base path to include /usr/lib/python3, got ' + JSON.stringify(basePaths),
+                );
+                assert.ok(
+                    basePaths.every((p) => p !== '/usr/lib' && p !== '/usr/local/lib'),
+                    'Must not watch /usr/lib or /usr/local/lib recursively to prevent inotify exhaustion',
+                );
+
+                for (const target of targets) {
+                    assert.strictEqual(
+                        target.pattern,
+                        '{site-packages,dist-packages}/{*.dist-info,*.dist-info/**}',
+                        'Should watch both site-packages and dist-packages',
+                    );
+                }
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
+        });
+
+        test('should watch reported Ubuntu package directories for /usr system Python (#1883)', () => {
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+            try {
+                // Issue #1883 reported Ubuntu layout with:
+                // /usr/lib/python3/dist-packages and /usr/local/lib/python3.14/dist-packages
+                const env = createMockEnvironment({
+                    sysPrefix: '/usr',
+                    version: '3.14.4',
+                    execInfo: { run: { executable: '/usr/bin/python3' } },
+                });
+                const packageManager = createMockPackageManager();
+
+                watchPackageChangesForEnvironment(
+                    env,
+                    packageManager as PackageManager,
+                    mockLogOutputChannel as LogOutputChannel,
+                );
+
+                const targets = createFileSystemWatcherStub.args.map((c) => c[0] as RelativePattern);
+                const basePaths = targets.map((t: RelativePattern) => t.baseUri.fsPath.replace(/\\/g, '/'));
+
+                // Verify the reported Ubuntu locations are covered:
+                assert.ok(
+                    basePaths.some((p) => p.endsWith('/usr/lib/python3')),
+                    'Must cover Ubuntu /usr/lib/python3/dist-packages via /usr/lib/python3 target',
+                );
+                assert.ok(
+                    basePaths.some((p) => p.endsWith('/usr/local/lib/python3.14')),
+                    'Must cover Ubuntu /usr/local/lib/python3.14/dist-packages via /usr/local/lib/python3.14 target',
+                );
+
+                // Verify all bases are narrowly scoped:
+                assert.ok(
+                    basePaths.every((p) => p !== '/usr/lib' && p !== '/usr/local/lib'),
+                    'Must not watch /usr/lib or /usr/local/lib recursively',
+                );
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
+        });
+
+        test('should scope watch pattern for /usr/local system Python', () => {
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+            try {
+                const env = createMockEnvironment({
+                    sysPrefix: '/usr/local',
+                    version: '3.13.2',
+                });
+                const packageManager = createMockPackageManager();
+
+                watchPackageChangesForEnvironment(
+                    env,
+                    packageManager as PackageManager,
+                    mockLogOutputChannel as LogOutputChannel,
+                );
+
+                const calls = createFileSystemWatcherStub.args;
+                assert.strictEqual(calls.length, 1, 'Expected 1 target for /usr/local system Python');
+
+                const pattern = calls[0][0] as RelativePattern;
+                const basePath = pattern.baseUri.fsPath.replace(/\\/g, '/');
+
+                assert.ok(
+                    basePath.endsWith('/usr/local/lib/python3.13'),
+                    'Expected base path to end with /usr/local/lib/python3.13, got ' + basePath,
+                );
+                assert.notStrictEqual(
+                    basePath,
+                    '/usr/local/lib',
+                    'Must not watch /usr/local/lib recursively',
+                );
+                assert.strictEqual(
+                    pattern.pattern,
+                    '{site-packages,dist-packages}/{*.dist-info,*.dist-info/**}',
+                );
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
+        });
+
+        test('should scope watch target for free-threaded Python with ABI suffix (/usr/local/lib/python3.14t)', () => {
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+            try {
+                const env = createMockEnvironment({
+                    sysPrefix: '/usr/local',
+                    version: '3.14.0t',
+                    execInfo: { run: { executable: '/usr/local/bin/python3.14t' } },
+                    environmentPath: Uri.file('/usr/local/bin/python3.14t'),
+                });
+                const packageManager = createMockPackageManager();
+
+                watchPackageChangesForEnvironment(
+                    env,
+                    packageManager as PackageManager,
+                    mockLogOutputChannel as LogOutputChannel,
+                );
+
+                const calls = createFileSystemWatcherStub.args;
+                assert.strictEqual(calls.length, 1);
+
+                const pattern = calls[0][0] as RelativePattern;
+                const basePath = pattern.baseUri.fsPath.replace(/\\/g, '/');
+
+                assert.ok(
+                    basePath.endsWith('/usr/local/lib/python3.14t'),
+                    'Expected base path to end with /usr/local/lib/python3.14t, got ' + basePath,
+                );
+                assert.strictEqual(
+                    pattern.pattern,
+                    '{site-packages,dist-packages}/{*.dist-info,*.dist-info/**}',
+                    'Should watch site-packages and dist-packages under python3.14t',
+                );
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
+        });
+
+        test('should scope watch targets for free-threaded Python under /usr (/usr/lib/python3.14t)', () => {
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+            try {
+                const env = createMockEnvironment({
+                    sysPrefix: '/usr',
+                    version: '3.14.0t',
+                    execInfo: { run: { executable: '/usr/bin/python3.14t' } },
+                    environmentPath: Uri.file('/usr/bin/python3.14t'),
+                });
+                const packageManager = createMockPackageManager();
+
+                watchPackageChangesForEnvironment(
+                    env,
+                    packageManager as PackageManager,
+                    mockLogOutputChannel as LogOutputChannel,
+                );
+
+                const calls = createFileSystemWatcherStub.args;
+                assert.strictEqual(calls.length, 3);
+
+                const targets = calls.map((c) => c[0] as RelativePattern);
+                const basePaths = targets.map((t: RelativePattern) => t.baseUri.fsPath.replace(/\\/g, '/'));
+
+                assert.ok(
+                    basePaths.some((p) => p.endsWith('/usr/lib/python3.14t')),
+                    'Expected /usr/lib/python3.14t, got ' + JSON.stringify(basePaths),
+                );
+                assert.ok(
+                    basePaths.some((p) => p.endsWith('/usr/local/lib/python3.14t')),
+                    'Expected /usr/local/lib/python3.14t, got ' + JSON.stringify(basePaths),
+                );
+                assert.ok(
+                    basePaths.some((p) => p.endsWith('/usr/lib/python3')),
+                    'Expected /usr/lib/python3, got ' + JSON.stringify(basePaths),
+                );
+                assert.ok(
+                    basePaths.every((p) => p !== '/usr/lib' && p !== '/usr/local/lib'),
+                    'Must not watch /usr/lib or /usr/local/lib recursively',
+                );
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
+        });
+
+        test('should fall back to unversioned pattern when version metadata is absent or unusable', () => {
+            const mockWatcher = createMockWatcher();
+            createFileSystemWatcherStub.returns(mockWatcher);
+
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+            try {
+                const env = createMockEnvironment({
+                    sysPrefix: '/usr',
+                    version: '',
+                    execInfo: { run: { executable: '/usr/bin/python' } },
+                    environmentPath: Uri.file('/usr/bin/python'),
+                });
+                const packageManager = createMockPackageManager();
+
+                watchPackageChangesForEnvironment(
+                    env,
+                    packageManager as PackageManager,
+                    mockLogOutputChannel as LogOutputChannel,
+                );
+
+                const calls = createFileSystemWatcherStub.args;
+                assert.strictEqual(calls.length, 1);
+
+                const pattern = calls[0][0] as RelativePattern;
+                const basePath = pattern.baseUri.fsPath.replace(/\\/g, '/');
+
+                assert.ok(basePath.endsWith('/usr/lib'));
+                assert.strictEqual(
+                    pattern.pattern,
+                    'python*/site-packages/{*.dist-info,*.dist-info/**}',
+                    'Should fall back to default pattern when version is unusable',
+                );
+            } finally {
+                Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
+            }
+        });
+
+        test('should deduplicate identical watch targets', () => {
+            const originalPlatform = process.platform;
+            Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+
+            try {
+                const env = createMockEnvironment({
+                    sysPrefix: '/usr/local',
+                    version: '3.13.2',
+                });
+                const targets = getDefaultPackageWatchTargets(env);
+                assert.strictEqual(targets.length, 1);
+
+                const basePaths = targets.map((t: RelativePattern) => t.baseUri.fsPath.replace(/\\/g, '/'));
+                const uniqueBases = new Set(basePaths);
+                assert.strictEqual(basePaths.length, uniqueBases.size, 'Targets must be deduplicated');
             } finally {
                 Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true });
             }
