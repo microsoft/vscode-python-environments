@@ -52,6 +52,7 @@ export async function getLegacyEnvironmentManagerCapability(
     environmentManager: EnvironmentManager,
     capability: EnvironmentManagerCapability,
 ): Promise<Support> {
+    // Skip legacy method inspection when the environment manager advertises capabilities.
     if (environmentManager.capabilities) {
         return unsupportedCapability({});
     }
