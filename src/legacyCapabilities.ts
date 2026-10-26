@@ -21,6 +21,10 @@ export async function getLegacyPackageManagerCapability(
     packageManager: PackageManager,
     capability: PackageManagerCapability,
 ): Promise<Support> {
+    // Skip legacy method inspection when the package manager advertises capabilities.
+    if (packageManager.capabilities) {
+        return unsupportedCapability({});
+    }
     switch (capability) {
         case PackageCapability.List:
             return getMethodSupport(packageManager.getPackages, packageManager.refresh);
@@ -48,6 +52,9 @@ export async function getLegacyEnvironmentManagerCapability(
     environmentManager: EnvironmentManager,
     capability: EnvironmentManagerCapability,
 ): Promise<Support> {
+    if (environmentManager.capabilities) {
+        return unsupportedCapability({});
+    }
     switch (capability) {
         case EnvironmentCapability.List:
             return getMethodSupport(environmentManager.getEnvironments, environmentManager.refresh);
