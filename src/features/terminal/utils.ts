@@ -247,9 +247,11 @@ export type AutoActivationType = 'off' | 'command' | 'shellStartup';
  *
  * Priority order:
  * 1. python-envs.terminal.autoActivationType
- *    a. globalRemoteValue
- *    b. globalLocalValue
- *    c. globalValue
+ *    a. workspaceFolderValue
+ *    b. workspaceValue
+ *    c. globalRemoteValue
+ *    d. globalLocalValue
+ *    e. globalValue
  * 2. python.terminal.activateEnvironment setting (if false, returns 'off' & sets autoActivationType to 'off')
  * 3. Default to 'command' if no setting is found
  *
@@ -260,9 +262,15 @@ export function getAutoActivationType(): AutoActivationType {
     const pyEnvsActivationType = pyEnvsConfig.inspect<AutoActivationType>('terminal.autoActivationType');
 
     if (pyEnvsActivationType) {
-        // Priority order: globalRemoteValue > globalLocalValue > globalValue
+        // Priority order: workspaceFolderValue > workspaceValue > globalRemoteValue > globalLocalValue > globalValue
         const activationType = pyEnvsActivationType as Record<string, unknown>;
 
+        if (pyEnvsActivationType.workspaceFolderValue !== undefined) {
+            return pyEnvsActivationType.workspaceFolderValue;
+        }
+        if (pyEnvsActivationType.workspaceValue !== undefined) {
+            return pyEnvsActivationType.workspaceValue;
+        }
         if ('globalRemoteValue' in pyEnvsActivationType && activationType.globalRemoteValue !== undefined) {
             return activationType.globalRemoteValue as AutoActivationType;
         }
