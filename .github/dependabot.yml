@@ -1,5 +1,23 @@
 version: 2
 updates:
+  - package-ecosystem: "npm"
+    directories:
+      - "/"
+      - "/api"
+    open-pull-requests-limit: 1
+    labels:
+      - "dependencies"
+      - "skip package*.json"
+    groups:
+      npm:
+        patterns: ["*"]
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 14
   - package-ecosystem: "github-actions"
     directory: "/"
     open-pull-requests-limit: 1
