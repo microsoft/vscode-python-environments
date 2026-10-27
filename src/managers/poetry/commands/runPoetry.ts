@@ -1,4 +1,4 @@
-import { CancellationError, CancellationToken, LogOutputChannel } from 'vscode';
+import { CancellationError, CancellationToken, Disposable, l10n, LogOutputChannel } from 'vscode';
 import { spawnProcess } from '../../../common/childProcess.apis';
 import { runLoggedProcess } from '../../../common/utils/processRunner';
 import { throwIfCancelled } from '../../../internal/pythonToolSupport';
@@ -10,25 +10,39 @@ export async function runPoetry(
     log?: LogOutputChannel,
     token?: CancellationToken,
     toolExecution = false,
+    env?: NodeJS.ProcessEnv,
 ): Promise<string> {
-    if (toolExecution) {
-        throwIfCancelled(token);
-    }
+    throwIfCancelled(token);
     const poetry = await getPoetry();
     if (!poetry) {
-        throw new Error('Poetry executable not found');
+        throw new Error(l10n.t('Poetry executable not found.'));
     }
+    throwIfCancelled(token);
 
     if (toolExecution) {
-        return runLoggedProcess(poetry, ['--no-interaction', ...args], { cwd }, log, token, 300_000, true);
+        return runLoggedProcess(poetry, ['--no-interaction', ...args], { cwd, env }, log, token, 300_000);
     }
     log?.info(`Running: ${poetry} ${args.join(' ')}`);
 
     return new Promise<string>((resolve, reject) => {
-        const proc = spawnProcess(poetry, args, { cwd });
-        token?.onCancellationRequested(() => {
+        const proc = spawnProcess(poetry, args, { cwd, env });
+        let settled = false;
+        let subscription: Disposable | undefined;
+        const finish = (error?: Error, output?: string) => {
+            if (settled) {
+                return;
+            }
+            settled = true;
+            subscription?.dispose();
+            if (error) {
+                reject(error);
+            } else {
+                resolve(output ?? '');
+            }
+        };
+        subscription = token?.onCancellationRequested(() => {
             proc.kill();
-            reject(new CancellationError());
+            finish(new CancellationError());
         });
         let builder = '';
         proc.stdout?.on('data', (data) => {
@@ -38,19 +52,18 @@ export async function runPoetry(
         });
         proc.stderr?.on('data', (data) => {
             const output = data.toString('utf-8');
-            builder += output;
             log?.append(`poetry: ${output}`);
         });
         proc.on('close', (code) => {
             if (code !== 0) {
-                reject(new Error(`Failed to run poetry ${args.join(' ')}`));
+                finish(new Error(l10n.t('Failed to run Poetry command: {0}', args.join(' '))));
                 return;
             }
-            resolve(builder);
+            finish(undefined, builder);
         });
         proc.on('error', (error) => {
             log?.error(`Error executing poetry command: ${error}`);
-            reject(error);
+            finish(error);
         });
     });
 }

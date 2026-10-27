@@ -9,6 +9,7 @@ export interface BaseExecuteArgs {
     cancellationToken?: CancellationToken;
     strict?: boolean;
     toolExecution?: boolean;
+    env?: NodeJS.ProcessEnv;
 }
 
 /**

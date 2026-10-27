@@ -3,6 +3,7 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import { CancellationError } from 'vscode';
 import { Package, PackageChangeKind, PackageManager, PythonEnvironment } from '../../../api';
 import { getPackageChanges, updatePackagesAndNotify } from '../../../managers/common/packageChanges';
 
@@ -143,6 +144,88 @@ suite('packageChanges', () => {
             assert.deepStrictEqual(result, fetched);
             assert.ok(fetchPackages.calledOnce);
             assert.ok(getPackagesStub.notCalled);
+        });
+
+        test('uses an operation-specific direct-package fetcher when provided', async () => {
+            const fetched = [
+                { name: 'requests', version: '2.31.0' } as Package,
+                { name: 'urllib3', version: '2.0.0' } as Package,
+            ];
+            const fetchPackages = sinon.stub().resolves(fetched);
+            const fetchDirectPackageNames = sinon.stub().resolves(new Set(['requests']));
+            const managerDirectPackageNames = sinon.stub().resolves(new Set(['urllib3']));
+            packageManager.getDirectPackageNames = managerDirectPackageNames;
+
+            const result = await updatePackagesAndNotify(
+                packageManager,
+                environment,
+                undefined,
+                sinon.stub(),
+                fetchPackages,
+                false,
+                fetchDirectPackageNames,
+            );
+
+            assert.ok(fetchDirectPackageNames.calledOnce);
+            assert.ok(managerDirectPackageNames.notCalled);
+            assert.strictEqual(result?.[0].isTransitive, false);
+            assert.strictEqual(result?.[1].isTransitive, true);
+        });
+
+        test('stores enriched packages before firing change events', async () => {
+            const fetched = [
+                { name: 'requests', version: '2.31.0' } as Package,
+                { name: 'urllib3', version: '2.0.0' } as Package,
+            ];
+            const order: string[] = [];
+            const resolvedPackages: Package[][] = [];
+            const onChanges = sinon.stub().callsFake(() => order.push('changes'));
+            const onPackagesResolved = sinon.stub().callsFake((packages: Package[]) => {
+                order.push('resolved');
+                resolvedPackages.push(packages);
+            });
+
+            await updatePackagesAndNotify(
+                packageManager,
+                environment,
+                undefined,
+                onChanges,
+                sinon.stub().resolves(fetched),
+                false,
+                sinon.stub().resolves(new Set(['requests'])),
+                onPackagesResolved,
+            );
+
+            assert.deepStrictEqual(order, ['resolved', 'changes']);
+            assert.deepStrictEqual(
+                resolvedPackages[0].map((pkg) => ({ name: pkg.name, isTransitive: pkg.isTransitive })),
+                [
+                    { name: 'requests', isTransitive: false },
+                    { name: 'urllib3', isTransitive: true },
+                ],
+            );
+        });
+
+        test('propagates direct-package cancellation before caching or firing changes', async () => {
+            const onChanges = sinon.stub();
+            const onPackagesResolved = sinon.stub();
+
+            await assert.rejects(
+                updatePackagesAndNotify(
+                    packageManager,
+                    environment,
+                    undefined,
+                    onChanges,
+                    sinon.stub().resolves([{ name: 'requests', version: '2.31.0' } as Package]),
+                    false,
+                    sinon.stub().rejects(new CancellationError()),
+                    onPackagesResolved,
+                ),
+                CancellationError,
+            );
+
+            assert.ok(onPackagesResolved.notCalled);
+            assert.ok(onChanges.notCalled);
         });
 
         test('preserves undefined and does not report removals when fetching fails', async () => {

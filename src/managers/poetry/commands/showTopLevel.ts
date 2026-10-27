@@ -13,7 +13,14 @@ export class PoetryShowTopLevelCommand extends ListDirectNamesCommand {
     }
 
     async execute(executeArgs?: BaseExecuteArgs): Promise<Set<string>> {
-        const output = await runPoetry(this.buildCommand(), this.cwd, this.log, executeArgs?.cancellationToken);
+        const output = await runPoetry(
+            this.buildCommand(),
+            this.cwd,
+            this.log,
+            executeArgs?.cancellationToken,
+            executeArgs?.toolExecution,
+            executeArgs?.env,
+        );
 
         try {
             const names = output

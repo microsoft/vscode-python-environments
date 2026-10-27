@@ -214,17 +214,21 @@ suite('Python tool manager capabilities', () => {
         const show = sinon.stub(PoetryShowCommand.prototype, 'execute').resolves([]);
         const target = sinon
             .stub(poetryRunner, 'runPoetry')
-            .callsFake(async (args) => (args[0] === 'env' ? environment.sysPrefix : '[]'));
+            .callsFake(async (args) => (args.includes('env') ? environment.sysPrefix : '[]'));
         await poetry[pythonToolSupport].manage(environment, { install: ['requests'] }, source.token, scope);
-        assert.deepStrictEqual(target.firstCall.args[0], ['env', 'info', '--path']);
+        assert.deepStrictEqual(target.firstCall.args[0], ['--no-ansi', 'env', 'info', '--path']);
         assert.strictEqual(target.firstCall.args[1], scope.fsPath);
         assert.strictEqual(target.firstCall.args[3], source.token);
         assert.strictEqual(target.firstCall.args[4], true);
+        assert.deepStrictEqual(target.firstCall.args[5], {});
+        assert.deepStrictEqual(target.secondCall.args[0], ['--no-ansi', 'env', 'info', '--path']);
+        assert.strictEqual(target.secondCall.args[5]?.VIRTUAL_ENV, environment.sysPrefix);
         assert.strictEqual(add.firstCall.args[0].cancellationToken, source.token);
         assert.strictEqual(add.firstCall.args[0].toolExecution, true);
+        assert.strictEqual(add.firstCall.args[0].env?.VIRTUAL_ENV, environment.sysPrefix);
         assert.strictEqual(Reflect.get(add.firstCall.thisValue, 'cwd'), scope.fsPath);
-        assert.deepStrictEqual(target.secondCall.args[0], ['install', '--no-root']);
-        assert.deepStrictEqual(target.thirdCall.args[0], [
+        assert.deepStrictEqual(target.thirdCall.args[0], ['install', '--no-root']);
+        assert.deepStrictEqual(target.getCall(3).args[0], [
             'run',
             'pip',
             'list',
@@ -250,7 +254,7 @@ suite('Python tool manager capabilities', () => {
         let output = '[{"name":"installed-only","version":"1.0.0"}]';
         const runner = sinon
             .stub(poetryRunner, 'runPoetry')
-            .callsFake(async (args) => (args[0] === 'env' ? environment.sysPrefix : output));
+            .callsFake(async (args) => (args.includes('env') ? environment.sysPrefix : output));
         sinon.stub(poetryUtils, 'getPoetry').resolves(path.join(temp, 'poetry'));
         const show = sinon
             .stub(PoetryShowCommand.prototype, 'execute')
@@ -261,7 +265,7 @@ suite('Python tool manager capabilities', () => {
             ['installed-only'],
         );
         assert.ok(show.notCalled);
-        assert.ok(runner.secondCall.args[0].includes('--disable-pip-version-check'));
+        assert.ok(runner.thirdCall.args[0].includes('--disable-pip-version-check'));
         sinon.stub(workspaceFs, 'stat').resolves({ type: FileType.Directory, ctime: 0, mtime: 0, size: 0 });
         const scopedPoetry = poetry.createForProject({ name: 'project', uri: scope });
         const publicPackages = await scopedPoetry.getPackages(environment, { skipCache: true });

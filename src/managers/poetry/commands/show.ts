@@ -13,7 +13,14 @@ export class PoetryShowCommand extends ListCommand {
     }
 
     async execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]> {
-        const output = await runPoetry(this.buildCommand(), this.cwd, this.log, executeArgs?.cancellationToken);
+        const output = await runPoetry(
+            this.buildCommand(),
+            this.cwd,
+            this.log,
+            executeArgs?.cancellationToken,
+            executeArgs?.toolExecution,
+            executeArgs?.env,
+        );
         const packages: PackageInfo[] = [];
         try {
             // Parse poetry show output

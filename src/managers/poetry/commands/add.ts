@@ -28,6 +28,7 @@ export class PoetryAddCommand extends InstallCommand {
             this.log,
             executeArgs.cancellationToken,
             executeArgs.toolExecution,
+            executeArgs.env,
         );
     }
 }
