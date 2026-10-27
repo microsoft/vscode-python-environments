@@ -1,0 +1,347 @@
+// Copyright (c) Microsoft Corporation. All rights reserved.
+// Licensed under the MIT License.
+
+import * as assert from 'assert';
+import * as path from 'path';
+import * as sinon from 'sinon';
+import { CancellationTokenSource, LogOutputChannel, Uri } from 'vscode';
+import {
+    Package,
+    PackageCapability,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    isPackageVersionLookupNotSupportedError,
+} from '../../../api';
+import * as errorUtils from '../../../common/errors/utils';
+import * as windowApis from '../../../common/window.apis';
+import { pythonToolSupport } from '../../../internal/pythonToolSupport';
+import { PipListCommand } from '../../../managers/builtin/commands/list';
+import * as helpers from '../../../managers/builtin/helpers';
+import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
+import { VenvManager } from '../../../managers/builtin/venvManager';
+import * as packageChanges from '../../../managers/common/packageChanges';
+import { createMockLogOutputChannel } from '../../mocks/helper';
+import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
+
+suite('PipPackageManager', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('preserves cached packages when a forced refresh fails', async () => {
+        const environment = createEnvironment();
+        const cachedPackage = { name: 'pip', version: '25.0' } as Package;
+        const api = {
+            createPackageItem: sinon.stub().returns(cachedPackage),
+        } as unknown as PythonEnvironmentApi;
+        const log = {
+            error: sinon.stub(),
+            info: sinon.stub(),
+        } as unknown as LogOutputChannel;
+        const manager = new PipPackageManager(api, log, {} as VenvManager);
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        const listPackages = sinon.stub(PipListCommand.prototype, 'execute');
+        listPackages
+            .onFirstCall()
+            .resolves([{ name: 'pip', version: '25.0', displayName: 'pip', description: '25.0' }]);
+        listPackages.onSecondCall().rejects(new Error('pip list failed'));
+
+        const initial = await manager.getPackages(environment);
+        const afterFailedRefresh = await manager.getPackages(environment, { skipCache: true });
+
+        assert.deepStrictEqual(initial, [cachedPackage]);
+        assert.deepStrictEqual(afterFailedRefresh, [cachedPackage]);
+    });
+
+    test('preserves undefined when an uncached refresh fails', async () => {
+        const environment = createEnvironment();
+        const manager = new PipPackageManager(
+            { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
+            { error: sinon.stub(), info: sinon.stub() } as unknown as LogOutputChannel,
+            {} as VenvManager,
+        );
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        const listPackages = sinon.stub(PipListCommand.prototype, 'execute').rejects(new Error('pip list failed'));
+
+        const firstResult = await manager.getPackages(environment);
+        const secondResult = await manager.getPackages(environment);
+
+        assert.strictEqual(firstResult, undefined);
+        assert.strictEqual(secondResult, undefined);
+        assert.strictEqual(listPackages.callCount, 2, 'A failed refresh should not populate the package cache');
+    });
+
+    test('offers to show logs when refreshing packages fails', async () => {
+        const environment = createEnvironment();
+        const log = createMockLogOutputChannel();
+        const manager = new PipPackageManager(
+            { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
+            log,
+            {} as VenvManager,
+        );
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(PipListCommand.prototype, 'execute').rejects(new Error('pip list failed'));
+        const showErrorMessageWithLogs = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
+
+        await manager.getPackages(environment);
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        assert.ok(showErrorMessageWithLogs.calledOnceWithExactly('Error refreshing packages', log));
+    });
+
+    test('reports version lookup as unsupported for pip older than 21.2', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(helpers, 'runPython').resolves('pip 20.3.4 from /path/to/pip (python 3.12)');
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'requests'),
+            isPackageVersionLookupNotSupportedError,
+        );
+        const support = await manager.capabilities[PackageCapability.FetchAvailableVersions]({ environment });
+        assert.strictEqual(support.supported, false);
+        if (!support.supported) {
+            assert.strictEqual(
+                support.reason,
+                'Package version lookup requires pip 21.2 or newer; the environment has pip 20.3.4.',
+            );
+        }
+        assert.strictEqual((await manager.capabilities[PackageCapability.FetchAvailableVersions]({})).supported, false);
+    });
+
+    test('propagates version lookup command failures for supported pip', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        const lookupError = new Error('pip index failed');
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        const runPython = sinon.stub(helpers, 'runPython').resolves('pip 25.1 from /path/to/pip (python 3.12)');
+        runPython.onFirstCall().resolves('pip 25.1 from /path/to/pip (python 3.12)');
+        runPython.onSecondCall().rejects(lookupError);
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'requests'),
+            (error: unknown) => error === lookupError,
+        );
+        assert.deepStrictEqual(await manager.capabilities[PackageCapability.FetchAvailableVersions]({ environment }), {
+            supported: true,
+        });
+    });
+
+    test('propagates pip version command failures during version lookup', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        const versionError = new Error('pip version failed');
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(helpers, 'runPython').rejects(versionError);
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'requests'),
+            (error: unknown) => error === versionError,
+        );
+        await assert.rejects(
+            manager.capabilities[PackageCapability.FetchAvailableVersions]({ environment }),
+            (error: unknown) => error === versionError,
+        );
+    });
+
+    test('rejects version lookup when pip version output cannot be parsed', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(helpers, 'runPython').resolves('unexpected version output');
+
+        await assert.rejects(
+            manager.getPackageAvailableVersions(environment, 'requests'),
+            /Unable to determine pip version for environment: test-environment/,
+        );
+    });
+
+    test('normalizes discovered Python versions for pip lookup', async () => {
+        const manager = createManager();
+        const environment = {
+            ...createEnvironment(),
+            version: '3.13.14.final.0',
+        };
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        const runPython = sinon.stub(helpers, 'runPython');
+        runPython.onFirstCall().resolves('pip 25.1 from /path/to/pip (python 3.13)');
+        runPython.onSecondCall().resolves(JSON.stringify({ versions: ['2.32.5'] }));
+
+        await manager.getPackageAvailableVersions(environment, 'requests');
+
+        assert.deepStrictEqual(runPython.secondCall.args[1], [
+            '-m',
+            'pip',
+            'index',
+            'versions',
+            'requests',
+            '--json',
+            '--disable-pip-version-check',
+            '--python-version',
+            '3.13.14',
+        ]);
+    });
+
+    test('uses text output for Pip versions before JSON support', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        const runPython = sinon.stub(helpers, 'runPython');
+        runPython.onFirstCall().resolves('pip 24.3 from /path/to/pip (python 3.12)');
+        runPython.onSecondCall().resolves('Available versions: 2.32.5, 2.31.0');
+
+        const versions = await manager.getPackageAvailableVersions(environment, 'requests');
+
+        assert.deepStrictEqual(runPython.secondCall.args[1], [
+            '-m',
+            'pip',
+            'index',
+            'versions',
+            'requests',
+            '--disable-pip-version-check',
+            '--python-version',
+            '3.12.0',
+        ]);
+        assert.deepStrictEqual(
+            versions.map((version) => version.public),
+            ['2.32.5', '2.31.0'],
+        );
+    });
+
+    test('uses pip directly even when automatic uv selection would be enabled', async () => {
+        const manager = createManager();
+        const environment = createEnvironment();
+        const shouldUseUv = sinon.stub(helpers, 'shouldUseUv').resolves(true);
+        const getUvExecutable = sinon.stub(helpers, 'getUvExecutable').resolves('workspace-uv');
+        const runPython = sinon.stub(helpers, 'runPython');
+        runPython.onFirstCall().resolves('pip 25.1 from pip (python 3.12)');
+        runPython.onSecondCall().resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
+        const runUV = sinon.stub(helpers, 'runUV').resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
+
+        const versions = await manager.getPackageAvailableVersions(environment, 'requests');
+
+        assert.ok(runPython.calledTwice);
+        assert.ok(shouldUseUv.notCalled);
+        assert.ok(getUvExecutable.notCalled);
+        assert.ok(runUV.notCalled);
+        assert.deepStrictEqual(
+            versions.map((version) => version.public),
+            ['2.32.5', '2.31.0'],
+        );
+    });
+
+    test('advertises and enforces the Python 2 package management restriction', async () => {
+        const shouldUseUvStub = sinon.stub(helpers, 'shouldUseUv');
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), 'python2'),
+            version: '2.7.18',
+            managerId: 'ms-python.python:venv',
+        });
+        const manager = new PipPackageManager({} as PythonEnvironmentApi, {} as LogOutputChannel, {} as VenvManager);
+
+        for (const capability of [PackageCapability.Install, PackageCapability.Uninstall, PackageCapability.Upgrade]) {
+            assert.deepStrictEqual(await manager.capabilities[capability]({ environment }), {
+                supported: false,
+                reason: 'Python 2.* is not supported (deprecated)',
+            });
+            assert.deepStrictEqual(
+                await manager.capabilities[capability]({
+                    environment: { ...environment, version: '3.12.0' },
+                }),
+                { supported: true },
+            );
+            assert.deepStrictEqual(await manager.capabilities[capability]({}), { supported: true });
+        }
+        for (const options of [
+            { install: ['flask'] },
+            { uninstall: ['flask'] },
+            { install: ['flask'], upgrade: true },
+        ]) {
+            await assert.rejects(manager.manage(environment, options), /Python 2\.\* is not supported \(deprecated\)/);
+        }
+        assert.strictEqual(shouldUseUvStub.callCount, 0);
+    });
+
+    test('uses an uninstall-specific progress title', async () => {
+        const withProgressStub = sinon
+            .stub(windowApis, 'withProgress')
+            .callsFake((_options, task) => task({} as never, {} as never));
+        sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(helpers, 'runPython').resolves('');
+        sinon.stub(packageChanges, 'updatePackagesAndNotify').resolves([]);
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), '.venv'),
+            managerId: 'ms-python.python:venv',
+        });
+        const manager = new PipPackageManager(
+            {} as PythonEnvironmentApi,
+            createMockLogOutputChannel(),
+            {} as VenvManager,
+        );
+
+        await manager.manage(environment, { uninstall: ['flask'] });
+
+        assert.strictEqual(withProgressStub.firstCall.args[0].title, 'Uninstalling packages');
+    });
+
+    test('keeps headless uninstall, upgrade, version, and direct dependency queries on pip', async () => {
+        const source = new CancellationTokenSource();
+        const scope = Uri.file(path.join(process.cwd(), 'project with spaces'));
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(scope.fsPath, '.venv'),
+            version: '3.12.0',
+            managerId: 'ms-python.python:venv',
+        });
+        const manager = new PipPackageManager(
+            { createPackageItem: sinon.stub().callsFake((info) => info) } as unknown as PythonEnvironmentApi,
+            createMockLogOutputChannel(),
+            {} as VenvManager,
+        );
+        const changes = sinon.spy();
+        manager.onDidChangePackages(changes);
+        const runUV = sinon.stub(helpers, 'runUV');
+        const runPython = sinon.stub(helpers, 'runPython').resolves('');
+        runPython.onThirdCall().resolves(JSON.stringify([{ name: 'requests', version: '2.32.5' }]));
+        runPython.onCall(3).resolves('pip 25.1 from pip (python 3.12)');
+        runPython.onCall(4).resolves(JSON.stringify([{ name: 'Requests' }]));
+
+        try {
+            await manager[pythonToolSupport].manage(
+                environment,
+                { uninstall: ['old-package'], install: ['requests'], upgrade: true },
+                source.token,
+                scope,
+            );
+            assert.strictEqual((await manager.getVersion(environment))?.public, '25.1');
+            assert.deepStrictEqual(await manager.getDirectPackageNames(environment), new Set(['requests']));
+            assert.ok(runUV.notCalled);
+            assert.deepStrictEqual(runPython.firstCall.args[1], ['-m', 'pip', 'uninstall', '-y', 'old-package']);
+            assert.deepStrictEqual(runPython.secondCall.args[1], ['-m', 'pip', 'install', '--upgrade', 'requests']);
+            assert.deepStrictEqual(runPython.getCall(4).args[1], [
+                '-m', 'pip', 'list', '--format=json', '--not-required', '--disable-pip-version-check',
+            ]);
+            assert.strictEqual(changes.firstCall.args[0].manager, manager);
+        } finally {
+            manager.dispose();
+            source.dispose();
+        }
+    });
+
+    function createManager(): PipPackageManager {
+        return new PipPackageManager(
+            { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
+            { error: sinon.stub(), info: sinon.stub() } as unknown as LogOutputChannel,
+            {} as VenvManager,
+        );
+    }
+
+    function createEnvironment(): PythonEnvironment {
+        return {
+            envId: { id: 'test-environment', managerId: 'test-manager' },
+            environmentPath: Uri.file('/path/to/environment'),
+            execInfo: { run: { executable: 'python', args: [] } },
+            version: '3.12.0',
+        } as unknown as PythonEnvironment;
+    }
+});

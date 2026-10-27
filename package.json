@@ -2,9 +2,8 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
-    "version": "1.37.0",
+    "version": "1.41.0",
     "publisher": "ms-python",
-    "preview": true,
     "engines": {
         "vscode": "^1.110.0-20260204"
     },
@@ -27,7 +26,15 @@
         }
     },
     "activationEvents": [
-        "onLanguage:python"
+        "onLanguage:python",
+        "workspaceContains:**/*.py",
+        "workspaceContains:**/*.pyi",
+        "workspaceContains:**/*.ipynb",
+        "workspaceContains:**/pyproject.toml",
+        "workspaceContains:**/requirements.txt",
+        "workspaceContains:**/Pipfile",
+        "workspaceContains:**/pyvenv.cfg",
+        "workspaceContains:mspythonconfig.json"
     ],
     "homepage": "https://github.com/microsoft/vscode-python-environments",
     "repository": {
@@ -79,6 +86,17 @@
                             }
                         }
                     }
+                },
+                "python-envs.inlineScripts.enabled": {
+                    "type": "boolean",
+                    "description": "%python-envs.inlineScripts.enabled.description%",
+                    "default": false,
+                    "scope": "window",
+                    "requiresReload": true,
+                    "tags": [
+                        "onExP",
+                        "preview"
+                    ]
                 },
                 "python-envs.terminal.showActivateButton": {
                     "type": "boolean",
@@ -245,6 +263,18 @@
                 "title": "%python-envs.clearCache.title%",
                 "category": "Python",
                 "icon": "$(trash)"
+            },
+            {
+                "command": "python-envs.clearScriptEnvCache",
+                "title": "%python-envs.clearScriptEnvCache.title%",
+                "category": "Python Envs",
+                "icon": "$(trash)"
+            },
+            {
+                "command": "python-envs.setupInlineScriptEnvs",
+                "title": "%python-envs.setupInlineScriptEnvs.title%",
+                "category": "Python Envs",
+                "icon": "$(tools)"
             },
             {
                 "command": "python-envs.runInTerminal",
@@ -416,6 +446,14 @@
                     "when": "config.python.useEnvironmentsExtension != false"
                 },
                 {
+                    "command": "python-envs.clearScriptEnvCache",
+                    "when": "pythonEnvsInlineScriptsEnabled"
+                },
+                {
+                    "command": "python-envs.setupInlineScriptEnvs",
+                    "when": "pythonEnvsInlineScriptsEnabled"
+                },
+                {
                     "command": "python-envs.terminal.activate",
                     "when": "pythonTerminalActivation"
                 },
@@ -504,7 +542,7 @@
                 {
                     "command": "python-envs.packages",
                     "group": "inline",
-                    "when": "view == env-managers && viewItem =~ /.*pythonEnvironment.*/"
+                    "when": "view == env-managers && viewItem =~ /;managePackages;/"
                 },
                 {
                     "command": "python-envs.copyEnvPath",
@@ -669,7 +707,7 @@
                     "id": "python",
                     "title": "Python",
                     "icon": "files/logo.svg",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "config.python.useEnvironmentsExtension != false && python-envs.workspaceHasPython"
                 }
             ]
         },
@@ -680,14 +718,14 @@
                     "name": "Python Projects",
                     "icon": "files/logo.svg",
                     "contextualTitle": "Python Projects",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "config.python.useEnvironmentsExtension != false && python-envs.workspaceHasPython"
                 },
                 {
                     "id": "env-managers",
                     "name": "Environment Managers",
                     "icon": "files/logo.svg",
                     "contextualTitle": "Environment Managers",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "config.python.useEnvironmentsExtension != false && python-envs.workspaceHasPython"
                 }
             ]
         },
@@ -724,7 +762,7 @@
         "@types/which": "^3.0.4",
         "@typescript-eslint/eslint-plugin": "^8.16.0",
         "@typescript-eslint/parser": "^8.16.0",
-        "@vscode/test-electron": "^2.5.2",
+        "@vscode/test-electron": "^3.1.0",
         "@vscode/vsce": "^3.9.2",
         "eslint": "^9.15.0",
         "glob": "^8.1.0",

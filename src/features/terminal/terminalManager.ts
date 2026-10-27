@@ -17,7 +17,7 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { normalizePath } from '../../common/utils/pathUtils';
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
-import { getPythonApi } from '../pythonApi';
+import { getPythonApi } from '../../extensionApi';
 import { getShellIntegrationEnabledCache, isWsl, shouldUseProfileActivation } from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
@@ -251,7 +251,7 @@ export class TerminalManagerImpl implements TerminalManager {
                     },
                     async () => {
                         await waitForShellIntegration(terminal);
-                        await this.activate(terminal, environment);
+                        await this.ta.activate(terminal, environment, 'terminalOpen');
                     },
                 );
             } else {
@@ -402,7 +402,7 @@ export class TerminalManagerImpl implements TerminalManager {
         const env = this.ta.getEnvironment(t) ?? (await getEnvironmentForTerminal(api, t));
 
         if (env && isActivatableEnvironment(env)) {
-            await this.activate(t, env);
+            await this.ta.activate(t, env, 'preExisting');
         }
     }
 
@@ -456,11 +456,11 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     public activate(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
-        return this.ta.activate(terminal, environment);
+        return this.ta.activate(terminal, environment, 'explicit');
     }
 
     public deactivate(terminal: Terminal): Promise<void> {
-        return this.ta.deactivate(terminal);
+        return this.ta.deactivate(terminal, 'explicit');
     }
 
     isActivated(terminal: Terminal, environment?: PythonEnvironment): boolean {

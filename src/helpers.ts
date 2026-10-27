@@ -8,7 +8,8 @@ import { ShellConstants } from './features/common/shellConstants';
 import { identifyTerminalShell } from './features/common/shellDetector';
 import { quoteArgs } from './features/execution/execUtils';
 import { getAutoActivationType } from './features/terminal/utils';
-import { EnvironmentManagers, PythonProjectManager } from './internal.api';
+import type { EnvironmentManagers } from './features/envManagers';
+import type { PythonProjectManager } from './features/projectManager';
 import { getNativePythonToolsPath } from './managers/common/nativePythonFinder';
 
 /**
@@ -145,9 +146,10 @@ export function getUserConfiguredSetting<T>(section: string, key: string, scope?
 }
 
 /**
- * Whether the PEP 723 inline-script env support is enabled. Internal
- * undeclared flag (`python-envs.inlineScripts.enabled`); defaults to
- * false. Window reload required to take effect.
+ * Whether the PEP 723 inline-script preview is enabled. Reads the effective
+ * `python-envs.inlineScripts.enabled` value, including an experimental default
+ * supplied by VS Code. The value is latched during activation and requires a
+ * window reload to change.
  */
 export function isInlineScriptsFeatureEnabled(): boolean {
     return getConfiguration('python-envs').get<boolean>('inlineScripts.enabled', false);

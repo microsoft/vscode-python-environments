@@ -10,6 +10,25 @@
 
 import type { Disposable, Event } from 'vscode';
 
+const DIALOG_SERVICE_TEST_ERROR = 'DialogService: refused to show dialog in tests';
+
+/**
+ * Runs an interactive test operation, treating VS Code's blocked test dialog as user cancellation.
+ *
+ * @param operation The operation that may attempt to show a dialog.
+ * @returns The operation result, or undefined when the test host blocks a dialog.
+ */
+export async function runWithBlockedDialogsAsCancellation<T>(operation: () => Promise<T>): Promise<T | undefined> {
+    try {
+        return await operation();
+    } catch (error) {
+        if (String(error).includes(DIALOG_SERVICE_TEST_ERROR)) {
+            return undefined;
+        }
+        throw error;
+    }
+}
+
 /**
  * Sleep for a specified number of milliseconds.
  * Use sparingly - prefer waitForCondition() for most cases.
@@ -28,6 +47,8 @@ export function sleep(ms: number): Promise<void> {
  * @param timeoutMs - Maximum time to wait (default: 10 seconds)
  * @param errorMessage - Error message if condition is not met
  * @param pollIntervalMs - How often to check condition (default: 100ms)
+ * @param retryOnError - Whether rejected conditions should be retried (default: true)
+ * @param rejectWithLastError - Whether a timeout after rejected conditions should preserve the last error
  *
  * @example
  * // Wait for extension to activate
@@ -50,22 +71,34 @@ export async function waitForCondition(
     timeoutMs: number = 10_000,
     errorMessage: string | (() => string) = 'Condition not met within timeout',
     pollIntervalMs: number = 100,
+    retryOnError: boolean = true,
+    rejectWithLastError: boolean = false,
 ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
         const startTime = Date.now();
+        let lastError: unknown;
 
         const checkCondition = async () => {
             try {
                 const result = await condition();
+                lastError = undefined;
                 if (result) {
                     resolve();
                     return;
                 }
-            } catch {
-                // Condition threw - keep waiting
+            } catch (error) {
+                if (!retryOnError) {
+                    reject(error);
+                    return;
+                }
+                lastError = error;
             }
 
             if (Date.now() - startTime >= timeoutMs) {
+                if (rejectWithLastError && lastError !== undefined) {
+                    reject(lastError);
+                    return;
+                }
                 const msg = typeof errorMessage === 'function' ? errorMessage() : errorMessage;
                 reject(new Error(`${msg} (waited ${timeoutMs}ms)`));
                 return;

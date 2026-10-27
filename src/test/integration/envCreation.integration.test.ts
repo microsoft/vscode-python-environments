@@ -19,18 +19,77 @@
  */
 
 import * as assert from 'assert';
+import * as fs from 'fs-extra';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
+import { VENV_MANAGER_ID } from '../../common/constants';
+import { normalizePath } from '../../common/utils/pathUtils';
 import { ENVS_EXTENSION_ID } from '../constants';
-import { sleep, waitForCondition } from '../testUtils';
+import { runWithBlockedDialogsAsCancellation, waitForCondition } from '../testUtils';
 
 suite('Integration: Environment Creation', function () {
     this.timeout(120_000); // Environment creation can be slow
 
     let api: PythonEnvironmentApi;
+    let defaultManagerScope: vscode.Uri | undefined;
+    let previousDefaultManager: string | undefined;
+    let previousEffectiveDefaultManager: string | undefined;
+    let workspaceRoot: string | undefined;
+    let originalVenvDirectories = new Set<string>();
+    let settingSnapshotTaken = false;
+    let venvSnapshotTaken = false;
+
+    async function getVenvDirectories(): Promise<Set<string>> {
+        if (!workspaceRoot) {
+            return new Set();
+        }
+        const entries = await fs.readdir(workspaceRoot, { withFileTypes: true });
+        return new Set(
+            entries
+                .filter((entry) => entry.isDirectory() && /^\.venv(?:-\d+)?$/.test(entry.name))
+                .map((entry) => entry.name),
+        );
+    }
+
+    async function removeCreatedEnvironment(environment: PythonEnvironment): Promise<void> {
+        const environmentPath = path.resolve(environment.sysPrefix);
+        await api.removeEnvironment(environment, { runHeadless: true });
+        await waitForCondition(
+            async () => !(await fs.pathExists(environmentPath)),
+            30_000,
+            'Environment directory was not removed: ' + environmentPath,
+        );
+    }
 
     suiteSetup(async function () {
         this.timeout(30_000);
+
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        assert.ok(workspaceFolder, 'Environment creation tests require a workspace folder');
+        defaultManagerScope = workspaceFolder.uri;
+        workspaceRoot = workspaceFolder.uri.fsPath;
+        const venvDirectories = await getVenvDirectories();
+        originalVenvDirectories = venvDirectories;
+        venvSnapshotTaken = true;
+        const defaultManagerConfig = vscode.workspace.getConfiguration('python-envs', defaultManagerScope);
+        const inspected = defaultManagerConfig.inspect<string>('defaultEnvManager');
+        previousDefaultManager = inspected?.workspaceValue;
+        previousEffectiveDefaultManager = defaultManagerConfig.get<string>('defaultEnvManager');
+        settingSnapshotTaken = true;
+        await defaultManagerConfig.update(
+            'defaultEnvManager',
+            VENV_MANAGER_ID,
+            vscode.ConfigurationTarget.Workspace,
+        );
+        await waitForCondition(
+            () =>
+                vscode.workspace
+                    .getConfiguration('python-envs', defaultManagerScope)
+                    .get<string>('defaultEnvManager') === VENV_MANAGER_ID,
+            10_000,
+            'Venv manager override was not applied',
+        );
 
         const extension = vscode.extensions.getExtension(ENVS_EXTENSION_ID);
         assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);
@@ -44,6 +103,61 @@ suite('Integration: Environment Creation', function () {
         assert.ok(api, 'API not available');
         assert.ok(typeof api.createEnvironment === 'function', 'createEnvironment should be a function');
         assert.ok(typeof api.removeEnvironment === 'function', 'removeEnvironment should be a function');
+    });
+
+    suiteTeardown(async function () {
+        this.timeout(30_000);
+        const cleanupErrors: unknown[] = [];
+        if (venvSnapshotTaken && workspaceRoot) {
+            try {
+                const currentVenvDirectories = await getVenvDirectories();
+                for (const directory of currentVenvDirectories) {
+                    if (!originalVenvDirectories.has(directory)) {
+                        try {
+                            await fs.rm(path.join(workspaceRoot, directory), {
+                                recursive: true,
+                                force: true,
+                                maxRetries: 5,
+                                retryDelay: 100,
+                            });
+                        } catch (error) {
+                            cleanupErrors.push(error);
+                        }
+                    }
+                }
+            } catch (error) {
+                cleanupErrors.push(error);
+            }
+        }
+        if (settingSnapshotTaken && defaultManagerScope) {
+            try {
+                await vscode.workspace
+                    .getConfiguration('python-envs', defaultManagerScope)
+                    .update(
+                        'defaultEnvManager',
+                        previousDefaultManager,
+                        vscode.ConfigurationTarget.Workspace,
+                    );
+                await waitForCondition(
+                    () =>
+                        vscode.workspace
+                            .getConfiguration('python-envs', defaultManagerScope)
+                            .get<string>('defaultEnvManager') === previousEffectiveDefaultManager,
+                    10_000,
+                    'Default environment manager setting was not restored',
+                );
+            } catch (error) {
+                cleanupErrors.push(error);
+            }
+        }
+        if (cleanupErrors.length > 0) {
+            throw new Error(
+                'Environment creation integration cleanup failed:\n' +
+                    cleanupErrors
+                        .map((error) => (error instanceof Error ? error.message : String(error)))
+                        .join('\n'),
+            );
+        }
     });
 
     // =========================================================================
@@ -77,7 +191,9 @@ suite('Integration: Environment Creation', function () {
 
         try {
             // --- ACTION: User creates environment ---
-            createdEnv = await api.createEnvironment(workspaceUri, { quickCreate: true });
+            createdEnv = await runWithBlockedDialogsAsCancellation(() =>
+                api.createEnvironment(workspaceUri, { quickCreate: true }),
+            );
 
             if (!createdEnv) {
                 console.log('Environment creation returned undefined (may require user input)');
@@ -100,7 +216,7 @@ suite('Integration: Environment Creation', function () {
             // Cleanup: Remove the created environment
             if (createdEnv) {
                 try {
-                    await api.removeEnvironment(createdEnv);
+                    await removeCreatedEnvironment(createdEnv);
                 } catch (e) {
                     console.warn('Cleanup warning - failed to remove environment:', e);
                 }
@@ -132,76 +248,40 @@ suite('Integration: Environment Creation', function () {
         let createdEnv: PythonEnvironment | undefined;
 
         try {
-            createdEnv = await api.createEnvironment(workspaceUri, { quickCreate: true });
+            createdEnv = await runWithBlockedDialogsAsCancellation(() =>
+                api.createEnvironment(workspaceUri, { quickCreate: true }),
+            );
             if (!createdEnv) {
                 this.skip();
                 return;
             }
 
             const envId = createdEnv.envId.id;
+            const managerId = createdEnv.envId.managerId;
+            const envPath = normalizePath(path.resolve(createdEnv.sysPrefix));
 
             // --- ACTION: User removes environment ---
-            await api.removeEnvironment(createdEnv);
-            createdEnv = undefined;
-
-            await sleep(1000);
+            await removeCreatedEnvironment(createdEnv);
 
             // --- VERIFY: Environment is no longer discoverable ---
             await api.refreshEnvironments(workspaceUri);
-            const environments = await api.getEnvironments(workspaceUri);
+            const environments = await api.getEnvironments('all');
 
-            const stillExists = environments.some((env) => env.envId.id === envId);
+            const stillExists = environments.some(
+                (env) =>
+                    env.envId.managerId === managerId &&
+                    (env.envId.id === envId || normalizePath(path.resolve(env.sysPrefix)) === envPath),
+            );
 
             assert.ok(!stillExists, 'Removed environment should not appear in discovery');
+            createdEnv = undefined;
         } finally {
             // Cleanup in case removal failed
             if (createdEnv) {
                 try {
-                    await api.removeEnvironment(createdEnv);
+                    await removeCreatedEnvironment(createdEnv);
                 } catch (e) {
                     console.warn('Cleanup warning - failed to remove environment:', e);
-                }
-            }
-        }
-    });
-
-    /**
-     * Test: Creating environment for 'global' scope
-     *
-     * The 'global' scope should allow creating environments not tied to a workspace.
-     * Note: This may require special permissions or configurations.
-     */
-    test('Global scope creation is handled', async function () {
-        // This test verifies the API handles global scope correctly
-        let createdEnv: PythonEnvironment | undefined;
-
-        try {
-            // Attempt global creation - this may prompt for user input
-            // so we use quickCreate and expect it might return undefined
-            createdEnv = await api.createEnvironment('global', { quickCreate: true });
-
-            if (createdEnv) {
-                // If creation succeeded, verify the environment has valid structure
-                assert.ok(createdEnv.envId, 'Created global env must have envId');
-                assert.ok(createdEnv.envId.id, 'Created global env must have envId.id');
-                assert.ok(createdEnv.environmentPath, 'Created global env must have environmentPath');
-            } else {
-                // quickCreate returned undefined - skip this test as feature not available
-                console.log('Global creation not supported with quickCreate, skipping');
-                this.skip();
-                return;
-            }
-        } finally {
-            // Cleanup: try to remove if created, but handle dialog errors in test mode
-            if (createdEnv) {
-                try {
-                    await api.removeEnvironment(createdEnv);
-                } catch (e) {
-                    // Ignore dialog errors in test mode - VS Code blocks dialogs
-                    if (!String(e).includes('DialogService')) {
-                        throw e;
-                    }
-                    console.log('Skipping cleanup for global environment (dialog blocked in tests)');
                 }
             }
         }
@@ -230,7 +310,9 @@ suite('Integration: Environment Creation', function () {
         let createdEnv: PythonEnvironment | undefined;
 
         try {
-            createdEnv = await api.createEnvironment(workspaceUri, { quickCreate: true });
+            createdEnv = await runWithBlockedDialogsAsCancellation(() =>
+                api.createEnvironment(workspaceUri, { quickCreate: true }),
+            );
 
             if (!createdEnv) {
                 this.skip();
@@ -247,7 +329,7 @@ suite('Integration: Environment Creation', function () {
         } finally {
             if (createdEnv) {
                 try {
-                    await api.removeEnvironment(createdEnv);
+                    await removeCreatedEnvironment(createdEnv);
                 } catch (e) {
                     console.warn('Cleanup warning - failed to remove environment:', e);
                 }

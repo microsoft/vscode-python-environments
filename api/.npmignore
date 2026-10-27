@@ -1,5 +1,8 @@
 node_modules/
 src/
+scripts/
+test/
 out/**/*.map
+*.tgz
 *.tsbuildinfo
 tsconfig*.json

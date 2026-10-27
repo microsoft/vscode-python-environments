@@ -6,6 +6,7 @@ export enum EventNames {
     PACKAGE_MANAGER_REGISTERED = 'PACKAGE_MANAGER.REGISTERED',
     ENVIRONMENT_MANAGER_SELECTED = 'ENVIRONMENT_MANAGER.SELECTED',
     PACKAGE_MANAGER_SELECTED = 'PACKAGE_MANAGER.SELECTED',
+    MANAGER_CAPABILITY_QUERY = 'MANAGER.CAPABILITY_QUERY',
 
     VENV_USING_UV = 'VENV.USING_UV',
     VENV_CREATION = 'VENV.CREATION',
@@ -14,6 +15,7 @@ export enum EventNames {
     UV_PYTHON_INSTALL_STARTED = 'UV.PYTHON_INSTALL_STARTED',
     UV_PYTHON_INSTALL_COMPLETED = 'UV.PYTHON_INSTALL_COMPLETED',
     UV_PYTHON_INSTALL_FAILED = 'UV.PYTHON_INSTALL_FAILED',
+    PYTHON_INSTALLER_OPERATION = 'PYTHON_INSTALLER.OPERATION',
 
     PACKAGE_MANAGEMENT = 'PACKAGE_MANAGEMENT',
     ADD_PROJECT = 'ADD_PROJECT',
@@ -49,6 +51,11 @@ export enum EventNames {
      * - errorType: string (error class name, on failure only)
      */
     ENVIRONMENT_DISCOVERY = 'ENVIRONMENT_DISCOVERY',
+    /**
+     * One event per terminal activation/deactivation command attempt.
+     * Legacy sendText cannot confirm command completion and is reported as unverified.
+     */
+    TERMINAL_ACTIVATION_OUTCOME = 'TERMINAL.ACTIVATION_OUTCOME',
     MANAGER_READY_TIMEOUT = 'MANAGER_READY.TIMEOUT',
     /**
      * Telemetry event for individual manager registration failure.
@@ -222,6 +229,29 @@ export enum EventNames {
      */
     INLINE_SCRIPT_DETECTED = 'inlineScript.detected',
     /**
+     * Telemetry event fired when inline-script environment creation completes
+     * successfully with a newly-built cache entry that passed verification and
+     * metadata persistence.
+     * Measures:
+     * - duration: number (ms spent in the underlying create/rebuild operation)
+     * - dependencyCount: number (normalized dependency count in the cache key)
+     */
+    INLINE_SCRIPT_ENV_CREATED = 'inlineScript.envCreated',
+    /**
+     * Telemetry event fired when inline-script environment creation validates
+     * and reuses an existing cache entry without rebuilding it.
+     * Measures:
+     * - dependencyCount: number (normalized dependency count in the cache key)
+     */
+    INLINE_SCRIPT_ENV_REUSE_HIT = 'inlineScript.envReuseHit',
+    /**
+     * Telemetry event fired when inline-script environment creation cannot
+     * complete.
+     * Properties:
+     * - category: stable low-cardinality failure category
+     */
+    INLINE_SCRIPT_ENV_ERROR = 'inlineScript.envError',
+    /**
      * Telemetry event fired once per session, per URI, the first time a `.py`
      * file that previously raised an `inlineScript.detected` event receives a
      * real text edit. Together with `inlineScript.detected` this measures the
@@ -232,8 +262,35 @@ export enum EventNames {
     INLINE_SCRIPT_EDITED = 'inlineScript.edited',
 }
 
+export type InlineScriptEnvErrorCategory =
+    | 'compatible-python-declined'
+    | 'discovery-failure'
+    | 'no-compatible-python'
+    | 'package-install-cancelled'
+    | 'install-failure'
+    | 'setup-failure'
+    | 'lock-timeout'
+    | 'lock-unavailable';
+
 // Map all events to their properties
 export interface IEventNamePropertyMapping {
+    /* __GDPR__
+        "terminal.activation_outcome": {
+            "operation": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "method": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "shell": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "trigger": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
+        }
+    */
+    [EventNames.TERMINAL_ACTIVATION_OUTCOME]: {
+        operation: 'activate' | 'deactivate';
+        outcome: 'succeeded' | 'failed' | 'timedOut' | 'unknown' | 'unverified' | 'noCommand';
+        method: 'shellIntegration' | 'sendText';
+        shell: string;
+        trigger: 'terminalOpen' | 'preExisting' | 'explicit' | 'environmentSwitch' | 'unknown';
+    };
     /* __GDPR__
        "extension.activation_duration": {
            "duration" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
@@ -274,6 +331,25 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
+        "manager.capability_query": {
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "managerKind": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "managerVersion": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "capability": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "isLegacy": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" }
+        }
+    */
+    [EventNames.MANAGER_CAPABILITY_QUERY]: {
+        managerId: string;
+        managerKind: 'environment' | 'package';
+        managerVersion: string;
+        capability: string;
+        outcome: 'supported' | 'unsupported' | 'unavailable' | 'error';
+        isLegacy: boolean;
+    };
+
+    /* __GDPR__
         "environment_manager.selected": {
             "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
@@ -311,7 +387,7 @@ export interface IEventNamePropertyMapping {
         }
     */
     [EventNames.UV_PYTHON_INSTALL_PROMPTED]: {
-        trigger: 'activation' | 'createEnvironment';
+        trigger: 'activation' | 'createEnvironment' | 'inlineScript';
     };
 
     /* __GDPR__
@@ -335,6 +411,23 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.UV_PYTHON_INSTALL_FAILED]: {
         stage: 'uvInstall' | 'uvNotOnPath' | 'pythonInstall' | 'findPath';
+    };
+
+    /* __GDPR__
+        "python_installer.operation": {
+            "provider": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "trigger": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "phase": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "reason": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "duration": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.PYTHON_INSTALLER_OPERATION]: {
+        provider: 'pymanager' | 'uv';
+        trigger: 'activation' | 'createEnvironment' | 'inlineScript' | 'globalCreate';
+        phase: 'prompted' | 'started' | 'completed' | 'failed' | 'cancelled' | 'declined' | 'reused';
+        reason?: 'provider-unusable' | 'catalogue-failed' | 'no-compatible-python' | 'runtime-conflict' |
+            'install-failed' | 'verification-failed';
     };
 
     /* __GDPR__
@@ -601,27 +694,10 @@ export interface IEventNamePropertyMapping {
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
+    // Numeric fields declared in the GDPR block are sent through the measurements payload.
     [EventNames.PET_REFRESH]: {
         result: 'success' | 'timeout' | 'error';
-        envCount?: number;
-        /** Number of discovered environments whose kind is Conda. Lets us slice refresh duration by conda footprint. */
-        condaEnvCount?: number;
-        /** Number of discovered environment managers (conda/pyenv/poetry/etc.). */
-        managerCount?: number;
-        unresolvedCount?: number;
-        workspaceDirCount?: number;
-        searchPathCount?: number;
-        attempt: number;
         errorType?: string;
-        // breakdown* fields go through the measures payload (numeric); listed here for GDPR only.
-        /** ms in the Locators phase. */
-        breakdownLocators?: number;
-        /** ms walking PATH env var entries (not a file path). */
-        breakdownPathEnv?: number;
-        /** ms scanning global virtual-env dirs. */
-        breakdownGlobalVirtualEnvs?: number;
-        /** ms scanning workspace dirs. */
-        breakdownWorkspaces?: number;
         /** JSON-serialized Record<locatorName, ms>. Parse with parse_json() in Kusto. */
         locatorsJson?: string;
         /** PET crate version reported by the `info` RPC. 'unknown' if the call failed or the PET binary doesn't implement it. */
@@ -638,14 +714,14 @@ export interface IEventNamePropertyMapping {
             "workspaceDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "envDirCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
             "retryCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" },
+            "errorType": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" },
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
+    // Numeric fields declared in the GDPR block are sent through the measurements payload.
     [EventNames.PET_CONFIGURE]: {
         result: 'success' | 'timeout' | 'error' | 'skipped';
-        workspaceDirCount?: number;
-        envDirCount?: number;
-        retryCount: number;
+        errorType?: string;
     };
 
     /* __GDPR__
@@ -660,8 +736,8 @@ export interface IEventNamePropertyMapping {
             "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "eleanorjboyd" }
         }
     */
+    // `attempt` is declared in the GDPR block and sent through the measurements payload.
     [EventNames.PET_PROCESS_RESTART]: {
-        attempt: number;
         result: 'success' | 'error';
         errorType?: string;
         /**
@@ -710,6 +786,36 @@ export interface IEventNamePropertyMapping {
     [EventNames.MIGRATION_SYSTEM_ENV_MANAGER]: {
         outcome: 'removed' | 'partial' | 'not_set' | 'failed';
         errorType?: string;
+    };
+
+    /* __GDPR__
+        "inlineScript.envCreated": {
+            "dependencyCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" },
+            "<duration>": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.INLINE_SCRIPT_ENV_CREATED]: {
+        // Goes through the measures payload (numeric); listed here for GDPR only.
+        dependencyCount?: number;
+    };
+
+    /* __GDPR__
+        "inlineScript.envReuseHit": {
+            "dependencyCount": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.INLINE_SCRIPT_ENV_REUSE_HIT]: {
+        // Goes through the measures payload (numeric); listed here for GDPR only.
+        dependencyCount?: number;
+    };
+
+    /* __GDPR__
+        "inlineScript.envError": {
+            "category": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.INLINE_SCRIPT_ENV_ERROR]: {
+        category: InlineScriptEnvErrorCategory;
     };
 
     /* __GDPR__

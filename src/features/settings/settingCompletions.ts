@@ -10,7 +10,7 @@ import {
     TextDocument,
     languages,
 } from 'vscode';
-import { EnvironmentManagers } from '../../internal.api';
+import type { EnvironmentManagers } from '../envManagers';
 
 const ENV_PATTERN = /\s*\"python-envs\.defaultEnvManager\"\s*:\s*\"/gm;
 const PKG_PATTERN = /\s*\"python-envs\.defaultPackageManager\"\s*:\s*\"/gm;

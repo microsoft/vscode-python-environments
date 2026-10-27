@@ -5,7 +5,7 @@ import { ConfigurationTarget, Disposable, EventEmitter, Uri, WorkspaceFolder } f
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonProjectManagerImpl } from '../../features/projectManager';
 import * as settingHelpers from '../../features/settings/settingHelpers';
-import { PythonProjectsImpl } from '../../internal.api';
+import { PythonProjectsImpl } from '../../features/projectManager';
 import { MockWorkspaceConfiguration } from '../mocks/mockWorkspaceConfig';
 
 /**

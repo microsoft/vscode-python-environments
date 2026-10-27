@@ -1,5 +1,6 @@
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../../features/settings/settingHelpers';
-import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../../features/envManagers';
+import type { PythonProjectManager } from '../../features/projectManager';
 import { getUvEnvironments } from '../../managers/builtin/uvEnvironments';
 import { ISSUES_URL } from '../constants';
 import { traceInfo, traceVerbose, traceWarn } from '../logging';

@@ -7,7 +7,8 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage } from '../../common/window.apis';
 import { installExtension } from '../../common/workbenchCommands';
-import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../envManagers';
+import type { PythonProjectManager } from '../projectManager';
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../settings/settingHelpers';
 
 export const MANAGER_READY_TIMEOUT_MS = 30_000;

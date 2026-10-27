@@ -23,6 +23,86 @@ export namespace WorkbenchStrings {
     export const installExtension = l10n.t('Install Extension');
 }
 
+export namespace InlineScriptStrings {
+    export const updateExtension = l10n.t('Update Extension');
+
+    export const setUpScriptEnvironment = l10n.t("Set up this script's Python environment");
+
+    export const saveFailedBeforeSetup = l10n.t(
+        'Could not save this script, so its environment was not set up. Save the file and try again.',
+    );
+    export const invalidMetadataBeforeSetup = l10n.t(
+        "Fix the '# /// script' metadata before setting up this script's environment. Check the block markers, TOML, and declared dependencies.",
+    );
+    export const invalidPythonRequirement = l10n.t(
+        "The script's 'requires-python' must be a valid Python version specifier, for example '>=3.11'.",
+    );
+    export const scriptReadFailedBeforeSetup = l10n.t(
+        'Could not read this script, so its environment was not set up. Make sure the file is available and try again.',
+    );
+
+    export const updatePythonExtension = l10n.t(
+        'The environment for this script was created. Update the Python extension for the full inline script experience.',
+    );
+    export const updatePylanceExtension = l10n.t(
+        'The environment for this script was created. Update Pylance for the full inline script experience.',
+    );
+    export const updatePythonAndPylanceExtensions = l10n.t(
+        'The environment for this script was created. Update the Python and Pylance extensions for the full inline script experience.',
+    );
+
+    export const diagnosticSource = l10n.t('Python Environments');
+
+    export function environmentReady(version: string | undefined): string {
+        const shown = version?.trim();
+        return shown
+            ? l10n.t('Script environment ready (Python {0})', shown)
+            : l10n.t('Script environment ready');
+    }
+
+    export const unterminatedBlock = l10n.t(
+        "This '# /// script' block is missing its closing '# ///' marker, so its inline script metadata is ignored.",
+    );
+    export const multipleBlocks = l10n.t(
+        "A script may contain only one '# /// script' block. Remove this block or merge it into the first one.",
+    );
+    export function invalidContentLine(line: string): string {
+        const found = line.trim();
+        if (found.length === 0) {
+            return l10n.t(
+                "Lines inside a '# /// script' block must be exactly '#' or start with '# '. This line is blank; use '#' for a blank metadata line.",
+            );
+        }
+        return l10n.t(
+            "Lines inside a '# /// script' block must be exactly '#' or start with '# '. Found: {0}",
+            found,
+        );
+    }
+    export function invalidBlockMarker(marker: string): string {
+        return l10n.t(
+            "'{0}' is not a valid inline script marker because of trailing whitespace. Markers must be exactly '# /// script' and '# ///'.",
+            marker,
+        );
+    }
+    export function invalidToml(detail: string): string {
+        return l10n.t('The inline script metadata is not valid TOML: {0}', detail);
+    }
+    export function invalidFieldType(field: string): string {
+        switch (field) {
+            case 'requires-python':
+                return l10n.t("Inline script metadata: 'requires-python' must be a string, for example '>=3.11'.");
+            case 'dependencies':
+                return l10n.t(
+                    "Inline script metadata: 'dependencies' must be an array of strings, for example ['requests'].",
+                );
+            case 'tool':
+                return l10n.t("Inline script metadata: 'tool' must be a table.");
+            default:
+                return l10n.t("Inline script metadata: '{0}' has the wrong type.", field);
+        }
+    }
+}
+
 export namespace Interpreter {
     export const statusBarSelect = l10n.t('Select Interpreter');
     export const browsePath = l10n.t('Browse...');
@@ -227,6 +307,68 @@ export namespace ActivationStrings {
     export const envFileInjectionDisabled = l10n.t(
         'An environment file is configured but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
     );
+    export const enableForWorkspace = l10n.t('Enable for Workspace');
+    export const enableForFolder = l10n.t('Enable for Folder');
+    export const envFileInjectionDisabledForFolder = (name: string) =>
+        l10n.t(
+            'An environment file is configured for the folder "{0}" but terminal environment injection is disabled. Enable "python.terminal.useEnvFile" to use environment variables from .env files in terminals.',
+            name,
+        );
+}
+
+export namespace PythonInstallStrings {
+    export const pymanager = l10n.t('Python Install Manager');
+    export const fetchingVersions = l10n.t('Finding available Python versions...');
+    export const selectVersion = l10n.t('Select Python version to install');
+    export const installed = l10n.t('installed');
+    export const installFailed = l10n.t('Python installation did not complete. See the Python Environments output for details.');
+    export const managerUnusable = l10n.t(
+        'Python Install Manager is unavailable or could not be verified. Check its installation and configuration, then try again. uv was not started.',
+    );
+    export const catalogueFailed = l10n.t(
+        'Could not find Python versions using Python Install Manager. Check its configured source or network access and try again. uv was not started.',
+    );
+    export const noCompatiblePython = l10n.t('No compatible Python was found in the selected installer\'s catalogue.');
+    export const verificationFailed = l10n.t(
+        'A usable Python interpreter matching the request could not be verified. See the Python Environments output.',
+    );
+    export const discoveryFailed = l10n.t(
+        'Python was installed but could not be verified. Refresh environments and try again.',
+    );
+    export const timedOut = l10n.t(
+        'Python installation timed out. Background work may still be running. No alternate installer was started; check the Python Environments output before retrying.',
+    );
+    export const cancelled = l10n.t(
+        'Python installation was canceled. Any runtime already installed is kept, and background downloads may still finish. No alternate installer was started.',
+    );
+    export function installPrompt(version: string, requirement?: string): string {
+        return requirement
+            ? l10n.t(
+                  'No installed Python satisfies this script\'s requirement ({0}). Install Python {1} using Python Install Manager? An older Python Install Manager runtime in the same version family may be updated, affecting environments that use it. Newer runtimes will not be downgraded.',
+                  requirement,
+                  version,
+              )
+            : l10n.t(
+                  'Install Python {0} using Python Install Manager? An older Python Install Manager runtime in the same version family may be updated, affecting environments that use it. Newer runtimes will not be downgraded.',
+                  version,
+              );
+    }
+    export function installAction(version: string): string {
+        return l10n.t('Install / Update Python {0}', version);
+    }
+    export function installing(version: string): string {
+        return l10n.t('Installing Python {0} using Python Install Manager...', version);
+    }
+    export function runtimeConflict(installed: string, requested: string): string {
+        return l10n.t(
+            'Python Install Manager already has Python {0} in the slot required for Python {1}. The existing runtime will not be downgraded or forcibly replaced. Select another compatible interpreter or manage that runtime explicitly, then try again.',
+            installed,
+            requested,
+        );
+    }
+    export function complete(executable: string): string {
+        return l10n.t('Python is ready at {0}', executable);
+    }
 }
 
 export namespace UvInstallStrings {
@@ -238,6 +380,56 @@ export namespace UvInstallStrings {
         'No Python found. Would you like to install uv and use it to install Python? This will download and run an installer from https://astral.sh.',
     );
     export const installPython = l10n.t('Install Python');
+    export const installUv = l10n.t('Install uv');
+    export const installUvAndPython = l10n.t('Install uv and Python');
+    export function installPythonVersion(version: string): string {
+        return l10n.t('Install Python {0}', version);
+    }
+    export function installUvAndPythonVersion(version: string): string {
+        return l10n.t('Install uv and Python {0}', version);
+    }
+    export function inlineScriptInstallPythonPrompt(requiresPython?: string, version?: string): string {
+        if (requiresPython && version) {
+            return l10n.t(
+                "No installed Python satisfies this script's requirement ({0}). Would you like to install Python {1} using uv?",
+                requiresPython,
+                version,
+            );
+        }
+        if (version) {
+            return l10n.t(
+                'No compatible Python is installed for this script. Would you like to install Python {0} using uv?',
+                version,
+            );
+        }
+        return l10n.t(
+            'No Python installation is available for this script. Would you like to install Python using uv?',
+        );
+    }
+    export function inlineScriptInstallPythonAndUvPrompt(requiresPython?: string, version?: string): string {
+        if (requiresPython && version) {
+            return l10n.t(
+                "No installed Python satisfies this script's requirement ({0}). Would you like to install uv and use it to install Python {1}? This will download and run an installer from https://astral.sh.",
+                requiresPython,
+                version,
+            );
+        }
+        if (version) {
+            return l10n.t(
+                'No compatible Python is installed for this script. Would you like to install uv and use it to install Python {0}? This will download and run an installer from https://astral.sh.',
+                version,
+            );
+        }
+        return l10n.t(
+            'No Python installation is available for this script. Would you like to install uv and use it to install Python? This will download and run an installer from https://astral.sh.',
+        );
+    }
+    export function inlineScriptInstallUvForVersionLookupPrompt(requiresPython: string): string {
+        return l10n.t(
+            "No installed Python satisfies this script's requirement ({0}). Install uv to find a compatible Python version? This will download and run an installer from https://astral.sh.",
+            requiresPython,
+        );
+    }
     export const installingUv = l10n.t('Installing uv...');
     export const installingPython = l10n.t('Installing Python via uv...');
     export const installComplete = l10n.t('Python installed successfully');
@@ -254,6 +446,10 @@ export namespace UvInstallStrings {
     );
     export const clickToInstallPython = l10n.t('No Python found, click to install');
     export const selectPythonVersion = l10n.t('Select Python version to install');
+    export const installUvForVersionLookupPrompt = l10n.t(
+        'The Global environment manager uses uv to find and install Python versions. uv was not found. Install uv to continue, or install Python another way.',
+    );
+    export const otherPythonInstallationOptions = l10n.t('Other installation options');
     export const installed = l10n.t('installed');
     export const fetchingVersions = l10n.t('Fetching available Python versions...');
     export const failedToFetchVersions = l10n.t('Failed to fetch available Python versions');

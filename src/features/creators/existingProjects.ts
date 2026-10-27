@@ -4,7 +4,10 @@ import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from
 import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo, traceLog } from '../../common/logging';
 import { showOpenDialog, showWarningMessage } from '../../common/window.apis';
-import { PythonProjectManager, PythonProjectsImpl } from '../../internal.api';
+import {
+    PythonProjectManager,
+    PythonProjectsImpl,
+} from '../projectManager';
 import { normalizePath } from '../../common/utils/pathUtils';
 
 export class ExistingProjects implements PythonProjectCreator {

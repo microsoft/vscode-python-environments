@@ -54,4 +54,19 @@ suite('Terminal - Activate Menu Button', () => {
             'Should set pythonTerminalActivation to false for task terminal',
         );
     });
+
+    test('should clear activation contexts when no environment is resolved', async () => {
+        await setActivateMenuButtonContext(mockTerminal, undefined);
+
+        assert.ok(
+            executeCommandStub.calledWith('setContext', 'pythonTerminalActivation', false),
+            'Should hide the activation button',
+        );
+        assert.ok(
+            executeCommandStub.calledWith('setContext', 'pythonTerminalActivated', false),
+            'Should clear the activated state',
+        );
+        assert.ok(isTaskTerminalStub.notCalled, 'Should not inspect terminal type without an environment');
+        assert.ok(isActivatableEnvironmentStub.notCalled, 'Should not inspect an undefined environment');
+    });
 });

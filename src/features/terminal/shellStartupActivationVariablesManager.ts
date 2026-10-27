@@ -11,6 +11,8 @@ export interface ShellStartupActivationVariablesManager extends Disposable {
 
 export class ShellStartupActivationVariablesManagerImpl implements ShellStartupActivationVariablesManager {
     private readonly disposables: Disposable[] = [];
+    private globalRefreshGeneration = 0;
+
     constructor(
         private readonly envCollection: GlobalEnvironmentVariableCollection,
         private readonly shellEnvsProviders: ShellEnvsProvider[],
@@ -33,6 +35,7 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
             if (autoActType === ACT_TYPE_SHELL) {
                 await this.initializeInternal();
             } else {
+                ++this.globalRefreshGeneration;
                 const workspaces = getWorkspaceFolders() ?? [];
                 if (workspaces.length > 0) {
                     workspaces.forEach((workspace) => {
@@ -48,21 +51,32 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
 
     private async handleEnvironmentChange(e: DidChangeEnvironmentEventArgs) {
         const autoActType = getAutoActivationType();
-        if (autoActType === ACT_TYPE_SHELL && e.uri) {
-            const wf = getWorkspaceFolder(e.uri);
-            if (wf) {
-                const envVars = this.envCollection.getScoped({ workspaceFolder: wf });
-                if (envVars) {
-                    this.shellEnvsProviders.forEach((provider) => {
-                        if (e.new) {
-                            provider.updateEnvVariables(envVars, e.new);
-                        } else {
-                            provider.removeEnvVariables(envVars);
-                        }
-                    });
-                }
-            }
+        if (autoActType !== ACT_TYPE_SHELL) {
+            return;
         }
+        if (!e.uri) {
+            if (!getWorkspaceFolders()?.length) {
+                ++this.globalRefreshGeneration;
+                this.updateGlobalEnvironment(e.new);
+            }
+            return;
+        }
+        const wf = getWorkspaceFolder(e.uri);
+        if (!wf) {
+            return;
+        }
+        const envVars = this.envCollection.getScoped({ workspaceFolder: wf });
+        if (!envVars) {
+            return;
+        }
+        const folderEnvironment = await this.api.getEnvironment(wf.uri);
+        this.shellEnvsProviders.forEach((provider) => {
+            if (folderEnvironment) {
+                provider.updateEnvVariables(envVars, folderEnvironment);
+            } else {
+                provider.removeEnvVariables(envVars);
+            }
+        });
     }
 
     private async initializeInternal(): Promise<void> {
@@ -85,17 +99,23 @@ export class ShellStartupActivationVariablesManagerImpl implements ShellStartupA
             });
             await Promise.all(promises);
         } else {
+            const generation = ++this.globalRefreshGeneration;
             const env = await this.api.getEnvironment(undefined);
-            await Promise.all(
-                this.shellEnvsProviders.map(async (provider) => {
-                    if (env) {
-                        provider.updateEnvVariables(this.envCollection, env);
-                    } else {
-                        provider.removeEnvVariables(this.envCollection);
-                    }
-                }),
-            );
+            if (generation !== this.globalRefreshGeneration || getWorkspaceFolders()?.length) {
+                return;
+            }
+            this.updateGlobalEnvironment(env);
         }
+    }
+
+    private updateGlobalEnvironment(environment: DidChangeEnvironmentEventArgs['new']): void {
+        this.shellEnvsProviders.forEach((provider) => {
+            if (environment) {
+                provider.updateEnvVariables(this.envCollection, environment);
+            } else {
+                provider.removeEnvVariables(this.envCollection);
+            }
+        });
     }
 
     public async initialize(): Promise<void> {

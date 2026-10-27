@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Build VSIX
         uses: ./.github/actions/build-vsix
@@ -30,10 +30,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -54,10 +54,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -82,14 +82,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.9', '3.12', '3.14']
+        python-version: ['3.10', '3.12', '3.14', '3.15']
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Checkout Python Environment Tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: 'microsoft/python-environment-tools'
           path: 'python-env-tools-src'
@@ -103,7 +103,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -132,15 +132,16 @@ jobs:
         shell: bash
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install Dependencies
         run: npm ci
@@ -153,9 +154,10 @@ jobs:
 
       - name: Run Smoke Tests (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@v1
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run smoke-test
+          script: smoke-test
+          artifact-name: smoke-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run Smoke Tests (non-Linux)
         if: runner.os != 'Linux'
@@ -169,14 +171,14 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.12', '3.14']
+        python-version: ['3.10', '3.12', '3.14', '3.15']
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Checkout Python Environment Tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: 'microsoft/python-environment-tools'
           path: 'python-env-tools-src'
@@ -190,7 +192,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -219,15 +221,16 @@ jobs:
         shell: bash
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install Dependencies
         run: npm ci
@@ -240,9 +243,10 @@ jobs:
 
       - name: Run E2E Tests (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@v1
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run e2e-test
+          script: e2e-test
+          artifact-name: e2e-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run E2E Tests (non-Linux)
         if: runner.os != 'Linux'
@@ -252,18 +256,21 @@ jobs:
     name: Integration Tests
     runs-on: ${{ matrix.os }}
     needs: [smoke-tests]
+    env:
+      CONDA_PLUGINS_AUTO_ACCEPT_TOS: 'true'
+      VSC_PYTHON_PACKAGE_NETWORK_TEST: '1'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.12', '3.14']
+        python-version: ['3.10', '3.12', '3.14', '3.15']
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Checkout Python Environment Tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: 'microsoft/python-environment-tools'
           path: 'python-env-tools-src'
@@ -277,7 +284,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust build
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -306,15 +313,16 @@ jobs:
         shell: bash
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install Dependencies
         run: npm ci
@@ -325,11 +333,21 @@ jobs:
       - name: Compile Tests
         run: npm run compile-tests
 
+      - name: Set up Conda
+        uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
+        with:
+          activate-environment: ''
+          auto-activate: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+
       - name: Run Integration Tests (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@v1
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run integration-test
+          script: integration-test
+          artifact-name: integration-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run Integration Tests (non-Linux)
         if: runner.os != 'Linux'
@@ -343,22 +361,23 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.10', '3.12', '3.14']
+        python-version: ['3.10', '3.12', '3.14', '3.15']
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
       - name: Install Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
 
       - name: Install Dependencies
         run: npm ci
@@ -371,9 +390,10 @@ jobs:
 
       - name: Run Integration Tests Multi-Root (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@v1
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run integration-test-multiroot
+          script: integration-test-multiroot
+          artifact-name: integration-multiroot-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run Integration Tests Multi-Root (non-Linux)
         if: runner.os != 'Linux'

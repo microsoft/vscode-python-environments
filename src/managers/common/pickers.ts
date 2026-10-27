@@ -108,6 +108,7 @@ function groupByInstalled(items: PackageQuickPickItem[], installed?: string[]): 
 interface PackagesPickerResult {
     install: string[];
     uninstall: string[];
+    selectedUris?: Uri[];
 }
 
 function selectionsToResult(selections: string[], installed: string[]): PackagesPickerResult {
@@ -149,12 +150,25 @@ export async function selectFromCommonPackagesToInstall(
                 handleItemButton(e.item.uri);
             },
         );
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (ex: any) {
+    } catch (ex) {
         if (ex === QuickInputButtons.Back) {
             throw ex;
-        } else if (ex.button === EDIT_ARGUMENTS_BUTTON && ex.item) {
-            const parts: PackageQuickPickItem[] = Array.isArray(ex.item) ? ex.item : [ex.item];
+        } else if (
+            typeof ex === 'object' &&
+            ex !== null &&
+            'button' in ex &&
+            ex.button === EDIT_ARGUMENTS_BUTTON &&
+            'item' in ex &&
+            ex.item
+        ) {
+            const selection: readonly unknown[] = Array.isArray(ex.item) ? ex.item : [ex.item];
+            const parts = selection.map((part) => {
+                const item = items.find((candidate) => candidate === part);
+                if (!item) {
+                    throw ex;
+                }
+                return item;
+            });
             selected = [
                 {
                     id: PackageManagement.enterPackageNames,
@@ -163,6 +177,8 @@ export async function selectFromCommonPackagesToInstall(
                 },
                 ...parts,
             ];
+        } else {
+            throw ex;
         }
     }
 
@@ -265,11 +281,12 @@ export async function selectFromInstallableToInstall(
     );
 
     if (selected) {
-        if (Array.isArray(selected)) {
-            return { install: selected.flatMap((s) => s.args ?? []), uninstall: [] };
-        } else {
-            return { install: selected.args ?? [], uninstall: [] };
-        }
+        const selectedItems = Array.isArray(selected) ? selected : [selected];
+        return {
+            install: selectedItems.flatMap((item) => item.args ?? []),
+            uninstall: [],
+            selectedUris: selectedItems.flatMap((item) => (item.uri ? [item.uri] : [])),
+        };
     }
     return undefined;
 }

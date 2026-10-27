@@ -3,15 +3,13 @@ import { DidChangeEnvironmentEventArgs, EnvironmentGroupInfo, PythonEnvironment 
 import { ProjectViews } from '../../common/localize';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createTreeView } from '../../common/window.apis';
-import {
+import type {
     DidChangeEnvironmentManagerEventArgs,
     DidChangePackageManagerEventArgs,
     EnvironmentManagers,
     InternalDidChangeEnvironmentsEventArgs,
     InternalDidChangePackagesEventArgs,
-    InternalEnvironmentManager,
-    InternalPackageManager,
-} from '../../internal.api';
+} from '../envManagers';
 import { ITemporaryStateManager } from './temporaryStateManager';
 import {
     EnvInfoTreeItem,
@@ -116,6 +114,9 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
             }),
             this.providers.onDidChangePackageManager((p: DidChangePackageManagerEventArgs) => {
                 this.onDidChangePackageManager(p);
+            }),
+            this.providers.onDidChangeProjectPackageManager(() => {
+                this.fireDataChanged(undefined);
             }),
         );
 
@@ -241,18 +242,14 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
 
         if (element.kind === EnvTreeItemKind.environment) {
             const pythonEnvItem = element as PythonEnvTreeItem;
-            const environment = pythonEnvItem.environment;
-            const envManager =
-                pythonEnvItem.parent.kind === EnvTreeItemKind.environmentGroup
-                    ? pythonEnvItem.parent.parent.manager
-                    : pythonEnvItem.parent.manager;
-
-            const pkgManager = this.getSupportedPackageManager(envManager);
+            const { environment } = pythonEnvItem;
+            const pkgManager = this.providers.getPackageManager(environment);
             const parent = element as PythonEnvTreeItem;
             const views: EnvTreeItem[] = [];
 
             if (pkgManager) {
-                let packages = await pkgManager.refresh(environment);
+                await pkgManager.refresh(environment);
+                const packages = await pkgManager.getPackages(environment);
                 if (packages && packages.length > 0) {
                     views.push(
                         ...packages
@@ -316,10 +313,6 @@ export class EnvManagerView implements TreeDataProvider<EnvTreeItem>, Disposable
         if (view && this.treeView.visible) {
             await this.treeView.reveal(view, { expand: false, focus: true, select: true });
         }
-    }
-
-    private getSupportedPackageManager(manager: InternalEnvironmentManager): InternalPackageManager | undefined {
-        return this.providers.getPackageManager(manager.preferredPackageManagerId);
     }
 
     private onDidChangeEnvironmentManager(_args: DidChangeEnvironmentManagerEventArgs) {
