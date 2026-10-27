@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, env, ExtensionTerminalOptions, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
+import { ConfigurationTarget, Disposable, env, ExtensionTerminalOptions, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
 import {
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -437,7 +437,19 @@ export function getAutoActivationType(): AutoActivationType {
 
 export async function setAutoActivationType(value: AutoActivationType): Promise<void> {
     const config = getConfiguration('python-envs');
-    return await config.update('terminal.autoActivationType', value, true);
+    const inspected = config.inspect<AutoActivationType>('terminal.autoActivationType');
+
+    // If a workspace-level override exists, update that scope instead of global,
+    // otherwise switching back (e.g. to 'command') would have no visible effect
+    // since the workspace value still takes priority on read.
+    if (inspected?.workspaceFolderValue !== undefined) {
+        return await config.update('terminal.autoActivationType', value, ConfigurationTarget.WorkspaceFolder);
+    }
+    if (inspected?.workspaceValue !== undefined) {
+        return await config.update('terminal.autoActivationType', value, ConfigurationTarget.Workspace);
+    }
+
+    return await config.update('terminal.autoActivationType', value, ConfigurationTarget.Global);
 }
 
 /**

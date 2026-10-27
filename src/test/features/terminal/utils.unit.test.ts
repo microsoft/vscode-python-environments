@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { ExtensionTerminalOptions, Terminal, TerminalOptions, Uri } from 'vscode';
+import { ConfigurationTarget, ExtensionTerminalOptions, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
 import { VENV_MANAGER_ID } from '../../../common/constants';
 import * as windowApis from '../../../common/window.apis';
@@ -14,6 +14,7 @@ import {
     AutoActivationType,
     getAutoActivationType,
     getEnvironmentForTerminal,
+    setAutoActivationType,
     shouldActivateInCurrentTerminal,
     shouldSkipTerminalActivation,
     waitForShellIntegration,
@@ -1094,5 +1095,91 @@ suite('Terminal Utils - waitForShellIntegration', () => {
 
         assert.strictEqual(result, true);
         assert.strictEqual(terminal.shellIntegration, shellIntegration);
+    });
+});
+
+suite('Terminal Utils - setAutoActivationType', () => {
+    let mockGetConfiguration: sinon.SinonStub;
+    let pyEnvsConfig: MockWorkspaceConfig;
+
+    setup(() => {
+        mockGetConfiguration = sinon.stub(workspaceApis, 'getConfiguration');
+        pyEnvsConfig = {
+            get: sinon.stub(),
+            inspect: sinon.stub(),
+            update: sinon.stub(),
+        };
+        mockGetConfiguration.withArgs('python-envs').returns(pyEnvsConfig);
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('updates global scope when no workspace override exists', async () => {
+        pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns({});
+
+        await setAutoActivationType(ACT_TYPE_COMMAND);
+
+        assert.ok(
+            pyEnvsConfig.update.calledWithExactly(
+                'terminal.autoActivationType',
+                ACT_TYPE_COMMAND,
+                ConfigurationTarget.Global,
+            ),
+            'Should update global scope when no workspace override exists',
+        );
+    });
+
+    test('updates workspace scope when workspaceValue override exists', async () => {
+        pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns({
+            workspaceValue: ACT_TYPE_SHELL,
+        });
+
+        await setAutoActivationType(ACT_TYPE_COMMAND);
+
+        assert.ok(
+            pyEnvsConfig.update.calledWithExactly(
+                'terminal.autoActivationType',
+                ACT_TYPE_COMMAND,
+                ConfigurationTarget.Workspace,
+            ),
+            'Should update workspace scope when workspaceValue override exists',
+        );
+    });
+
+    test('updates workspaceFolder scope when workspaceFolderValue override exists', async () => {
+        pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns({
+            workspaceFolderValue: ACT_TYPE_SHELL,
+        });
+
+        await setAutoActivationType(ACT_TYPE_COMMAND);
+
+        assert.ok(
+            pyEnvsConfig.update.calledWithExactly(
+                'terminal.autoActivationType',
+                ACT_TYPE_COMMAND,
+                ConfigurationTarget.WorkspaceFolder,
+            ),
+            'Should update workspaceFolder scope when workspaceFolderValue override exists',
+        );
+    });
+
+    test('prioritizes workspaceFolder scope over workspace scope when both exist', async () => {
+        pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns({
+            workspaceValue: ACT_TYPE_SHELL,
+            workspaceFolderValue: ACT_TYPE_OFF,
+        });
+
+        await setAutoActivationType(ACT_TYPE_COMMAND);
+
+        assert.ok(
+            pyEnvsConfig.update.calledWithExactly(
+                'terminal.autoActivationType',
+                ACT_TYPE_COMMAND,
+                ConfigurationTarget.WorkspaceFolder,
+            ),
+            'Should prioritize workspaceFolder scope over workspace scope',
+        );
     });
 });
