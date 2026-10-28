@@ -117,10 +117,12 @@ suite('tryFastPathGet', () => {
 
     test('reports stale when global cached path resolves to undefined', async () => {
         const globalPath = __filename;
+        const clearPersistedPath = sinon.stub().resolves();
         const { opts } = createOpts({
             scope: undefined,
             getGlobalPersistedPath: sinon.stub().resolves(globalPath),
             resolve: sinon.stub().resolves(undefined),
+            clearPersistedPath,
         });
         const result = await tryFastPathGet(opts);
 
@@ -129,14 +131,17 @@ suite('tryFastPathGet', () => {
         const [eventName, , props] = sendTelemetryStub.firstCall.args;
         assert.strictEqual(eventName, EventNames.GLOBAL_ENV_CACHE);
         assert.strictEqual(props.result, 'stale');
+        sinon.assert.calledOnceWithExactly(clearPersistedPath, undefined);
     });
 
     test('returns undefined for global scope when cached path resolve fails', async () => {
         const globalPath = __filename;
+        const clearPersistedPath = sinon.stub().resolves();
         const { opts } = createOpts({
             scope: undefined,
             getGlobalPersistedPath: sinon.stub().resolves(globalPath),
             resolve: sinon.stub().rejects(new Error('python was uninstalled')),
+            clearPersistedPath,
         });
         const result = await tryFastPathGet(opts);
 
@@ -147,6 +152,7 @@ suite('tryFastPathGet', () => {
         const [eventName, , props] = sendTelemetryStub.firstCall.args;
         assert.strictEqual(eventName, EventNames.GLOBAL_ENV_CACHE);
         assert.strictEqual(props.result, 'stale');
+        sinon.assert.calledOnceWithExactly(clearPersistedPath, undefined);
     });
 
     test('global scope fast path starts background init when initialized is undefined', async () => {
@@ -192,13 +198,33 @@ suite('tryFastPathGet', () => {
         assert.strictEqual(result, undefined);
     });
 
-    test('returns undefined when resolve throws', async () => {
+    test('clears workspace persisted path when resolve returns undefined', async () => {
+        const clearPersistedPath = sinon.stub().resolves();
+        const scope = Uri.file(path.resolve('test', 'workspace'));
         const { opts } = createOpts({
-            resolve: sinon.stub().rejects(new Error('resolve failed')),
+            scope,
+            resolve: sinon.stub().resolves(undefined),
+            clearPersistedPath,
         });
         const result = await tryFastPathGet(opts);
 
         assert.strictEqual(result, undefined);
+        sinon.assert.calledOnceWithExactly(clearPersistedPath, scope);
+    });
+
+
+    test('returns undefined when resolve throws', async () => {
+        const clearPersistedPath = sinon.stub().resolves();
+        const scope = Uri.file(path.resolve('test', 'workspace'));
+        const { opts } = createOpts({
+            scope,
+            resolve: sinon.stub().rejects(new Error('resolve failed')),
+            clearPersistedPath,
+        });
+        const result = await tryFastPathGet(opts);
+
+        assert.strictEqual(result, undefined);
+        sinon.assert.calledOnceWithExactly(clearPersistedPath, scope);
     });
 
     test('skips resolve and falls through when workspace persisted path no longer exists on disk', async () => {

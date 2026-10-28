@@ -566,6 +566,14 @@ export class VenvManager implements EnvironmentManager {
             getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getVenvForWorkspace(fsPath),
             resolve: (p) => resolveVenvPythonEnvironmentPath(p, this.nativeFinder, this.api, this, this.baseManager),
+            clearPersistedPath: async (staleScope) => {
+                if (staleScope instanceof Uri) {
+                    const projectFsPath = getProjectFsPathForScope(this.api, staleScope);
+                    await setVenvForWorkspace(projectFsPath, undefined);
+                } else {
+                    await setVenvForGlobal(undefined);
+                }
+            },
             startBackgroundInit: () => this.initializeWithBase(),
         });
         if (fastResult) {
