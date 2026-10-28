@@ -28,7 +28,6 @@ import {
     PythonProject,
 } from '../../api';
 import { Capabilities, PackageCapability, PackageManagerCapability, Support } from '../../capabilities';
-import { normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInputBox, withProgress } from '../../common/window.apis';
 import * as workspaceFs from '../../common/workspace.fs.apis';
 import {
@@ -36,6 +35,7 @@ import {
     PythonToolError,
     pythonToolSupport,
     throwIfCancelled,
+    waitForToolRead,
 } from '../../internal/pythonToolSupport';
 import { PackageManagerRequiresProjectError } from '../common/errors';
 import { updatePackagesAndNotify } from '../common/packageChanges';
@@ -50,6 +50,43 @@ import {
 import { runPoetry } from './commands/runPoetry';
 import { PoetryManager } from './poetryManager';
 import { getPoetry } from './poetryUtils';
+
+const pendingPoetryEnvironmentMismatchNotifications = new Set<string>();
+
+interface PoetryTarget {
+    readonly canonical?: string;
+    readonly identity?: string;
+    readonly reported: string;
+}
+
+interface VerifiedPoetryEnvironment {
+    readonly cacheKey: string;
+    readonly env: NodeJS.ProcessEnv;
+}
+
+interface ResolvedEnvironment {
+    readonly canonical: string;
+    readonly identity: string;
+}
+
+interface PoetryPackageManagerSharedState {
+    readonly environmentOperations: Map<string, Promise<void>>;
+    readonly installedPackages: Map<string, Package[]>;
+}
+
+function isPoetryEnvironmentMismatch(error: unknown): error is PythonToolError {
+    return error instanceof PythonToolError && error.code === 'ENVIRONMENT_MISMATCH';
+}
+
+async function resolveEnvironmentEntry(envPath: string): Promise<ResolvedEnvironment> {
+    const canonical = await fsapi.realpath(envPath);
+    const stat = await fsapi.stat(canonical, { bigint: true });
+    const identity =
+        stat.ino !== BigInt(0)
+            ? `${stat.dev.toString()}:${stat.ino.toString()}`
+            : path.resolve(canonical);
+    return { canonical, identity };
+}
 
 export class PoetryPackageManager implements PackageManager, Disposable {
     readonly capabilities: Capabilities<PackageManagerCapability> = {
@@ -77,13 +114,18 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     private readonly packagesChangedEmitter = new EventEmitter<DidChangePackagesEventArgs>();
     readonly onDidChangePackages: Event<DidChangePackagesEventArgs> = this.packagesChangedEmitter.event;
 
-    private packages: Map<string, Package[]> = new Map();
+    private readonly packages = new Map<string, Package[]>();
 
     constructor(
         private readonly api: PythonEnvironmentApi,
         public readonly log: LogOutputChannel,
         private readonly poetryManager: PoetryManager,
         private readonly project?: PythonProject,
+        private readonly sharedState: PoetryPackageManagerSharedState = {
+            environmentOperations: new Map(),
+            installedPackages: new Map(),
+        },
+        private readonly ownsSharedState = true,
     ) {
         this.name = 'poetry';
         this.displayName = 'Poetry';
@@ -104,49 +146,161 @@ export class PoetryPackageManager implements PackageManager, Disposable {
      * @returns A Poetry package manager scoped to the project.
      */
     createForProject(project: PythonProject): PoetryPackageManager {
-        return new PoetryPackageManager(this.api, this.log, this.poetryManager, project);
+        return new PoetryPackageManager(
+            this.api,
+            this.log,
+            this.poetryManager,
+            project,
+            this.sharedState,
+            false,
+        );
     }
 
     readonly [pythonToolSupport]: PackageToolSupport = {
         manage: async (environment, options, token, scope) => {
-            await this.verifyToolEnvironment(environment, scope, token);
             await this.manage(environment, { ...options, runHeadless: true }, token, scope);
         },
-        getPackages: async (environment, token, scope) => {
-            await this.verifyToolEnvironment(environment, scope, token);
-            return this.fetchInstalledPackagesForTools(environment, token, scope);
-        },
+        getPackages: (environment, token, scope) =>
+            this.enqueueEnvironmentOperation(environment, token, async () => {
+                const verified = await this.verifyEnvironment(environment, scope.fsPath, token, true);
+                const packages = await this.fetchInstalledPackagesForTools(environment, token, scope, verified.env);
+                this.sharedState.installedPackages.set(verified.cacheKey, packages);
+                return packages;
+            }),
     };
 
-    private async verifyToolEnvironment(
-        environment: PythonEnvironment,
-        scope: Uri,
-        token: CancellationToken,
-    ): Promise<void> {
+    private async resolvePoetryTarget(
+        cwd: string,
+        token?: CancellationToken,
+        toolExecution = false,
+        env?: NodeJS.ProcessEnv,
+    ): Promise<PoetryTarget> {
+        const output = await runPoetry(
+            ['--no-ansi', 'env', 'info', '--path'],
+            cwd,
+            this.log,
+            token,
+            toolExecution,
+            env,
+        );
         throwIfCancelled(token);
-        const target = (await runPoetry(['env', 'info', '--path'], scope.fsPath, this.log, token, true)).trim();
-        throwIfCancelled(token);
-        const actual = path.isAbsolute(target) ? await fsapi.realpath(target) : undefined;
-        const selected = environment.sysPrefix ? await fsapi.realpath(environment.sysPrefix) : undefined;
-        if (!actual || !selected || normalizePath(actual) !== normalizePath(selected)) {
-            throw new PythonToolError(
-                'ENVIRONMENT_MISMATCH',
-                l10n.t(
-                    "Poetry for {0} targets {1}, not the selected environment {2}. Select this project's Poetry environment before querying or installing packages.",
-                    scope.fsPath,
-                    target || l10n.t('no environment'),
-                    environment.sysPrefix,
-                ),
-                environment,
-            );
+        const reported = output.trim();
+        const lines = reported.split(/\r?\n/).filter((line) => line.length > 0);
+        const target = lines.length === 1 ? lines[0] : undefined;
+        if (!target || !path.isAbsolute(target)) {
+            return { reported };
         }
+        try {
+            const resolved = await resolveEnvironmentEntry(target);
+            return { ...resolved, reported: target };
+        } catch (error) {
+            this.log.error('Failed to resolve the Poetry target environment', error);
+            return { reported: target };
+        }
+    }
+
+    private async resolveSelectedEnvironment(environment: PythonEnvironment): Promise<ResolvedEnvironment | undefined> {
+        if (!environment.sysPrefix || !path.isAbsolute(environment.sysPrefix)) {
+            return undefined;
+        }
+        try {
+            return await resolveEnvironmentEntry(environment.sysPrefix);
+        } catch (error) {
+            this.log.error('Failed to resolve the selected Python environment', error);
+            return undefined;
+        }
+    }
+
+    private async verifyEnvironment(
+        environment: PythonEnvironment,
+        cwd: string,
+        token?: CancellationToken,
+        toolExecution = false,
+    ): Promise<VerifiedPoetryEnvironment> {
         throwIfCancelled(token);
+        const operationEnv: NodeJS.ProcessEnv = toolExecution ? {} : { ...process.env };
+        const target = await this.resolvePoetryTarget(cwd, token, toolExecution, operationEnv);
+        const selected = await this.resolveSelectedEnvironment(environment);
+        throwIfCancelled(token);
+        if (!target.canonical || !target.identity || !selected || target.identity !== selected.identity) {
+            this.deletePackageCaches(environment, selected?.identity);
+            throw this.createEnvironmentMismatch(environment, cwd, target.reported);
+        }
+
+        const env = { ...operationEnv, VIRTUAL_ENV: target.canonical };
+        const pinnedTarget = await this.resolvePoetryTarget(cwd, token, toolExecution, env);
+        throwIfCancelled(token);
+        if (
+            !pinnedTarget.canonical ||
+            !pinnedTarget.identity ||
+            pinnedTarget.identity !== target.identity
+        ) {
+            this.deletePackageCaches(environment, selected.identity);
+            throw this.createEnvironmentMismatch(environment, cwd, pinnedTarget.reported);
+        }
+
+        return { cacheKey: target.identity, env };
+    }
+
+    private createEnvironmentMismatch(
+        environment: PythonEnvironment,
+        cwd: string,
+        reportedTarget: string,
+    ): PythonToolError {
+        return new PythonToolError(
+            'ENVIRONMENT_MISMATCH',
+            l10n.t(
+                "Poetry for {0} targets {1}, not the selected environment {2}. Select this project's Poetry environment or choose a compatible package manager before querying or changing packages.",
+                cwd,
+                reportedTarget || l10n.t('no environment'),
+                environment.sysPrefix || l10n.t('no environment'),
+            ),
+            environment,
+        );
+    }
+
+    private deletePackageCaches(environment: PythonEnvironment, installedCacheKey?: string): void {
+        this.packages.delete(environment.envId.id);
+        if (installedCacheKey) {
+            this.sharedState.installedPackages.delete(installedCacheKey);
+        } else {
+            this.sharedState.installedPackages.clear();
+        }
+    }
+
+    private async enqueueEnvironmentOperation<T>(
+        environment: PythonEnvironment,
+        token: CancellationToken | undefined,
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        throwIfCancelled(token);
+        const selected = await this.resolveSelectedEnvironment(environment);
+        throwIfCancelled(token);
+        const key = selected?.identity ?? `environment:${environment.envId.id}`;
+        const previous = this.sharedState.environmentOperations.get(key) ?? Promise.resolve();
+        const waitForPrevious = token ? waitForToolRead(previous, token, null) : previous;
+        const result = waitForPrevious.then(async () => {
+            throwIfCancelled(token);
+            return operation();
+        });
+        const tail = previous.then(
+            () => result.then(() => undefined, () => undefined),
+            () => result.then(() => undefined, () => undefined),
+        );
+        this.sharedState.environmentOperations.set(key, tail);
+        void tail.finally(() => {
+            if (this.sharedState.environmentOperations.get(key) === tail) {
+                this.sharedState.environmentOperations.delete(key);
+            }
+        });
+        return result;
     }
 
     private async fetchInstalledPackagesForTools(
         environment: PythonEnvironment,
         token: CancellationToken,
         scope: Uri,
+        env: NodeJS.ProcessEnv,
     ): Promise<Package[]> {
         // poetry show describes the lockfile, not the installed distributions.
         const output = await runPoetry(
@@ -155,6 +309,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             this.log,
             token,
             true,
+            env,
         );
         throwIfCancelled(token);
         const data: unknown = JSON.parse(output);
@@ -197,12 +352,17 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         if (toInstall.length === 0 && toUninstall.length === 0) {
             if (options.runHeadless) {
                 // Headless mode: skip the interactive package input prompt.
+                if (toolToken) {
+                    await this.enqueueEnvironmentOperation(environment, toolToken, async () => {
+                        await this.verifyEnvironment(environment, cwd, toolToken, true);
+                    });
+                }
                 return;
             }
             // Show package input UI if no packages are specified
             const installInput = await showInputBox({
-                prompt: 'Enter packages to install (comma separated)',
-                placeHolder: 'e.g., requests, pytest, black',
+                prompt: l10n.t('Enter packages to install (comma separated)'),
+                placeHolder: l10n.t('e.g., requests, pytest, black'),
             });
 
             if (installInput) {
@@ -217,20 +377,37 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
         }
 
-        const execute = async (token?: CancellationToken): Promise<void> => {
+        const execute = (token?: CancellationToken): Promise<void> =>
+            this.enqueueEnvironmentOperation(environment, token, async () => {
             try {
-                await this.runPoetryManage({ install: toInstall, uninstall: toUninstall }, cwd, token, !!toolToken);
-                await updatePackagesAndNotify(
-                    this,
+                const toolExecution = toolToken !== undefined;
+                const verified = await this.verifyEnvironment(environment, cwd, token, toolExecution);
+                const cache = toolExecution ? this.sharedState.installedPackages : this.packages;
+                const cacheKey = toolExecution ? verified.cacheKey : environment.envId.id;
+                const before = cache.get(cacheKey);
+                this.deletePackageCaches(environment, verified.cacheKey);
+                await this.runPoetryManage(
+                    { install: toInstall, uninstall: toUninstall },
+                    cwd,
+                    verified.env,
+                    token,
+                    toolExecution,
+                );
+                await this.updatePackagesForVerifiedEnvironment(
                     environment,
-                    this.packages.get(environment.envId.id),
-                    (changes) => {
-                        this.packagesChangedEmitter.fire({ environment, manager: this, changes });
+                    cwd,
+                    verified.env,
+                    {
+                        before,
+                        cacheKey,
+                        token,
+                        toolExecution,
+                        fetchPackages:
+                            toolToken && scope
+                                ? () => this.fetchInstalledPackagesForTools(environment, toolToken, scope, verified.env)
+                                : undefined,
+                        skipDirectDependencies: toolExecution,
                     },
-                    toolToken && scope
-                        ? () => this.fetchInstalledPackagesForTools(environment, toolToken, scope)
-                        : undefined,
-                    !!toolToken,
                 );
             } catch (e) {
                 if (e instanceof CancellationError) {
@@ -238,16 +415,11 @@ export class PoetryPackageManager implements PackageManager, Disposable {
                 }
                 this.log.error('Error managing packages with Poetry', e);
                 if (!options.runHeadless) {
-                    setImmediate(async () => {
-                        const result = await showErrorMessage('Error managing packages with Poetry', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
-                    });
+                    this.notifyPackageError(e, l10n.t('Error managing packages with Poetry'));
                 }
                 throw e;
             }
-        };
+            });
 
         if (options.runHeadless) {
             await execute(toolToken);
@@ -257,7 +429,7 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         await withProgress(
             {
                 location: ProgressLocation.Notification,
-                title: 'Managing packages with Poetry',
+                title: l10n.t('Managing packages with Poetry'),
                 cancellable: true,
             },
             (_progress, token) => execute(token),
@@ -271,43 +443,44 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         await withProgress(
             {
                 location: ProgressLocation.Window,
-                title: 'Refreshing Poetry packages',
+                title: l10n.t('Refreshing Poetry packages'),
             },
-            async () => {
+            (_progress, token) => this.enqueueEnvironmentOperation(environment, token, async () => {
                 try {
-                    const packages = await updatePackagesAndNotify(
-                        this,
-                        environment,
-                        this.packages.get(environment.envId.id),
-                        (changes) => {
-                            this.packagesChangedEmitter.fire({ environment, manager: this, changes });
-                        },
-                    );
-                    this.packages.set(environment.envId.id, packages ?? []);
-                } catch (error) {
-                    this.log.error(`Failed to refresh packages: ${error}`);
-                    // Show error to user but don't break the UI
-                    setImmediate(async () => {
-                        const result = await showErrorMessage('Error refreshing Poetry packages', 'View Output');
-                        if (result === 'View Output') {
-                            this.log.show();
-                        }
+                    const cwd = await this.getProjectCwd();
+                    const verified = await this.verifyEnvironment(environment, cwd, token);
+                    await this.updatePackagesForVerifiedEnvironment(environment, cwd, verified.env, {
+                        cacheKey: environment.envId.id,
+                        token,
                     });
+                } catch (error) {
+                    if (error instanceof CancellationError) {
+                        throw error;
+                    }
+                    this.log.error(`Failed to refresh packages: ${error}`);
+                    if (isPoetryEnvironmentMismatch(error)) {
+                        throw error;
+                    }
+                    this.notifyPackageError(error, l10n.t('Error refreshing Poetry packages'));
                 }
-            },
+            }),
         );
     }
 
-    async getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+    getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
         if (!this.project) {
-            return undefined;
+            return Promise.resolve(undefined);
         }
-        if (options?.skipCache || !this.packages.has(environment.envId.id)) {
-            const packages = await this.fetchPackagesFromTool(environment);
-            this.packages.set(environment.envId.id, packages);
-            return packages;
-        }
-        return this.packages.get(environment.envId.id);
+        return this.enqueueEnvironmentOperation(environment, undefined, async () => {
+            const cwd = await this.getProjectCwd();
+            const verified = await this.verifyEnvironment(environment, cwd);
+            if (options?.skipCache || !this.packages.has(environment.envId.id)) {
+                const packages = await this.fetchPackagesFromTool(environment, cwd, verified.env);
+                this.packages.set(environment.envId.id, packages);
+                return packages;
+            }
+            return this.packages.get(environment.envId.id);
+        });
     }
 
     async getVersion(_environment: PythonEnvironment): Promise<Pep440Version | undefined> {
@@ -336,17 +509,20 @@ export class PoetryPackageManager implements PackageManager, Disposable {
     dispose(): void {
         this.packagesChangedEmitter.dispose();
         this.packages.clear();
+        if (this.ownsSharedState) {
+            this.sharedState.installedPackages.clear();
+            this.sharedState.environmentOperations.clear();
+        }
     }
 
     private async runPoetryManage(
         options: { install?: string[]; uninstall?: string[] },
         cwd: string,
+        env: NodeJS.ProcessEnv,
         token?: CancellationToken,
         toolExecution = false,
     ): Promise<void> {
-        if (toolExecution) {
-            throwIfCancelled(token);
-        }
+        throwIfCancelled(token);
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(
@@ -357,32 +533,85 @@ export class PoetryPackageManager implements PackageManager, Disposable {
         }
         // Handle uninstalls first
         if (options.uninstall && options.uninstall.length > 0) {
+            throwIfCancelled(token);
             const removeCmd = new PoetryRemoveCommand({
                 pythonExecutable: poetry,
                 cwd,
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.uninstall);
-            await removeCmd.execute({ packages, cancellationToken: token, toolExecution });
+            await removeCmd.execute({ packages, cancellationToken: token, toolExecution, env });
         }
 
         // Handle installs
         if (options.install && options.install.length > 0) {
+            throwIfCancelled(token);
             const addCmd = new PoetryAddCommand({
                 pythonExecutable: poetry,
                 cwd,
                 log: this.log,
             });
             const packages = parsePackageSpecs(options.install);
-            await addCmd.execute({ packages, cancellationToken: token, toolExecution });
+            await addCmd.execute({ packages, cancellationToken: token, toolExecution, env });
             if (toolExecution) {
                 // poetry add skips already-declared dependencies, even when they are not installed.
-                await runPoetry(['install', '--no-root'], cwd, this.log, token, true);
+                await runPoetry(['install', '--no-root'], cwd, this.log, token, true, env);
             }
         }
     }
 
-    private async fetchPackagesFromTool(environment: PythonEnvironment): Promise<Package[]> {
+    private updatePackagesForVerifiedEnvironment(
+        environment: PythonEnvironment,
+        cwd: string,
+        env: NodeJS.ProcessEnv,
+        options: {
+            before?: Package[];
+            cacheKey?: string;
+            token?: CancellationToken;
+            toolExecution?: boolean;
+            fetchPackages?: () => Promise<Package[] | undefined>;
+            skipDirectDependencies?: boolean;
+        } = {},
+    ): Promise<Package[] | undefined> {
+        const cache = options.skipDirectDependencies ? this.sharedState.installedPackages : this.packages;
+        const cacheKey = options.cacheKey ?? environment.envId.id;
+        return updatePackagesAndNotify(
+            this,
+            environment,
+            options.before ?? cache.get(cacheKey),
+            (changes) => {
+                this.packagesChangedEmitter.fire({ environment, manager: this, changes });
+            },
+            options.fetchPackages ??
+                (() =>
+                    this.fetchPackagesFromTool(
+                        environment,
+                        cwd,
+                        env,
+                        options.token,
+                        options.toolExecution,
+                    )),
+            options.skipDirectDependencies,
+            options.skipDirectDependencies
+                ? undefined
+                : () =>
+                      this.fetchDirectPackageNames(
+                          cwd,
+                          env,
+                          options.token,
+                          options.toolExecution,
+                      ),
+            (packages) => cache.set(cacheKey, packages),
+        );
+    }
+
+    private async fetchPackagesFromTool(
+        environment: PythonEnvironment,
+        cwd: string,
+        env: NodeJS.ProcessEnv,
+        token?: CancellationToken,
+        toolExecution = false,
+    ): Promise<Package[]> {
         const poetry = await getPoetry();
         if (!poetry) {
             throw new Error(
@@ -392,25 +621,40 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             );
         }
 
-        const cwd = await this.getProjectCwd();
         const showCmd = new PoetryShowCommand({
             pythonExecutable: poetry,
             cwd,
             log: this.log,
         });
         try {
-            const data = await showCmd.execute();
+            const data = await showCmd.execute({ cancellationToken: token, toolExecution, env });
             return data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
         } catch (error) {
+            if (error instanceof CancellationError) {
+                throw error;
+            }
             this.log.error(`Error refreshing packages with Poetry: ${error}`);
             return [];
         }
     }
 
-    async getDirectPackageNames(_environment: PythonEnvironment): Promise<Set<string> | undefined> {
+    getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
         if (!this.project) {
-            return undefined;
+            return Promise.resolve(undefined);
         }
+        return this.enqueueEnvironmentOperation(environment, undefined, async () => {
+            const cwd = await this.getProjectCwd();
+            const verified = await this.verifyEnvironment(environment, cwd);
+            return this.fetchDirectPackageNames(cwd, verified.env);
+        });
+    }
+
+    private async fetchDirectPackageNames(
+        cwd: string,
+        env: NodeJS.ProcessEnv,
+        token?: CancellationToken,
+        toolExecution = false,
+    ): Promise<Set<string> | undefined> {
         try {
             const poetry = await getPoetry();
             if (!poetry) {
@@ -418,14 +662,43 @@ export class PoetryPackageManager implements PackageManager, Disposable {
             }
             const showTopLevelCmd = new PoetryShowTopLevelCommand({
                 pythonExecutable: poetry,
-                cwd: await this.getProjectCwd(),
+                cwd,
                 log: this.log,
             });
-            return await showTopLevelCmd.execute();
+            return await showTopLevelCmd.execute({ cancellationToken: token, toolExecution, env });
         } catch (err) {
+            if (err instanceof CancellationError) {
+                throw err;
+            }
             this.log.error(`Error fetching direct package names with Poetry: ${err}`);
             return undefined;
         }
+    }
+
+    private notifyPackageError(error: unknown, fallbackMessage: string): void {
+        const mismatch = isPoetryEnvironmentMismatch(error);
+        let notificationKey: string | undefined;
+        if (mismatch) {
+            const projectKey = this.project?.uri.toString() ?? 'global';
+            notificationKey = `${projectKey}\0${error.message}`;
+            if (pendingPoetryEnvironmentMismatchNotifications.has(notificationKey)) {
+                return;
+            }
+            pendingPoetryEnvironmentMismatchNotifications.add(notificationKey);
+        }
+        setImmediate(async () => {
+            try {
+                const viewOutput = l10n.t('View Output');
+                const result = await showErrorMessage(mismatch ? error.message : fallbackMessage, viewOutput);
+                if (result === viewOutput) {
+                    this.log.show();
+                }
+            } finally {
+                if (notificationKey) {
+                    pendingPoetryEnvironmentMismatchNotifications.delete(notificationKey);
+                }
+            }
+        });
     }
 
     private async getProjectCwd(): Promise<string> {

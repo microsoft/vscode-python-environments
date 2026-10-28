@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import { CancellationError } from 'vscode';
 import { Package, PackageChangeKind, PackageManager, PythonEnvironment } from '../../api';
 import { normalizePackageName } from './packageUtils';
 
@@ -10,6 +11,8 @@ import { normalizePackageName } from './packageUtils';
 export type PackageChangesCallback = (changes: { kind: PackageChangeKind; pkg: Package }[]) => void;
 
 type PackageFetcher = () => Promise<Package[] | undefined>;
+type DirectPackageNamesFetcher = () => Promise<Set<string> | undefined>;
+type PackagesResolvedCallback = (packages: Package[]) => void;
 
 /**
  * Computes the list of package changes between a before and after snapshot.
@@ -49,6 +52,10 @@ export function getPackageChanges(before: Package[], after: Package[]): { kind: 
  * @param before The package snapshot from before the operation.
  * @param onChanges Callback invoked when package changes are detected.
  * @param fetchPackages Optional internal fetcher for operation-specific refresh behavior.
+ * @param skipDirectDependencies Whether to skip direct-dependency enrichment.
+ * @param fetchDirectPackageNames Optional internal fetcher for operation-specific direct dependencies.
+ * @param onPackagesResolved Optional callback invoked with enriched packages before change events.
+ * @returns The refreshed package list, or undefined when packages could not be fetched.
  */
 export async function updatePackagesAndNotify(
     packageManager: PackageManager,
@@ -57,11 +64,24 @@ export async function updatePackagesAndNotify(
     onChanges: PackageChangesCallback,
     fetchPackages?: PackageFetcher,
     skipDirectDependencies = false,
+    fetchDirectPackageNames?: DirectPackageNamesFetcher,
+    onPackagesResolved?: PackagesResolvedCallback,
 ): Promise<Package[] | undefined> {
+    const directPackageNames = skipDirectDependencies
+        ? undefined
+        : (
+              fetchDirectPackageNames
+                  ? fetchDirectPackageNames()
+                  : packageManager.getDirectPackageNames?.(environment)
+          )?.catch((error) => {
+              if (error instanceof CancellationError) {
+                  throw error;
+              }
+              return undefined;
+          });
     const [after, afterDirectDependenciesNames] = await Promise.all([
         fetchPackages?.() ?? packageManager.getPackages(environment, { skipCache: true }),
-        // Handle transitive dependencies (best-effort, don't break package refresh on failure)
-        skipDirectDependencies ? undefined : packageManager.getDirectPackageNames?.(environment).catch(() => undefined),
+        directPackageNames,
     ]);
 
     if (after === undefined) {
@@ -75,6 +95,8 @@ export async function updatePackagesAndNotify(
               isTransitive: !afterDirectDependenciesNames.has(normalizePackageName(pkg.name)),
           }))
         : after;
+
+    onPackagesResolved?.(enriched);
 
     // Fire change event
     const changes = getPackageChanges(before ?? [], enriched);

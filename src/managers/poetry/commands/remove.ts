@@ -18,6 +18,7 @@ export class PoetryRemoveCommand extends UninstallCommand {
             this.log,
             executeArgs.cancellationToken,
             executeArgs.toolExecution,
+            executeArgs.env,
         );
     }
 }

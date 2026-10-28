@@ -172,13 +172,28 @@ suite('Public package API execution policy', () => {
         test(`${kind}: public progress tokens do not enable agent process policy`, async () => {
             await publicApi(manager()).managePackages(environment, { install: ['requests'] });
             assert.ok(progress.calledOnce);
-            assert.strictEqual(calls.length, 1);
-            assert.strictEqual(calls[0].options.timeout, undefined);
-            assert.strictEqual(calls[0].options.env, undefined);
-            assert.strictEqual(calls[0].options.detached, undefined);
-            assert.ok(calls[0].endInput.notCalled);
-            assert.ok(!calls[0].args.includes('--no-interaction'));
+            assert.strictEqual(calls.length, kind === 'poetry' ? 3 : 1);
+            for (const call of calls) {
+                assert.strictEqual(call.options.timeout, undefined);
+                assert.strictEqual(call.options.detached, undefined);
+                assert.ok(call.endInput.notCalled);
+                assert.ok(!call.args.includes('--no-interaction'));
+            }
             assert.ok(!timers.getCalls().some((call) => call.args[1] === 300_000));
+            if (kind === 'poetry') {
+                assert.deepStrictEqual(calls[0].args, ['--no-ansi', 'env', 'info', '--path']);
+                assert.deepStrictEqual(calls[1].args, ['--no-ansi', 'env', 'info', '--path']);
+                assert.strictEqual(calls[0].options.env?.VIRTUAL_ENV, process.env.VIRTUAL_ENV);
+                assert.strictEqual(calls[1].options.env?.VIRTUAL_ENV, environment.sysPrefix);
+                assert.strictEqual(calls[2].options.env?.VIRTUAL_ENV, environment.sysPrefix);
+                assert.strictEqual(calls[2].args[0], 'add');
+                for (const call of calls) {
+                    assert.strictEqual(call.options.env?.PIP_NO_INPUT, process.env.PIP_NO_INPUT);
+                    assert.strictEqual(call.options.env?.UV_NO_PROGRESS, process.env.UV_NO_PROGRESS);
+                }
+            } else {
+                assert.strictEqual(calls[0].options.env, undefined);
+            }
             if (kind === 'uv') {
                 assert.strictEqual(calls[0].executable, path.join(temp, '.pyprojectx', 'main', 'uv'));
             }
