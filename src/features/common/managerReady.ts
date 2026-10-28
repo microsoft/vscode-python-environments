@@ -3,7 +3,6 @@ import { getExtension } from '../../common/extension.apis';
 import { WorkbenchStrings } from '../../common/localize';
 import { traceError, traceInfo, traceWarn } from '../../common/logging';
 import { EventNames } from '../../common/telemetry/constants';
-import { getTelemetryManagerId } from '../../common/telemetry/helpers';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage } from '../../common/window.apis';
@@ -53,7 +52,7 @@ export function withManagerTimeout(
                         `To prevent this, check your "python-envs.defaultEnvManager" and "python-envs.pythonProjects" settings.`,
                 );
                 sendTelemetryEvent(EventNames.MANAGER_READY_TIMEOUT, undefined, {
-                    managerId: getTelemetryManagerId(managerId),
+                    managerId,
                     managerKind: kind,
                 });
                 deferred.resolve();

@@ -21,7 +21,6 @@ import { EventNames } from './common/telemetry/constants';
 import { classifyError } from './common/telemetry/errorClassifier';
 import {
     logDiscoverySummary,
-    getTelemetryManagerId,
     sendEnvironmentToolUsageTelemetry,
     sendManagerSelectionTelemetry,
     sendProjectStructureTelemetry,
@@ -328,7 +327,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 managerId = item.manager.id;
             }
             sendTelemetryEvent(EventNames.CREATE_ENVIRONMENT, undefined, {
-                manager: getTelemetryManagerId(managerId),
+                manager: managerId,
                 triggeredLocation: 'createSpecifiedCommand',
             });
             return await withProgress(

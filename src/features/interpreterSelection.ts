@@ -9,7 +9,6 @@ import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../common/logging';
 import { StopWatch } from '../common/stopWatch';
 import { EventNames } from '../common/telemetry/constants';
-import { getTelemetryManagerId } from '../common/telemetry/helpers';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { resolveVariables } from '../common/utils/internalVariables';
 import { normalizePath } from '../common/utils/pathUtils';
@@ -319,7 +318,7 @@ export async function applyInitialEnvironmentSelection(
             sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, scopeStopWatch.elapsedTime, {
                 scope: 'workspace',
                 prioritySource: result.source,
-                managerId: getTelemetryManagerId(result.manager.id),
+                managerId: result.manager.id,
                 resolutionPath: result.environment ? 'envPreResolved' : 'managerDiscovery',
                 hasPersistedSelection: env !== undefined,
             });
@@ -358,7 +357,7 @@ export async function applyInitialEnvironmentSelection(
             sendTelemetryEvent(EventNames.ENV_SELECTION_RESULT, globalStopWatch.elapsedTime, {
                 scope: 'global',
                 prioritySource: result.source,
-                managerId: getTelemetryManagerId(result.manager.id),
+                managerId: result.manager.id,
                 resolutionPath: result.environment ? 'envPreResolved' : 'managerDiscovery',
                 hasPersistedSelection: env !== undefined,
             });

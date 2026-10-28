@@ -11,7 +11,6 @@ import { EnvironmentCapability, PackageCapability } from '../capabilities';
 import * as logging from '../common/logging';
 import { createDeferred } from '../common/utils/deferred';
 import { EventNames } from '../common/telemetry/constants';
-import { getTelemetryManagerId } from '../common/telemetry/helpers';
 import * as telemetry from '../common/telemetry/sender';
 import * as managerReady from '../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
@@ -406,7 +405,7 @@ suite('PythonEnvironmentApiImpl - operational capability mapping', () => {
             assert.deepStrictEqual(
                 sendTelemetry.withArgs(EventNames.MANAGER_CAPABILITY_QUERY).getCalls().map((call) => call.args[2]),
                 cases.map(({ capability }) => ({
-                    managerId: getTelemetryManagerId(environmentManager.id),
+                    managerId: environmentManager.id,
                     managerKind: 'environment',
                     managerVersion: 'unknown',
                     capability,
@@ -452,11 +451,7 @@ suite('PythonEnvironmentApiImpl - operational capability mapping', () => {
             assert.ok(sendTelemetry.calledWithExactly(
                 EventNames.MANAGER_CAPABILITY_QUERY,
                 undefined,
-                sinon.match({
-                    managerId: getTelemetryManagerId(packageManager.id),
-                    managerKind: 'package',
-                    capability: PackageCapability.Install,
-                }),
+                sinon.match({ managerId: packageManager.id, managerKind: 'package', capability: PackageCapability.Install }),
             ));
         });
 

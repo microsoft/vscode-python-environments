@@ -4,7 +4,6 @@ import { Disposable, EventEmitter } from 'vscode';
 import * as extensionApis from '../../../common/extension.apis';
 import * as logging from '../../../common/logging';
 import { EventNames } from '../../../common/telemetry/constants';
-import { getTelemetryManagerId } from '../../../common/telemetry/helpers';
 import * as telemetrySender from '../../../common/telemetry/sender';
 import { createDeferred } from '../../../common/utils/deferred';
 import * as windowApis from '../../../common/window.apis';
@@ -67,7 +66,7 @@ suite('withManagerTimeout', () => {
         assert.ok(sendTelemetryStub.calledOnce, 'sendTelemetryEvent should be called once');
         const [eventName, , properties] = sendTelemetryStub.firstCall.args;
         assert.strictEqual(eventName, EventNames.MANAGER_READY_TIMEOUT);
-        assert.strictEqual(properties.managerId, getTelemetryManagerId('test-ext:venv'));
+        assert.strictEqual(properties.managerId, 'test-ext:venv');
         assert.strictEqual(properties.managerKind, 'environment');
     });
 
@@ -127,7 +126,7 @@ suite('withManagerTimeout', () => {
         await promise;
 
         const [, , properties] = sendTelemetryStub.firstCall.args;
-        assert.strictEqual(properties.managerId, getTelemetryManagerId('test-ext:pip'));
+        assert.strictEqual(properties.managerId, 'test-ext:pip');
         assert.strictEqual(properties.managerKind, 'package');
     });
 });

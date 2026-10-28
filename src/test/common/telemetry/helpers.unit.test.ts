@@ -2,31 +2,14 @@ import assert from 'node:assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../../api';
+import { sendProjectStructureTelemetry } from '../../../common/telemetry/helpers';
 import { EventNames } from '../../../common/telemetry/constants';
-import { getTelemetryManagerId, sendProjectStructureTelemetry } from '../../../common/telemetry/helpers';
 import * as sender from '../../../common/telemetry/sender';
 import * as workspaceApis from '../../../common/workspace.apis';
 import type { EnvironmentManagers } from '../../../features/envManagers';
 import type { PythonProjectManager } from '../../../features/projectManager';
 
 suite('Telemetry Helpers', () => {
-    suite('getTelemetryManagerId', () => {
-        test('returns the full deterministic SHA-256 digest for every manager ID', () => {
-            assert.strictEqual(
-                getTelemetryManagerId('ms-python.python:venv'),
-                'c3ac61f81b7983a1b2d9f68d1758093845e42254531824ce6e008aab743284de',
-            );
-            assert.strictEqual(
-                getTelemetryManagerId('third-party:manager'),
-                '02c9232e62766f581e69792f5853a77b9bae634b9f4f1c428bc93c6df5b96a5c',
-            );
-        });
-
-        test('returns undefined sentinel only when the manager ID is missing', () => {
-            assert.strictEqual(getTelemetryManagerId(undefined), 'undefined');
-        });
-    });
-
     suite('sendProjectStructureTelemetry', () => {
         let sendTelemetryEventStub: sinon.SinonStub;
         let getWorkspaceFoldersStub: sinon.SinonStub;
