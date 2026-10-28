@@ -6,6 +6,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { CancellationError, CancellationTokenSource, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../../api';
+import { DEFAULT_PACKAGE_MANAGER_ID } from '../../../common/constants';
 import * as persistentState from '../../../common/persistentState';
 import * as windowApis from '../../../common/window.apis';
 import * as envCommands from '../../../features/envCommands';
@@ -152,7 +153,7 @@ suite('BuiltInEnvironmentManager and peer backends', () => {
             await facade.create(root, undefined);
 
             assert.strictEqual(facade.name, 'venv');
-            assert.strictEqual(facade.preferredPackageManagerId, 'ms-python.python:pip');
+            assert.strictEqual(facade.preferredPackageManagerId, DEFAULT_PACKAGE_MANAGER_ID);
             sinon.assert.calledOnce(workflow);
         });
     }

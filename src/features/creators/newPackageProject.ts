@@ -2,7 +2,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import { commands, l10n, MarkdownString, QuickInputButtons, Uri, window, workspace } from 'vscode';
 import { PythonEnvironment, PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from '../../api';
-import { NEW_PROJECT_TEMPLATES_FOLDER } from '../../common/constants';
+import { NEW_PROJECT_TEMPLATES_FOLDER, VENV_MANAGER_ID } from '../../common/constants';
 import { traceError } from '../../common/logging';
 import { showInputBoxWithButtons } from '../../common/window.apis';
 import type { EnvironmentManagers } from '../envManagers';
@@ -134,7 +134,7 @@ export class NewPackageProject implements PythonProjectCreator {
                 } else {
                     // get venv manager or any manager that supports quick creating environments
                     const venvManager = this.envManagers.managers.find(
-                        (m) => m.id === 'ms-python.python:venv' || m.supportsQuickCreate,
+                        (m) => m.id === VENV_MANAGER_ID || m.supportsQuickCreate,
                     );
                     if (venvManager) {
                         createdEnv = await venvManager.create(Uri.file(projectDestinationFolder), {

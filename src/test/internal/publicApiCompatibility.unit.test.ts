@@ -31,6 +31,7 @@ import { PoetryManager } from '../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../managers/poetry/poetryPackageManager';
 import * as poetryUtils from '../../managers/poetry/poetryUtils';
 import { createMockLogOutputChannel } from '../mocks/helper';
+import { VENV_MANAGER_ID } from '../../common/constants';
 
 interface SpawnRecord {
     executable: string;
@@ -57,7 +58,7 @@ suite('Public package API execution policy', () => {
         await fs.ensureDir(prefix);
         const executable = path.join(prefix, process.platform === 'win32' ? 'python.exe' : 'python');
         environment = {
-            envId: { id: 'test', managerId: 'ms-python.python:venv' },
+            envId: { id: 'test', managerId: VENV_MANAGER_ID },
             name: 'test',
             displayName: 'test',
             displayPath: executable,

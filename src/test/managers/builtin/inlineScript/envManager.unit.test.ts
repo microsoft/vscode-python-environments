@@ -28,7 +28,16 @@ import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import * as metadataReader from '../../../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../../../common/inlineScript/routingRegistry';
 import * as lockfileApis from '../../../../common/lockfile.apis';
-import { INLINE_SCRIPT_ENVS_KEY } from '../../../../common/constants';
+import {
+    CONDA_MANAGER_ID,
+    DEFAULT_PACKAGE_MANAGER_ID,
+    INLINE_SCRIPT_ENVS_KEY,
+    INLINE_SCRIPT_MANAGER_ID,
+    PIPENV_MANAGER_ID,
+    PYENV_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+    VENV_MANAGER_ID,
+} from '../../../../common/constants';
 import { PythonInstallStrings } from '../../../../common/localize';
 import { EventNames } from '../../../../common/telemetry/constants';
 import * as telemetrySender from '../../../../common/telemetry/sender';
@@ -161,7 +170,7 @@ suite('InlineScriptEnvManager', () => {
         globalStorageUri = Uri.file(path.join(tempRoot, 'global-storage'));
         baseExecutable = path.join(tempRoot, 'base-python', isWindows() ? 'python.exe' : 'python');
         await fs.outputFile(baseExecutable, '');
-        baseEnvironment = makeEnvironment('ms-python.python:system', '3.12.4', baseExecutable);
+        baseEnvironment = makeEnvironment(SYSTEM_MANAGER_ID, '3.12.4', baseExecutable);
 
         apiGetEnvironmentsStub = sinon.stub().resolves([baseEnvironment]);
         apiRefreshEnvironmentsStub = sinon.stub().resolves();
@@ -258,7 +267,7 @@ suite('InlineScriptEnvManager', () => {
                     : path.join(envDir, 'lib', 'python3.12', 'site-packages'),
             );
             const environment = makeEnvironment(
-                'ms-python.python:inline-script',
+                INLINE_SCRIPT_MANAGER_ID,
                 selectedBase.version,
                 getVenvPythonPath(envDir),
                 envDir,
@@ -357,8 +366,8 @@ suite('InlineScriptEnvManager', () => {
             lastUsedAt: NOW.toISOString(),
         }, Uri.file(location));
         const environment = {
-            ...makeEnvironment('ms-python.python:inline-script', '3.12.4', executable, location),
-            envId: { managerId: 'ms-python.python:inline-script', id: envId },
+            ...makeEnvironment(INLINE_SCRIPT_MANAGER_ID, '3.12.4', executable, location),
+            envId: { managerId: INLINE_SCRIPT_MANAGER_ID, id: envId },
         };
         environmentsByExecutablePath.set(normalizePath(executable), environment);
         return environment;
@@ -639,7 +648,7 @@ suite('InlineScriptEnvManager', () => {
         test('retains inline-script manager presentation metadata', () => {
             assert.strictEqual(manager.name, 'inline-script');
             assert.ok(manager.displayName);
-            assert.strictEqual(manager.preferredPackageManagerId, 'ms-python.python:pip');
+            assert.strictEqual(manager.preferredPackageManagerId, DEFAULT_PACKAGE_MANAGER_ID);
             assert.ok(manager.iconPath);
             assert.ok(manager.tooltip);
         });
@@ -679,7 +688,7 @@ suite('InlineScriptEnvManager', () => {
 
     suite('base interpreter selection', () => {
         test('excludes derived managers even when they report newer global environments', async () => {
-            const pipenv = makeEnvironment('ms-python.python:pipenv', '3.14.0', baseExecutable);
+            const pipenv = makeEnvironment(PIPENV_MANAGER_ID, '3.14.0', baseExecutable);
             apiGetEnvironmentsStub.resolves([pipenv, baseEnvironment]);
 
             await manager.create(scriptUri());
@@ -688,7 +697,7 @@ suite('InlineScriptEnvManager', () => {
         });
 
         test('does not reapply release-only matching after strict PEP 440 filtering', async () => {
-            const finalRelease = makeEnvironment('ms-python.python:system', '3.15.0', baseExecutable);
+            const finalRelease = makeEnvironment(SYSTEM_MANAGER_ID, '3.15.0', baseExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '!=3.15.0rc2' });
             apiGetEnvironmentsStub.resolves([finalRelease]);
 
@@ -703,7 +712,7 @@ suite('InlineScriptEnvManager', () => {
             // (e.g. "3.14.3.final.0"), which is not valid PEP 440. This must still satisfy
             // requires-python (matchesInstallConstraint) and pass the post-create
             // release-equality check (areEqualPythonReleases) instead of being discarded.
-            const versionInfoBase = makeEnvironment('ms-python.python:system', '3.14.3.final.0', baseExecutable);
+            const versionInfoBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.14.3.final.0', baseExecutable);
             apiGetEnvironmentsStub.resolves([versionInfoBase]);
 
             assert.ok(await manager.create(scriptUri()));
@@ -713,7 +722,7 @@ suite('InlineScriptEnvManager', () => {
 
         test('creates an environment with a sys.version_info version when requires-python is absent', async () => {
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: undefined });
-            const versionInfoBase = makeEnvironment('ms-python.python:system', '3.14.3.final.0', baseExecutable);
+            const versionInfoBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.14.3.final.0', baseExecutable);
             apiGetEnvironmentsStub.resolves([versionInfoBase]);
 
             assert.ok(await manager.create(scriptUri()));
@@ -723,14 +732,14 @@ suite('InlineScriptEnvManager', () => {
 
         test('excludes named conda environments even when they are newer than conda base', async () => {
             const condaNamed = makeEnvironment(
-                'ms-python.python:conda',
+                CONDA_MANAGER_ID,
                 '3.14.0',
                 baseExecutable,
                 undefined,
                 'project-env',
             );
             const condaBase = makeEnvironment(
-                'ms-python.python:conda',
+                CONDA_MANAGER_ID,
                 '3.11.9',
                 baseExecutable,
                 undefined,
@@ -745,7 +754,7 @@ suite('InlineScriptEnvManager', () => {
 
         test('falls back when the newest compatible interpreter cannot be canonicalized', async () => {
             const missingExecutable = path.join(tempRoot, 'missing', 'python');
-            const newest = makeEnvironment('ms-python.python:system', '3.13.0', missingExecutable);
+            const newest = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.0', missingExecutable);
             apiGetEnvironmentsStub.resolves([baseEnvironment, newest]);
 
             await manager.create(scriptUri());
@@ -759,7 +768,7 @@ suite('InlineScriptEnvManager', () => {
             await fs.outputFile(pyenvVenvExecutable, '');
             await fs.outputFile(path.join(pyenvVenvRoot, 'pyvenv.cfg'), 'home = base');
             const pyenvVenv = makeEnvironment(
-                'ms-python.python:pyenv',
+                PYENV_MANAGER_ID,
                 '3.13.0',
                 pyenvVenvExecutable,
                 pyenvVenvRoot,
@@ -784,8 +793,8 @@ suite('InlineScriptEnvManager', () => {
             await fs.outputFile(emptyPrefixExecutable, '');
             await fs.outputFile(relativePrefixExecutable, '');
             apiGetEnvironmentsStub.resolves([
-                makeEnvironment('ms-python.python:system', '3.14.0', emptyPrefixExecutable, ''),
-                makeEnvironment('ms-python.python:system', '3.13.0', relativePrefixExecutable, 'relative-prefix'),
+                makeEnvironment(SYSTEM_MANAGER_ID, '3.14.0', emptyPrefixExecutable, ''),
+                makeEnvironment(SYSTEM_MANAGER_ID, '3.13.0', relativePrefixExecutable, 'relative-prefix'),
                 baseEnvironment,
             ]);
 
@@ -868,7 +877,7 @@ suite('InlineScriptEnvManager', () => {
         test('installs the requirement lower bound, refreshes, and uses the discovered base interpreter', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.2', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.2', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -889,7 +898,7 @@ suite('InlineScriptEnvManager', () => {
         test('asks uv for the latest Python when requires-python is absent', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.14.0', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.14.0', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: undefined });
             apiGetEnvironmentsStub.onFirstCall().resolves([]);
             apiGetEnvironmentsStub.onSecondCall().resolves([]);
@@ -933,7 +942,7 @@ suite('InlineScriptEnvManager', () => {
         test('directly resolves the installed interpreter when environment refresh fails', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.2', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.2', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
             apiGetEnvironmentsStub.resolves([baseEnvironment]);
             promptInstallPythonViaUvStub.resolves({ kind: 'installed', pythonPath: uvExecutable });
@@ -956,7 +965,7 @@ suite('InlineScriptEnvManager', () => {
         test('directly resolves the installed interpreter when post-install discovery fails', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.2', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.2', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -979,7 +988,7 @@ suite('InlineScriptEnvManager', () => {
         test('uses strict PEP 440 matching for a directly resolved final release', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.15.0', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.15.0', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '!=3.15.0rc2' });
             apiGetEnvironmentsStub.resolves([]);
             getAvailablePythonVersionsStub.resolves([makeUvPythonVersion('3.15.0')]);
@@ -998,7 +1007,7 @@ suite('InlineScriptEnvManager', () => {
         test('selects an available uv release that satisfies exclusion clauses', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.3', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.3', uvExecutable);
             readMetadataStub.resolves({
                 ...VALID_METADATA,
                 requiresPython: '>=3.13.2,!=3.13.2',
@@ -1049,7 +1058,7 @@ suite('InlineScriptEnvManager', () => {
         test('uses an explicit patch release when a minor selector could exceed the constraint', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.0', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.0', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13,<=3.13' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -1071,7 +1080,7 @@ suite('InlineScriptEnvManager', () => {
         test('uses an advertised release for a bounded range instead of fabricating patch zero', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.11.14', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.11.14', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.11,<3.12' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -1091,7 +1100,7 @@ suite('InlineScriptEnvManager', () => {
         test('resolves a short exact requirement to an advertised concrete release', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.0', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.0', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '==3.13' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -1130,7 +1139,7 @@ suite('InlineScriptEnvManager', () => {
         test('uses an exact requirement without needing an existing uv catalog', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.1', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.1', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '==3.13.1' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -1150,7 +1159,7 @@ suite('InlineScriptEnvManager', () => {
         test('does not select a uv prerelease unless requires-python permits it', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.14.2', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.14.2', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.14,<3.16' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -1172,7 +1181,7 @@ suite('InlineScriptEnvManager', () => {
         test('installs an explicitly permitted prerelease lower bound', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.15.0a1', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.15.0a1', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.15.0a1,<3.16' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -1190,7 +1199,7 @@ suite('InlineScriptEnvManager', () => {
         test('normalizes a PEP 440 prerelease alias before installation', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.15.0rc1', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.15.0rc1', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '==3.15.0c1' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -1208,7 +1217,7 @@ suite('InlineScriptEnvManager', () => {
         test('does not prompt when requires-python has no safe lower bound', async () => {
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '<3.13' });
             apiGetEnvironmentsStub.resolves([
-                makeEnvironment('ms-python.python:system', '3.13.0', baseExecutable),
+                makeEnvironment(SYSTEM_MANAGER_ID, '3.13.0', baseExecutable),
             ]);
 
             assert.strictEqual(await manager.create(scriptUri()), undefined);
@@ -1260,7 +1269,7 @@ suite('InlineScriptEnvManager', () => {
             const uri = scriptUri();
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.1', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.1', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
             let installed = false;
             apiGetEnvironmentsStub.callsFake(async () => (installed ? [uvBase] : [baseEnvironment]));
@@ -1323,7 +1332,7 @@ suite('InlineScriptEnvManager', () => {
         test('coalesces simultaneous fallback requests for the same Python version', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.1', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.1', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
 
             let isInstalled = false;
@@ -1376,7 +1385,7 @@ suite('InlineScriptEnvManager', () => {
         test('reuses a compatible installation for a queued request with a different lower bound', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.1', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.1', uvExecutable);
             readMetadataStub.callsFake(async (uri: Uri) => ({
                 ...VALID_METADATA,
                 requiresPython: uri.fsPath.endsWith('compatible.py') ? '~=3.13.0' : '>=3.13',
@@ -1428,7 +1437,7 @@ suite('InlineScriptEnvManager', () => {
         test('reuses a directly resolved installation when discovery remains stale', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.1', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.1', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
             apiGetEnvironmentsStub.resolves([baseEnvironment]);
             resolveSystemPythonStub.resolves(uvBase);
@@ -1464,7 +1473,7 @@ suite('InlineScriptEnvManager', () => {
         test('reuses a directly resolved installation when later discovery throws', async () => {
             const uvExecutable = path.join(tempRoot, 'uv-python', isWindows() ? 'python.exe' : 'python');
             await fs.outputFile(uvExecutable, '');
-            const uvBase = makeEnvironment('ms-python.python:system', '3.13.1', uvExecutable);
+            const uvBase = makeEnvironment(SYSTEM_MANAGER_ID, '3.13.1', uvExecutable);
             readMetadataStub.resolves({ ...VALID_METADATA, requiresPython: '>=3.13' });
             apiGetEnvironmentsStub.onFirstCall().resolves([baseEnvironment]);
             apiGetEnvironmentsStub.onSecondCall().resolves([baseEnvironment]);
@@ -1566,7 +1575,7 @@ suite('InlineScriptEnvManager', () => {
                 lastUsedAt: '2030-01-01T00:00:00.000Z',
             } satisfies cacheLayout.InlineScriptEnvMeta;
             const environment = makeEnvironment(
-                'ms-python.python:inline-script',
+                INLINE_SCRIPT_MANAGER_ID,
                 baseEnvironment.version,
                 executable,
                 directory.fsPath,
@@ -1631,7 +1640,7 @@ suite('InlineScriptEnvManager', () => {
                 await gate;
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         venvPythonPath(target),
                         target,
@@ -1695,7 +1704,7 @@ suite('InlineScriptEnvManager', () => {
                 const target = args[6] as string;
                 await fs.outputFile(venvPythonPath(target), '');
                 const environment = makeEnvironment(
-                    'ms-python.python:inline-script',
+                    INLINE_SCRIPT_MANAGER_ID,
                     '3.12.4',
                     venvPythonPath(target),
                     target,
@@ -1816,7 +1825,7 @@ suite('InlineScriptEnvManager', () => {
                 const target = args[6] as string;
                 await fs.outputFile(venvPythonPath(target), '');
                 const environment = makeEnvironment(
-                    'ms-python.python:inline-script',
+                    INLINE_SCRIPT_MANAGER_ID,
                     '3.12.4',
                     venvPythonPath(target),
                     target,
@@ -1922,7 +1931,7 @@ suite('InlineScriptEnvManager', () => {
                     const target = args[6] as string;
                     await fs.outputFile(venvPythonPath(target), '');
                     const environment = makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         venvPythonPath(target),
                         target,
@@ -2065,7 +2074,7 @@ suite('InlineScriptEnvManager', () => {
                 const target = args[6] as string;
                 await fs.outputFile(venvPythonPath(target), '');
                 const environment = makeEnvironment(
-                    'ms-python.python:inline-script',
+                    INLINE_SCRIPT_MANAGER_ID,
                     '3.12.4',
                     venvPythonPath(target),
                     target,
@@ -2145,7 +2154,7 @@ suite('InlineScriptEnvManager', () => {
                 lastUsedAt: '2026-07-20T00:00:00.000Z',
             };
             const cached = makeEnvironment(
-                'ms-python.python:inline-script',
+                INLINE_SCRIPT_MANAGER_ID,
                 '3.12.4',
                 venvPythonPath(envDir().fsPath),
                 envDir().fsPath,
@@ -2182,7 +2191,7 @@ suite('InlineScriptEnvManager', () => {
                 sourceMetadataIdentityHashes: [cacheLayout.hashSourceMetadataIdentity('{"requiresPython":">=3.12","dependencies":["rich"]}')],
             });
             const cached = makeEnvironment(
-                'ms-python.python:inline-script',
+                INLINE_SCRIPT_MANAGER_ID,
                 '3.12.4',
                 venvPythonPath(envDir().fsPath),
                 envDir().fsPath,
@@ -2221,7 +2230,7 @@ suite('InlineScriptEnvManager', () => {
                 sourceMetadataIdentityHashes: hashes,
             });
             const cached = makeEnvironment(
-                'ms-python.python:inline-script',
+                INLINE_SCRIPT_MANAGER_ID,
                 '3.12.4',
                 venvPythonPath(envDir().fsPath),
                 envDir().fsPath,
@@ -2255,7 +2264,7 @@ suite('InlineScriptEnvManager', () => {
                 lastUsedAt: '2026-07-20T00:00:00.000Z',
             });
             const cached = makeEnvironment(
-                'ms-python.python:inline-script',
+                INLINE_SCRIPT_MANAGER_ID,
                 '3.12.4',
                 venvPythonPath(envDir().fsPath),
                 envDir().fsPath,
@@ -2329,7 +2338,7 @@ suite('InlineScriptEnvManager', () => {
             });
             resolveVenvStub.resolves(
                 makeEnvironment(
-                    'ms-python.python:system',
+                    SYSTEM_MANAGER_ID,
                     '3.11.9',
                     venvPythonPath(envDir().fsPath),
                     envDir().fsPath,
@@ -2354,7 +2363,7 @@ suite('InlineScriptEnvManager', () => {
             });
             resolveVenvStub.resolves(
                 makeEnvironment(
-                    'ms-python.python:inline-script',
+                    INLINE_SCRIPT_MANAGER_ID,
                     'Unknown',
                     getVenvPythonPath(envDir().fsPath),
                     envDir().fsPath,
@@ -2377,7 +2386,7 @@ suite('InlineScriptEnvManager', () => {
             await fs.outputFile(venvPythonPath(envDir().fsPath), '');
             resolveVenvStub.resolves(
                 makeEnvironment(
-                    'ms-python.python:inline-script',
+                    INLINE_SCRIPT_MANAGER_ID,
                     '3.10.0',
                     venvPythonPath(envDir().fsPath),
                     envDir().fsPath,
@@ -2398,7 +2407,7 @@ suite('InlineScriptEnvManager', () => {
             });
             resolveVenvStub.resolves(
                 makeEnvironment(
-                    'ms-python.python:inline-script',
+                    INLINE_SCRIPT_MANAGER_ID,
                     '3.11.9',
                     venvPythonPath(envDir().fsPath),
                     envDir().fsPath,
@@ -2833,7 +2842,7 @@ suite('InlineScriptEnvManager', () => {
                 await fs.outputFile(venvPythonPath(target), '');
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         venvPythonPath(target),
                         target,
@@ -2860,7 +2869,7 @@ suite('InlineScriptEnvManager', () => {
                 await fs.outputFile(path.join(target, '.meta.json.backup-0123456789ab'), '{}');
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         venvPythonPath(target),
                         target,
@@ -2908,7 +2917,7 @@ suite('InlineScriptEnvManager', () => {
                 await fs.outputFile(venvPythonPath(target), '');
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         venvPythonPath(target),
                         target,
@@ -2939,7 +2948,7 @@ suite('InlineScriptEnvManager', () => {
                 await fs.ensureDir(target);
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         venvPythonPath(target),
                         target,
@@ -2979,7 +2988,7 @@ suite('InlineScriptEnvManager', () => {
                 await fs.outputFile(venvPythonPath(target), '');
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.11.9',
                         venvPythonPath(target),
                         target,
@@ -3001,7 +3010,7 @@ suite('InlineScriptEnvManager', () => {
                 await fs.outputFile(otherPython, '');
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         otherPython,
                         otherRoot,
@@ -3287,7 +3296,7 @@ suite('InlineScriptEnvManager', () => {
             }
             await fs.outputFile(physicalExecutable, '');
             const environment = makeEnvironment(
-                'ms-python.python:inline-script',
+                INLINE_SCRIPT_MANAGER_ID,
                 '3.12.4',
                 physicalExecutable,
                 physicalEnvDir,
@@ -3696,7 +3705,7 @@ suite('InlineScriptEnvManager', () => {
                 lastUsedAt: NOW.toISOString(),
             });
             const cached = makeEnvironment(
-                'ms-python.python:inline-script',
+                INLINE_SCRIPT_MANAGER_ID,
                 '3.12.4',
                 venvPythonPath(envDir().fsPath),
                 envDir().fsPath,
@@ -3851,7 +3860,7 @@ suite('InlineScriptEnvManager', () => {
                 await gate;
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         venvPythonPath(target),
                         target,
@@ -3929,7 +3938,7 @@ suite('InlineScriptEnvManager', () => {
                 await fs.outputFile(venvPythonPath(target), '');
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         venvPythonPath(target),
                         target,
@@ -3979,7 +3988,7 @@ suite('InlineScriptEnvManager', () => {
                 await fs.outputFile(venvPythonPath(target), '');
                 return {
                     environment: makeEnvironment(
-                        'ms-python.python:inline-script',
+                        INLINE_SCRIPT_MANAGER_ID,
                         '3.12.4',
                         venvPythonPath(target),
                         target,
@@ -4021,7 +4030,7 @@ suite('InlineScriptEnvManager', () => {
             await fs.outputFile(venvPythonPath(envDir().fsPath), '');
             resolveVenvStub.resolves(
                 makeEnvironment(
-                    'ms-python.python:inline-script',
+                    INLINE_SCRIPT_MANAGER_ID,
                     '3.10.0',
                     venvPythonPath(envDir().fsPath),
                     envDir().fsPath,
@@ -4463,7 +4472,7 @@ suite('InlineScriptEnvManager', () => {
             await manager.set(uri, environment!);
             resolveVenvStub.resolves({
                 ...environment!,
-                envId: { ...environment!.envId, managerId: 'ms-python.python:system' },
+                envId: { ...environment!.envId, managerId: SYSTEM_MANAGER_ID },
             });
             openDocumentsStub.returns([]);
             routingRegistry.setMetadata(uri, VALID_METADATA);
@@ -6351,7 +6360,7 @@ suite('InlineScriptEnvManager', () => {
             persistedAssociations = { [normalizePath(uri.fsPath)]: environment.environmentPath.fsPath };
             resolveVenvStub.resolves({
                 ...environment,
-                envId: { ...environment.envId, managerId: 'ms-python.python:system' },
+                envId: { ...environment.envId, managerId: SYSTEM_MANAGER_ID },
             });
 
             assert.strictEqual(await manager.get(uri), undefined);
@@ -6370,7 +6379,7 @@ suite('InlineScriptEnvManager', () => {
             await fs.outputFile(outsideExecutable, '');
             await fs.ensureDir(cacheLayout.getScriptEnvCacheRoot(globalStorageUri).fsPath);
             const unowned = makeEnvironment(
-                'ms-python.python:inline-script',
+                INLINE_SCRIPT_MANAGER_ID,
                 '3.12.4',
                 outsideExecutable,
                 outsideDir,
@@ -6515,7 +6524,7 @@ suite('InlineScriptEnvManager', () => {
             await manager.set(uri, environment);
             const stale = {
                 ...environment,
-                envId: { ...environment.envId, managerId: 'ms-python.python:system' },
+                envId: { ...environment.envId, managerId: SYSTEM_MANAGER_ID },
             };
             resolvePending!(stale);
 
@@ -7201,7 +7210,7 @@ suite('InlineScriptEnvManager', () => {
                 const environment = await createOwnedEnvironment();
                 const candidate = { ...environment };
                 if (invalidTarget === 'foreign-manager') {
-                    candidate.envId = { ...environment.envId, managerId: 'ms-python.python:venv' };
+                    candidate.envId = { ...environment.envId, managerId: VENV_MANAGER_ID };
                 } else if (invalidTarget === 'outside-cache') {
                     candidate.sysPrefix = path.join(tempRoot, 'outside', path.basename(environment.sysPrefix));
                     candidate.environmentPath = Uri.file(getVenvPythonPath(candidate.sysPrefix));

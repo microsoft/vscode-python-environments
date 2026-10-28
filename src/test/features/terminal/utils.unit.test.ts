@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { ExtensionTerminalOptions, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
-import { VENV_MANAGER_ID } from '../../../common/constants';
+import { VENV_MANAGER_ID, CONDA_MANAGER_ID } from '../../../common/constants';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as shellDetector from '../../../features/common/shellDetector';
@@ -52,7 +52,7 @@ suite('Terminal Utils - getEnvironmentForTerminal', () => {
         return createMockPythonEnvironment({
             name: id,
             id,
-            managerId: 'ms-python.python:conda',
+            managerId: CONDA_MANAGER_ID,
             envPath: path.resolve('external-environments', id, 'python'),
         });
     }

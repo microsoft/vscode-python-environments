@@ -18,7 +18,7 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
-import { PYENV_MANAGER_ID } from '../../common/constants';
+import { PYENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { PyenvStrings } from '../../common/localize';
 import { traceError, traceInfo } from '../../common/logging';
 import { StopWatch } from '../../common/stopWatch';
@@ -80,7 +80,7 @@ export class PyEnvManager implements EnvironmentManager, Disposable {
     ) {
         this.name = 'pyenv';
         this.displayName = 'PyEnv';
-        this.preferredPackageManagerId = 'ms-python.python:pip';
+        this.preferredPackageManagerId = DEFAULT_PACKAGE_MANAGER_ID;
         this.tooltip = new MarkdownString(PyenvStrings.pyenvManager, true);
     }
 

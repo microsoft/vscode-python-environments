@@ -15,14 +15,7 @@ import {
     WorkspaceConfiguration,
 } from 'vscode';
 import { EnvironmentManager, Package, PackageManagementOptions, PythonEnvironment, PythonProject } from '../../api';
-import {
-    CONDA_MANAGER_ID,
-    INLINE_SCRIPT_MANAGER_ID,
-    PYENV_MANAGER_ID,
-    PYTHON_EXTENSION_ID,
-    SYSTEM_MANAGER_ID,
-    VENV_MANAGER_ID,
-} from '../../common/constants';
+import { CONDA_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID, PIPENV_MANAGER_ID, POETRY_MANAGER_ID, PYENV_MANAGER_ID, PYTHON_EXTENSION_ID, SYSTEM_MANAGER_ID, VENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { createDeferred } from '../../common/utils/deferred';
 import * as frameUtils from '../../common/utils/frameUtils';
 import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
@@ -40,9 +33,6 @@ import {
     ToolEnvironmentManager,
     ToolPackageManager,
 } from '../../internal/pythonToolSupport';
-
-const POETRY_MANAGER_ID = `${PYTHON_EXTENSION_ID}:poetry`;
-const PIPENV_MANAGER_ID = `${PYTHON_EXTENSION_ID}:pipenv`;
 
 suite('Internal Python tools', () => {
     let temp: string;
@@ -92,7 +82,7 @@ suite('Internal Python tools', () => {
     function makeManager(
         name: string,
         fallback?: PythonEnvironment,
-        preferredPackageManagerId = `${PYTHON_EXTENSION_ID}:pip`,
+        preferredPackageManagerId = DEFAULT_PACKAGE_MANAGER_ID,
     ): ToolEnvironmentManager {
         const selections = new Map<string, PythonEnvironment>();
         const manager: ToolEnvironmentManager = {
@@ -101,7 +91,7 @@ suite('Internal Python tools', () => {
             get: sinon
                 .stub()
                 .callsFake(async (scope?: Uri) =>
-                    scope ? selections.get(normalizePath(scope.fsPath)) ?? fallback : fallback,
+                    scope ? (selections.get(normalizePath(scope.fsPath)) ?? fallback) : fallback,
                 ),
             set: sinon.stub().callsFake(async (scope: Uri | Uri[] | undefined, env?: PythonEnvironment) => {
                 for (const uri of Array.isArray(scope) ? scope : scope ? [scope] : []) {
@@ -183,15 +173,15 @@ suite('Internal Python tools', () => {
                             (key === 'defaultEnvManager'
                                 ? VENV_MANAGER_ID
                                 : key === 'pythonProjects'
-                                ? projectSettings
-                                : key === 'defaultPackageManager'
-                                ? `${PYTHON_EXTENSION_ID}:pip`
-                                : fallback)) as T;
+                                  ? projectSettings
+                                  : key === 'defaultPackageManager'
+                                    ? DEFAULT_PACKAGE_MANAGER_ID
+                                    : fallback)) as T;
                     },
                     inspect: (key: string) => ({ key, globalValue: explicitSettings.get(`${section}.${key}`) }),
                     has: () => true,
                     update: async () => {},
-                } as WorkspaceConfiguration),
+                }) as WorkspaceConfiguration,
         );
         sinon.stub(settings, 'setAllManagerSettings').callsFake(async (edits) => {
             for (const edit of edits) {
@@ -546,11 +536,7 @@ suite('Internal Python tools', () => {
                 getPackages: sinon.stub().throws(new Error('Public package cache must not be called')),
                 refresh: sinon.stub().resolves(),
                 [pythonToolSupport]: {
-                    getPackages: async (
-                        _environment: PythonEnvironment,
-                        _token: CancellationToken,
-                        scope: Uri,
-                    ) => {
+                    getPackages: async (_environment: PythonEnvironment, _token: CancellationToken, scope: Uri) => {
                         calls.push({ operation: 'get', project: project.uri.fsPath, scope: scope.fsPath });
                         return [{ name: `${project.name}-package`, version: '1.0' }];
                     },
@@ -571,10 +557,7 @@ suite('Internal Python tools', () => {
         };
         managers.registerPackageManager(poetryPackages, { extensionId: PYTHON_EXTENSION_ID });
 
-        const firstQuery = await api.getEnvironment(
-            { resourcePath: root.fsPath, includePackages: true },
-            source.token,
-        );
+        const firstQuery = await api.getEnvironment({ resourcePath: root.fsPath, includePackages: true }, source.token);
         const firstInstall = await api.installPackages(
             { resourcePath: root.fsPath, packages: ['first-package'] },
             source.token,

@@ -9,7 +9,7 @@ import {
     PythonEnvironmentApi,
     isPackageVersionLookupNotSupportedError,
 } from '../../api';
-import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
+import { CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, POETRY_MANAGER_ID, UV_MANAGER_ID } from '../../common/constants';
 import { ENVS_EXTENSION_ID } from '../constants';
 import { waitForCondition } from '../testUtils';
 import {
@@ -44,7 +44,7 @@ const profiles: PackageManagerProfile[] = [
     {
         name: 'uv',
         packageName: 'requests',
-        packageManagerId: 'ms-python.python:uv',
+        packageManagerId: UV_MANAGER_ID,
         provider: createVenvFixtureProvider(),
         supportsVersionLookup: () => true,
     },
@@ -58,7 +58,7 @@ const profiles: PackageManagerProfile[] = [
 ];
 
 const deferredPackageManagers: Readonly<Record<PackageManagerId, string>> = {
-    'ms-python.python:poetry': 'Poetry lifecycle coverage requires a controlled Poetry installation.',
+    [POETRY_MANAGER_ID]: 'Poetry lifecycle coverage requires a controlled Poetry installation.',
 };
 
 suite('Package Manager profile coverage', function () {
@@ -74,7 +74,7 @@ suite('Package Manager profile coverage', function () {
             'python-envs.test.getPackageManagerIds',
         );
         assert.ok(registeredIds, 'Registered package-manager IDs are unavailable');
-        assert.ok(registeredIds.includes('ms-python.python:uv'), 'uv package manager is not registered');
+        assert.ok(registeredIds.includes(UV_MANAGER_ID), 'uv package manager is not registered');
 
         const coveredIds = new Set(profiles.map((profile) => profile.packageManagerId));
         const uncoveredIds = registeredIds.filter(
@@ -103,7 +103,7 @@ for (const profile of profiles) {
         let fixture: EnvironmentFixture | undefined;
         let previousAlwaysUseUv: boolean | undefined;
         let alwaysUseUvUpdated = false;
-        const useProjectManager = profile.packageManagerId === 'ms-python.python:uv';
+        const useProjectManager = profile.packageManagerId === UV_MANAGER_ID;
         const getPackages = () => useProjectManager
             ? vscode.commands.executeCommand<Package[] | undefined>(
                 'python-envs.test.getPackagesForProject', fixture!.projectUri, environment!,

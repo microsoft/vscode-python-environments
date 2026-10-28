@@ -4,6 +4,7 @@
 import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { PythonEnvironmentImpl } from '../../managers/common/models';
+import { CONDA_MANAGER_ID } from '../../common/constants';
 
 /**
  * Options for {@link createMockPythonEnvironment}.
@@ -42,7 +43,7 @@ export function createMockPythonEnvironment(options: MockPythonEnvironmentOption
         envPath,
         sysPrefix = envPath,
         version = '3.12.0',
-        managerId = 'ms-python.python:conda',
+        managerId = CONDA_MANAGER_ID,
         id = `${name}-test`,
         description,
         displayName = `${name} (${version})`,

@@ -35,12 +35,7 @@ import {
     SetEnvironmentScope,
 } from '../../../api';
 import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../../capabilities';
-import {
-    CONDA_MANAGER_ID,
-    INLINE_SCRIPT_MANAGER_ID,
-    PYENV_MANAGER_ID,
-    SYSTEM_MANAGER_ID,
-} from '../../../common/constants';
+import { CONDA_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID, PYENV_MANAGER_ID, SYSTEM_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../../common/constants';
 import { getErrorMessage } from '../../../common/errors/utils';
 import { computeCacheKey, normalizeDependency } from '../../../common/inlineScript/cacheKey';
 import { InlineScriptEnvironmentModifiedError } from '../../../common/inlineScript/errors';
@@ -371,7 +366,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     public readonly name = 'inline-script';
     public readonly displayName = l10n.t('Inline scripts');
-    public readonly preferredPackageManagerId = 'ms-python.python:pip';
+    public readonly preferredPackageManagerId = DEFAULT_PACKAGE_MANAGER_ID;
     public readonly description: string | undefined = undefined;
     public readonly tooltip: string | MarkdownString = new MarkdownString(
         l10n.t('Environments built from PEP 723 inline script metadata.'),

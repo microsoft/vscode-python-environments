@@ -17,6 +17,7 @@ import * as pipUtils from '../../../managers/builtin/pipUtils';
 import { PythonToolError, PythonToolOperation } from '../../../internal/pythonToolSupport';
 import { NativePythonEnvironmentKind, NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import * as managerUtils from '../../../managers/common/utils';
+import { SYSTEM_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID } from '../../../common/constants';
 
 suite('createWithProgress uv tracking', () => {
     let addUvEnvironmentStub: sinon.SinonStub;
@@ -35,7 +36,7 @@ suite('createWithProgress uv tracking', () => {
         await fs.outputFile(pythonPath, '');
 
         baseEnvironment = {
-            envId: { id: 'base', managerId: 'ms-python.python:system' },
+            envId: { id: 'base', managerId: SYSTEM_MANAGER_ID },
             name: 'base',
             displayName: 'base',
             displayPath: pythonPath,
@@ -46,7 +47,7 @@ suite('createWithProgress uv tracking', () => {
         };
         const createdEnvironment = {
             ...baseEnvironment,
-            envId: { id: 'created', managerId: 'ms-python.python:inline-script' },
+            envId: { id: 'created', managerId: INLINE_SCRIPT_MANAGER_ID },
         };
         api = {
             createPythonEnvironmentItem: sinon.stub().returns(createdEnvironment),
@@ -529,7 +530,7 @@ suite('getBaseInterpreterForVenv', () => {
 
     function makeBase(executable: string, sysPrefix: string): PythonEnvironment {
         return {
-            envId: { id: 'base', managerId: 'ms-python.python:system' },
+            envId: { id: 'base', managerId: SYSTEM_MANAGER_ID },
             name: 'base',
             displayName: 'base',
             displayPath: executable,

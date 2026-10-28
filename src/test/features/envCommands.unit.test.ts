@@ -5,7 +5,7 @@ import * as typeMoq from 'typemoq';
 import { CancellationTokenSource, Memento, Terminal, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../api';
 import * as commandApi from '../../common/command.api';
-import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
+import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID, VENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { Interpreter } from '../../common/localize';
 import * as persistentState from '../../common/persistentState';
 import * as managerApi from '../../common/pickers/managers';
@@ -44,7 +44,7 @@ import { setupNonThenable } from '../mocks/helper';
 import { createMockPythonEnvironment } from '../mocks/pythonEnvironment';
 
 suite('Environment removal command ownership', () => {
-    for (const managerId of [INLINE_SCRIPT_MANAGER_ID, 'ms-python.python:venv']) {
+    for (const managerId of [INLINE_SCRIPT_MANAGER_ID, VENV_MANAGER_ID]) {
         test(`routes a ${managerId} project environment without changing ordinary removal`, async () => {
             const project: PythonProject = {
                 name: 'script',
@@ -57,7 +57,7 @@ suite('Environment removal command ownership', () => {
             const remove = sinon.stub().resolves();
             const owner = new InternalEnvironmentManager(managerId, {
                 name: 'test',
-                preferredPackageManagerId: 'ms-python.python:pip',
+                preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
                 get: async () => environment,
                 set: async () => undefined,
                 getEnvironments: async () => [environment],

@@ -22,6 +22,7 @@ import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvi
 import * as packageChanges from '../../../managers/common/packageChanges';
 import { createMockLogOutputChannel } from '../../mocks/helper';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
+import { VENV_MANAGER_ID } from '../../../common/constants';
 
 suite('PipPackageManager', () => {
     teardown(() => {
@@ -236,7 +237,7 @@ suite('PipPackageManager', () => {
         const environment = createMockPythonEnvironment({
             envPath: path.join(process.cwd(), 'python2'),
             version: '2.7.18',
-            managerId: 'ms-python.python:venv',
+            managerId: VENV_MANAGER_ID,
         });
         const manager = new PipPackageManager(
             {} as PythonEnvironmentApi,
@@ -276,7 +277,7 @@ suite('PipPackageManager', () => {
         sinon.stub(packageChanges, 'updatePackagesAndNotify').resolves([]);
         const environment = createMockPythonEnvironment({
             envPath: path.join(process.cwd(), '.venv'),
-            managerId: 'ms-python.python:venv',
+            managerId: VENV_MANAGER_ID,
         });
         const manager = new PipPackageManager(
             {} as PythonEnvironmentApi,

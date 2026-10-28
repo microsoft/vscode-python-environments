@@ -32,7 +32,7 @@ import {
 } from '../../api';
 import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
 import { executeCommand } from '../../common/command.api';
-import { PYTHON_EXTENSION_ID } from '../../common/constants';
+import { DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import { PythonInstallStrings, VenvManagerStrings } from '../../common/localize';
 import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
@@ -119,7 +119,7 @@ export class BuiltInEnvironmentManager implements EnvironmentManager {
         // https://github.com/microsoft/vscode-python-environments/issues/167
         this.description = undefined;
         this.tooltip = new MarkdownString(VenvManagerStrings.venvManagerDescription, true);
-        this.preferredPackageManagerId = 'ms-python.python:pip';
+        this.preferredPackageManagerId = DEFAULT_PACKAGE_MANAGER_ID;
         this.iconPath = new ThemeIcon('python');
     }
 
@@ -728,7 +728,7 @@ export class BuiltInEnvironmentManager implements EnvironmentManager {
             this.backends,
         );
         if (resolved) {
-            if (resolved.envId.managerId === `${PYTHON_EXTENSION_ID}:venv`) {
+            if (resolved.envId.managerId === VENV_MANAGER_ID) {
                 // We should only return the resolved env if it is a venv.
                 // Fall through an return undefined if it is not a venv
                 this.addEnvironment(resolved, true);

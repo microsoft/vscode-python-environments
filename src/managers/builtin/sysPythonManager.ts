@@ -20,6 +20,7 @@ import {
     SetEnvironmentScope,
 } from '../../api';
 import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
+import { DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import { PythonInstallStrings, SysManagerStrings } from '../../common/localize';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { isFileNotFoundError } from '../../common/utils/filesystem';
@@ -92,7 +93,7 @@ export class SysPythonManager implements EnvironmentManager {
     ) {
         this.name = 'system';
         this.displayName = 'Global';
-        this.preferredPackageManagerId = 'ms-python.python:pip';
+        this.preferredPackageManagerId = DEFAULT_PACKAGE_MANAGER_ID;
         this.description = undefined;
         this.tooltip = new MarkdownString(SysManagerStrings.sysManagerDescription, true);
         this.iconPath = new ThemeIcon('globe');

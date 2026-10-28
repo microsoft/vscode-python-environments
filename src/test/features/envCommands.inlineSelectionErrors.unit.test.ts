@@ -6,7 +6,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { QuickInputButtons, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironment, PythonProject } from '../../api';
-import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
+import { INLINE_SCRIPT_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 import {
     InlineScriptEnvironmentModifiedError,
     InlineScriptPackagesNotManagedError,
@@ -68,7 +68,7 @@ suite('Inline environment selection error feedback', () => {
             } else if (kind === 'environment') {
                 const provider: EnvironmentManager = {
                     name: 'inline-script',
-                    preferredPackageManagerId: 'ms-python.python:pip',
+                    preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
                     get: async () => environment,
                     set: async () => undefined,
                     getEnvironments: async () => [environment],
@@ -152,7 +152,7 @@ suite('Inline environment package command guard', () => {
     test('still resolves package commands for ordinary environments', async () => {
         const environment = createMockPythonEnvironment({
             envPath: path.join(process.cwd(), 'venv-package-env'),
-            managerId: 'ms-python.python:venv',
+            managerId: VENV_MANAGER_ID,
         });
 
         const options = await getPackageCommandOptions(uri, createManagers(environment), projects);
