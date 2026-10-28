@@ -22,7 +22,7 @@ import * as helpers from '../../managers/builtin/helpers';
 import { PipPackageManager } from '../../managers/builtin/pipPackageManager';
 import { UvPackageManager } from '../../managers/builtin/uvPackageManager';
 import { BuiltInPackageManager } from '../../managers/builtin/builtInPackageManager';
-import { VenvManager } from '../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../managers/builtin/builtInEnvironmentManager';
 import * as packageChanges from '../../managers/common/packageChanges';
 import { InternalPackageManager } from '../../managers/common/registeredManagers';
 import { CondaPackageManager } from '../../managers/conda/condaPackageManager';
@@ -163,10 +163,10 @@ suite('Public package API execution policy', () => {
             sinon.stub(helpers, 'getUvExecutable').resolves(path.join(temp, '.pyprojectx', 'main', 'uv'));
             return kind === 'uv'
                 ? new BuiltInPackageManager(
-                    new PipPackageManager(api, log, {} as VenvManager),
-                    new UvPackageManager(api, log, {} as VenvManager),
+                    new PipPackageManager(api, log, {} as BuiltInEnvironmentManager),
+                    new UvPackageManager(api, log, {} as BuiltInEnvironmentManager),
                 )
-                : new PipPackageManager(api, log, {} as VenvManager);
+                : new PipPackageManager(api, log, {} as BuiltInEnvironmentManager);
         }
 
         test(`${kind}: public progress tokens do not enable agent process policy`, async () => {

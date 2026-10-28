@@ -18,7 +18,9 @@ import { VENV_MANAGER_ID } from '../../../common/constants';
 import { normalizePath } from '../../../common/utils/pathUtils';
 import * as windowApis from '../../../common/window.apis';
 import * as envCommands from '../../../features/envCommands';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../../managers/builtin/venvUtils';
 import * as pythonInstaller from '../../../managers/builtin/pythonInstaller';
 import * as builtinUtils from '../../../managers/builtin/utils';
@@ -38,7 +40,7 @@ function venvPythonPath(venvRoot: string): string {
 function createManager(
     apiOverrides?: Partial<PythonEnvironmentApi>,
     baseEnvironments: PythonEnvironment[] = [],
-): VenvManager {
+): BuiltInEnvironmentManager {
     const api = {
         getEnvironments: sinon.stub().resolves([]),
         getPythonProject: sinon.stub().returns(undefined),
@@ -49,11 +51,18 @@ function createManager(
     const baseManager = {
         getEnvironments: sinon.stub().resolves(baseEnvironments),
     } as any as EnvironmentManager;
-    const manager = new VenvManager({} as NativePythonFinder, api, baseManager, {
-        info: sinon.stub(),
-        error: sinon.stub(),
-        warn: sinon.stub(),
-    } as any);
+    const manager = new BuiltInEnvironmentManager(
+        {} as NativePythonFinder,
+        api,
+        baseManager,
+        {
+            info: sinon.stub(),
+            error: sinon.stub(),
+            warn: sinon.stub(),
+        } as any,
+        new VenvEnvironmentManager(),
+        new UvEnvironmentManager(),
+    );
     (manager as any)._initialized = { completed: true, promise: Promise.resolve() };
     (manager as any).collection = [];
     return manager;

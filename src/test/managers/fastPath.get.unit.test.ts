@@ -19,7 +19,9 @@ import * as sysCache from '../../managers/builtin/cache';
 import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import * as sysUtils from '../../managers/builtin/utils';
 import * as pymanager from '../../managers/builtin/pymanagerPythonInstaller';
-import { VenvManager } from '../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 import { CondaEnvManager } from '../../managers/conda/condaEnvManager';
@@ -114,11 +116,13 @@ function createManagerCases(): ManagerCase[] {
             createContext: (sandbox: sinon.SinonSandbox) => {
                 const getPersistedStub = sandbox.stub(venvUtils, 'getVenvForWorkspace');
                 const resolveStub = sandbox.stub(venvUtils, 'resolveVenvPythonEnvironmentPath');
-                const manager = new VenvManager(
+                const manager = new BuiltInEnvironmentManager(
                     createMockNativeFinder(),
                     createMockApi(testUri),
                     {} as EnvironmentManager,
                     createMockLog(),
+                    new VenvEnvironmentManager(),
+                    new UvEnvironmentManager(),
                 );
                 return { manager, getPersistedStub, resolveStub };
             },
@@ -309,11 +313,13 @@ suite('Manager get() fast path', () => {
             const getVenvStub = sandbox.stub(venvUtils, 'getVenvForWorkspace').resolves(persistedPath);
             const resolveVenvStub = sandbox.stub(venvUtils, 'resolveVenvPythonEnvironmentPath').resolves(mockEnv);
 
-            const manager = new VenvManager(
+            const manager = new BuiltInEnvironmentManager(
                 createMockNativeFinder(),
                 createMockApi(testUri),
                 {} as EnvironmentManager,
                 createMockLog(),
+                new VenvEnvironmentManager(),
+                new UvEnvironmentManager(),
             );
 
             const internalRefreshStub = sandbox.stub(
@@ -345,11 +351,13 @@ suite('Manager get() fast path', () => {
                 createPythonEnvironmentItem: sinon.stub(),
             } as unknown as sinon.SinonStubbedInstance<PythonEnvironmentApi>;
 
-            const manager = new VenvManager(
+            const manager = new BuiltInEnvironmentManager(
                 createMockNativeFinder(),
                 mockApi,
                 {} as EnvironmentManager,
                 createMockLog(),
+                new VenvEnvironmentManager(),
+                new UvEnvironmentManager(),
             );
             const result = await manager.get(testUri);
 

@@ -4,11 +4,13 @@ import { createSimpleDebounce } from '../../common/utils/debounce';
 import { createFileSystemWatcher, onDidDeleteFiles } from '../../common/workspace.apis';
 import { getPythonApi } from '../../extensionApi';
 import { NativePythonFinder } from '../common/nativePythonFinder';
+import { BuiltInEnvironmentManager } from './builtInEnvironmentManager';
 import { BuiltInPackageManager } from './builtInPackageManager';
 import { PipPackageManager } from './pipPackageManager';
 import { SysPythonManager } from './sysPythonManager';
+import { UvEnvironmentManager } from './uvEnvironmentManager';
 import { UvPackageManager } from './uvPackageManager';
-import { VenvManager } from './venvManager';
+import { VenvEnvironmentManager } from './venvEnvironmentManager';
 
 export async function registerSystemPythonFeatures(
     nativeFinder: NativePythonFinder,
@@ -17,7 +19,14 @@ export async function registerSystemPythonFeatures(
     envManager: SysPythonManager,
 ): Promise<void> {
     const api: PythonEnvironmentApi = await getPythonApi();
-    const venvManager = new VenvManager(nativeFinder, api, envManager, log);
+    const venvManager = new BuiltInEnvironmentManager(
+        nativeFinder,
+        api,
+        envManager,
+        log,
+        new VenvEnvironmentManager(),
+        new UvEnvironmentManager(),
+    );
     const uvPackageManager = new UvPackageManager(api, log, venvManager);
     const pipPackageManager = new PipPackageManager(api, log, venvManager);
     const pkgManager = new BuiltInPackageManager(pipPackageManager, uvPackageManager);
