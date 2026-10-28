@@ -12,7 +12,7 @@ import * as frameUtils from '../../common/utils/frameUtils';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
-import { SYSTEM_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, CONDA_MANAGER_ID } from '../../common/constants';
+import { SYSTEM_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, CONDA_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 
 suite('PythonEnvironmentManagers - getEnvironment', () => {
     let sandbox: sinon.SinonSandbox;
@@ -238,6 +238,108 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
             0,
             'getEnvironment must not fire change events, preserving the initial selection',
         );
+    });
+});
+
+suite('PythonEnvironmentManagers - cross-manager global selection', () => {
+    let sandbox: sinon.SinonSandbox;
+    let envManagers: PythonEnvironmentManagers;
+    let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
+
+    const selectedSystemEnvironment: PythonEnvironment = {
+        envId: { id: 'selected-system', managerId: SYSTEM_MANAGER_ID },
+        name: 'Selected system Python',
+        displayName: 'Selected system Python',
+        version: '3.13.0',
+        displayPath: '/usr/bin/python3.13',
+        environmentPath: Uri.file('/usr/bin/python3.13'),
+        sysPrefix: '/usr',
+        execInfo: { run: { executable: '/usr/bin/python3.13' } },
+    };
+
+    const configuredVenvEnvironment: PythonEnvironment = {
+        envId: { id: 'configured-venv', managerId: VENV_MANAGER_ID },
+        name: 'Configured venv',
+        displayName: 'Configured venv',
+        version: '3.12.0',
+        displayPath: '/workspace/.venv/bin/python',
+        environmentPath: Uri.file('/workspace/.venv/bin/python'),
+        sysPrefix: '/workspace/.venv',
+        execInfo: { run: { executable: '/workspace/.venv/bin/python' } },
+    };
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+        sandbox.stub(frameUtils, 'getCallingExtension').returns('ms-python.python');
+
+        sandbox.stub(workspaceApis, 'getConfiguration').returns({
+            get: (key: string, defaultValue?: unknown) => {
+                if (key === 'defaultEnvManager') {
+                    return VENV_MANAGER_ID;
+                }
+                if (key === 'pythonProjects') {
+                    return [];
+                }
+                return defaultValue;
+            },
+            has: () => false,
+            inspect: () => undefined,
+            update: () => Promise.resolve(),
+        } as any);
+
+        mockProjectManager = {
+            getProjects: sandbox.stub().returns([]),
+            get: sandbox.stub().returns(undefined),
+        } as unknown as sinon.SinonStubbedInstance<PythonProjectManager>;
+
+        envManagers = new PythonEnvironmentManagers(mockProjectManager as unknown as PythonProjectManager);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    function registerFakeManager(
+        managerId: string,
+        getStub: sinon.SinonStub,
+        setStub: sinon.SinonStub = sandbox.stub().resolves(),
+    ): string {
+        const fakeManager = {
+            name: managerId.split(':')[1],
+            displayName: managerId,
+            preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
+            get: getStub,
+            set: setStub,
+            resolve: sandbox.stub().resolves(undefined),
+            refresh: sandbox.stub().resolves(),
+            getEnvironments: sandbox.stub().resolves([]),
+            onDidChangeEnvironments: sandbox.stub().returns({ dispose: () => {} }),
+            onDidChangeEnvironment: sandbox.stub().returns({ dispose: () => {} }),
+        };
+        envManagers.registerEnvironmentManager(fakeManager as any, { extensionId: 'ms-python.python' });
+        return managerId;
+    }
+
+    test('routes and reads a global selection through its selected manager', async () => {
+        const configuredVenvGet = sandbox.stub().resolves(configuredVenvEnvironment);
+        registerFakeManager(VENV_MANAGER_ID, configuredVenvGet);
+
+        const selectedSystemGet = sandbox.stub().resolves(selectedSystemEnvironment);
+        registerFakeManager(SYSTEM_MANAGER_ID, selectedSystemGet);
+
+        await envManagers.setEnvironments('global', selectedSystemEnvironment, false);
+
+        assert.strictEqual(
+            envManagers.getEnvironmentManager(undefined)?.id,
+            SYSTEM_MANAGER_ID,
+            'A global selection must route through the selected environment manager',
+        );
+        assert.strictEqual(
+            (await envManagers.getEnvironment(undefined))?.envId.id,
+            selectedSystemEnvironment.envId.id,
+            'Global readback must return the selected non-venv environment',
+        );
+        assert.ok(configuredVenvGet.notCalled, 'The configured venv manager must not serve the selected global readback');
     });
 });
 

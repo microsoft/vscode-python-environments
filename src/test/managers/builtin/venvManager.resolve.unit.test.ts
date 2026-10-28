@@ -16,7 +16,9 @@ import {
 } from '../../../api';
 import { VENV_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../../common/constants';
 import * as windowApis from '../../../common/window.apis';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
@@ -24,7 +26,7 @@ import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 suite('VenvManager - manual path resolution', () => {
     let sandbox: sinon.SinonSandbox;
     let cancellation: CancellationTokenSource;
-    let manager: VenvManager;
+    let manager: BuiltInEnvironmentManager;
     let project: PythonProject;
     let previous: PythonEnvironment;
     let selected: PythonEnvironment;
@@ -52,11 +54,13 @@ suite('VenvManager - manual path resolution', () => {
         api.setup((a) => a.getPythonProject(typemoq.It.isAny())).returns(() => project);
         const baseManager = typemoq.Mock.ofType<EnvironmentManager>();
         baseManager.setup((m) => m.getEnvironments('global')).returns(async () => []);
-        manager = new VenvManager(
+        manager = new BuiltInEnvironmentManager(
             typemoq.Mock.ofType<NativePythonFinder>().object,
             api.object,
             baseManager.object,
             typemoq.Mock.ofType<LogOutputChannel>().object,
+            new VenvEnvironmentManager(),
+            new UvEnvironmentManager(),
         );
         sandbox.stub(windowApis, 'withProgress').callsFake(async (_options, task) =>
             task({ report: () => {} }, cancellation.token),

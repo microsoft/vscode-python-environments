@@ -60,7 +60,7 @@ import {
     selectStaleEntries,
     writeMetaJson,
 } from '../../../common/inlineScript/cacheLayout';
-import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
+import { pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
 import { InlineScriptMetadata, readInlineScriptMetadataFromFile } from '../../../common/inlineScript/metadata';
 import {
     getInlineScriptMetadataRoutingIdentity,
@@ -83,13 +83,13 @@ import { createDeferred, Deferred } from '../../../common/utils/deferred';
 import { isFileNotFoundError } from '../../../common/utils/filesystem';
 import { isSameOrParentPath, normalizePath } from '../../../common/utils/pathUtils';
 import { PythonVersion } from '../../../common/pythonVersion';
-import { PythonVersionSpecifier, splitClause } from '../../../common/pythonVersionSpecifier';
+import { PythonVersionSpecifier } from '../../../common/pythonVersionSpecifier';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import { getOpenTextDocuments, onDidDeleteFiles, onDidRenameFiles } from '../../../common/workspace.apis';
 import { NativePythonFinder } from '../../common/nativePythonFinder';
 import { sortEnvironments } from '../../common/utils';
 import { resolveSystemPythonEnvironmentPath } from '../utils';
-import * as uvPythonInstaller from '../uvPythonInstaller';
+import { promptInstallPythonDetailed } from '../pythonInstaller';
 import { createWithProgress, hasMinimumPathDepth, isDriveRoot, resolveVenvPythonEnvironmentPath } from '../venvUtils';
 import { InlineAssociationAccessor, InlineScriptAssociationStore } from './associationStore';
 import {
@@ -167,6 +167,9 @@ interface BuildCacheEntryResult {
 interface BaseInterpreterSelectionResult {
     readonly selectedBase?: SelectedBaseInterpreter;
     readonly errorCategory?: InlineScriptEnvErrorCategory;
+    readonly cancelled?: boolean;
+    readonly message?: string;
+    readonly alreadyReported?: boolean;
 }
 
 interface SelectBaseInterpreterResult {
@@ -177,7 +180,13 @@ interface SelectBaseInterpreterResult {
 type InstallPythonAndRefreshResult =
     | { readonly kind: 'installed'; readonly installedPath: string }
     | { readonly kind: 'declined' }
-    | { readonly kind: 'failed' };
+    | { readonly kind: 'cancelled'; readonly message?: string }
+    | {
+          readonly kind: 'failed';
+          readonly category: InlineScriptEnvErrorCategory;
+          readonly message?: string;
+          readonly alreadyReported?: boolean;
+      };
 
 interface DiscoveryRefreshPass {
     readonly promise: Promise<boolean>;
@@ -517,6 +526,13 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             operation,
         );
         if (!baseSelection.selectedBase) {
+            if (baseSelection.cancelled) {
+                this.routingRegistry.noteSetupOutcome(scriptUri, {
+                    kind: 'cancelled',
+                    ...(baseSelection.message ? { message: baseSelection.message } : {}),
+                });
+                return undefined;
+            }
             if (baseSelection.errorCategory) {
                 this.sendInlineScriptEnvErrorTelemetry(baseSelection.errorCategory);
             }
@@ -524,6 +540,8 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 kind: 'failed',
                 category: baseSelection.errorCategory ?? 'setup-failure',
                 requiresPython: metadata.requiresPython,
+                ...(baseSelection.message ? { message: baseSelection.message } : {}),
+                ...(baseSelection.alreadyReported ? { alreadyReported: true } : {}),
             });
             this.log.warn(
                 `No compatible Python is available for inline-script environment creation: ${scriptUri.fsPath}.`,
@@ -3458,21 +3476,16 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         const requiresPython = metadata.requiresPython?.trim() || undefined;
-        const lowerBound = extractLowerBoundVersion(requiresPython);
-        const versionSelection = await this.selectInstallablePythonVersion(requiresPython, lowerBound);
-        if (requiresPython && !versionSelection.version) {
-            this.log.warn(
-                'Cannot install a Python for this inline script because no compatible install version could be selected.',
-            );
-            return {
-                errorCategory: versionSelection.errorCategory ?? 'no-compatible-python',
-            };
-        }
-
-        const installResult = await this.installPythonAndRefresh(requiresPython, versionSelection.version);
+        const installResult = await this.installPythonAndRefresh(requiresPython);
         if (installResult.kind !== 'installed') {
+            if (installResult.kind === 'cancelled') {
+                return { cancelled: true, message: installResult.message };
+            }
             return {
-                errorCategory: installResult.kind === 'declined' ? 'compatible-python-declined' : 'install-failure',
+                errorCategory: installResult.kind === 'declined' ? 'compatible-python-declined' : installResult.category,
+                ...(installResult.kind === 'failed'
+                    ? { message: installResult.message, alreadyReported: installResult.alreadyReported }
+                    : {}),
             };
         }
         const installedPath = installResult.installedPath;
@@ -3519,68 +3532,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return { selectedBase: selected };
     }
 
-    private async selectInstallablePythonVersion(
-        requiresPython: string | undefined,
-        lowerBound: string | undefined,
-    ): Promise<{ readonly version?: string; readonly errorCategory?: InlineScriptEnvErrorCategory }> {
-        if (!requiresPython) {
-            return { version: lowerBound };
-        }
-        const prereleaseLowerBound = this.extractPrereleaseLowerBound(requiresPython);
-        if (prereleaseLowerBound) {
-            return { version: prereleaseLowerBound };
-        }
-        const lowerBoundRelease = PythonVersion.tryParse(lowerBound);
-        let needsCompleteCatalog = false;
-        if (lowerBound && lowerBoundRelease?.major === 3) {
-            if (/^>=\s*[^,]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
-                return { version: lowerBound };
-            }
-            // PEP 440 `==3.13` is exact, while uv treats `3.13` as a broad minor selector.
-            if (/^==\s*[^,*]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
-                if (lowerBoundRelease.precision >= 3) {
-                    return { version: lowerBound };
-                }
-                needsCompleteCatalog = true;
-            }
-        }
-
-        let available: uvPythonInstaller.UvPythonVersion[];
-        try {
-            const uvLookupResult = await uvPythonInstaller.ensureUvForInlineScriptVersionLookupDetailed(
-                requiresPython,
-                this.log,
-            );
-            if (uvLookupResult !== 'available') {
-                return {
-                    errorCategory: uvLookupResult === 'declined' ? 'compatible-python-declined' : 'install-failure',
-                };
-            }
-            available = needsCompleteCatalog
-                ? await uvPythonInstaller.getAvailablePythonVersions({ allVersions: true })
-                : await uvPythonInstaller.getAvailablePythonVersions();
-        } catch (error) {
-            this.log.warn(`Unable to query Python versions available from uv: ${getErrorMessage(error)}`);
-            return { errorCategory: 'install-failure' };
-        }
-        if (available.length === 0) {
-            return { errorCategory: 'install-failure' };
-        }
-        const version = available
-            .flatMap((candidate) => {
-                const parsed = PythonVersion.tryParse(candidate.version);
-                return parsed &&
-                    candidate.implementation === 'cpython' &&
-                    candidate.variant === 'default' &&
-                    candidate.version_parts.major === 3 &&
-                    this.matchesInstallConstraint(requiresPython, candidate.version)
-                    ? [{ parsed, raw: candidate.version }]
-                    : [];
-            })
-            .sort((left, right) => right.parsed.compareTo(left.parsed))[0]?.raw;
-        return version ? { version } : { errorCategory: 'no-compatible-python' };
-    }
-
     private matchesInstallConstraint(requiresPython: string, version: string): boolean {
         const candidate = PythonVersion.tryParse(version);
         const specifier = PythonVersionSpecifier.tryParse(requiresPython);
@@ -3591,42 +3542,34 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return specifier.matches(candidate);
     }
 
-    private extractPrereleaseLowerBound(requiresPython: string): string | undefined {
-        return requiresPython
-            .split(',')
-            .map((clause) => splitClause(clause))
-            .filter(
-                (clause) =>
-                    clause && (clause.operator === '>=' || clause.operator === '==' || clause.operator === '~='),
-            )
-            .map((clause) => PythonVersion.tryParse(clause?.literal))
-            .find((version): version is PythonVersion => !!version && version.releaseLevel !== 'final')
-            ?.toString();
-    }
-
     private async installPythonAndRefresh(
         requiresPython: string | undefined,
-        version: string | undefined,
     ): Promise<InstallPythonAndRefreshResult> {
-        let promptResult: uvPythonInstaller.PromptInstallPythonViaUvResult;
+        let installedPath: string;
         try {
-            promptResult = await uvPythonInstaller.promptInstallPythonViaUvDetailed('inlineScript', this.log, {
-                requiresPython,
-                version,
-            });
+            const promptResult = await promptInstallPythonDetailed('inlineScript', this.log, { requiresPython });
             if (promptResult.kind === 'declined') {
                 this.log.warn(
                     'Python installation for inline-script environment creation was declined or did not complete.',
                 );
                 return { kind: 'declined' };
             }
+            if (promptResult.kind === 'cancelled') {
+                return { kind: 'cancelled', message: promptResult.message };
+            }
             if (promptResult.kind === 'failed') {
                 this.log.error('Failed to install Python for an inline script.');
-                return { kind: 'failed' };
+                return {
+                    kind: 'failed',
+                    category: promptResult.reason === 'no-compatible-python' ? 'no-compatible-python' : 'install-failure',
+                    message: promptResult.message,
+                    alreadyReported: promptResult.alreadyReported,
+                };
             }
+            installedPath = promptResult.pythonPath;
         } catch (error) {
             this.log.error(`Failed to install Python for an inline script: ${getErrorMessage(error)}`);
-            return { kind: 'failed' };
+            return { kind: 'failed', category: 'install-failure' };
         }
 
         try {
@@ -3636,7 +3579,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 `Python was installed for an inline script, but environment discovery could not be refreshed: ${getErrorMessage(error)}`,
             );
         }
-        return { kind: 'installed', installedPath: promptResult.pythonPath };
+        return { kind: 'installed', installedPath };
     }
 
     /**

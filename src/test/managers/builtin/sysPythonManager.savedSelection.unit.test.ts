@@ -8,9 +8,9 @@ import { LogOutputChannel, Uri } from 'vscode';
 import { EnvironmentChangeKind, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as sysCache from '../../../managers/builtin/cache';
+import * as pythonInstaller from '../../../managers/builtin/pythonInstaller';
 import { SysPythonManager } from '../../../managers/builtin/sysPythonManager';
 import * as sysUtils from '../../../managers/builtin/utils';
-import * as uvPythonInstaller from '../../../managers/builtin/uvPythonInstaller';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { SYSTEM_MANAGER_ID } from '../../../common/constants';
 
@@ -67,8 +67,7 @@ suite('SysPythonManager saved selections', () => {
     });
 
     test('installing an already-installed version reuses the listed interpreter', async () => {
-        sinon.stub(uvPythonInstaller, 'selectPythonVersionToInstall').resolves('3.13');
-        sinon.stub(uvPythonInstaller, 'installPythonWithUv').resolves(interpreter);
+        sinon.stub(pythonInstaller, 'selectAndInstallPython').resolves(interpreter);
         sinon.stub(sysCache, 'setSystemEnvForGlobal').resolves();
         const manager = createManager();
         await manager.initialize();
@@ -81,5 +80,15 @@ suite('SysPythonManager saved selections', () => {
         assert.strictEqual(created, listed);
         assert.strictEqual((await manager.getEnvironments('all')).length, 1);
         assert.strictEqual(added.length, 0);
+    });
+
+    test('create returns undefined when quickCreate is requested without prompting for version selection', async () => {
+        const selectAndInstallStub = sinon.stub(pythonInstaller, 'selectAndInstallPython');
+        const manager = createManager();
+
+        const created = await manager.create('global', { quickCreate: true });
+
+        assert.strictEqual(created, undefined);
+        assert.strictEqual(selectAndInstallStub.called, false);
     });
 });

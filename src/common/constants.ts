@@ -13,11 +13,13 @@ export const PIPENV_MANAGER_ID = `${PYTHON_EXTENSION_ID}:pipenv`;
 export const POETRY_MANAGER_ID = `${PYTHON_EXTENSION_ID}:poetry`;
 export const PIXI_MANAGER_ID = `${PYTHON_EXTENSION_ID}:pixi`;
 export const HATCH_MANAGER_ID = `${PYTHON_EXTENSION_ID}:hatch`;
+export const PIP_MANAGER_ID = `${PYTHON_EXTENSION_ID}:pip`;
+export const UV_MANAGER_ID = `${PYTHON_EXTENSION_ID}:uv`;
+export const VENV_MANAGER_ID = `${PYTHON_EXTENSION_ID}:venv`;
+export const SYSTEM_MANAGER_ID = `${PYTHON_EXTENSION_ID}:system`;
 
-export const DEFAULT_PACKAGE_MANAGER_ID = 'ms-python.python:pip';
-export const DEFAULT_ENV_MANAGER_ID = 'ms-python.python:venv';
-export const VENV_MANAGER_ID = 'ms-python.python:venv';
-export const SYSTEM_MANAGER_ID = 'ms-python.python:system';
+export const DEFAULT_PACKAGE_MANAGER_ID = PIP_MANAGER_ID;
+export const DEFAULT_ENV_MANAGER_ID = VENV_MANAGER_ID;
 
 export const JUPYTER_EXTENSION_ID = 'ms-toolsai.jupyter';
 export const EXTENSION_ROOT_DIR = path.dirname(__dirname);

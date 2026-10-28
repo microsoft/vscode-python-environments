@@ -14,6 +14,7 @@ import type {
 } from '../api';
 import { EnvironmentCapability, PackageCapability } from '../capabilities';
 import type { CapabilityContext, Support } from '../capabilities';
+import { PIP_MANAGER_ID, PYTHON_EXTENSION_ID, UV_MANAGER_ID } from '../common/constants';
 import * as logging from '../common/logging';
 import { EventNames } from '../common/telemetry/constants';
 import { getTelemetryManagerId } from '../common/telemetry/helpers';
@@ -62,7 +63,7 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         environmentManagerVersion = sinon.stub().resolves(parsePep440Version('2.0.0'));
         packageManagerVersion = sinon.stub().resolves(parsePep440Version('25.1'));
         scopedPackageManagerVersion = sinon.stub().resolves(parsePep440Version('2.1.0'));
-        sinon.stub(frameUtils, 'getCallingExtension').returns(extensionId);
+        sinon.stub(frameUtils, 'getCallingExtension').callsFake((hint) => hint ?? extensionId);
         sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
         sinon.stub(windowApis, 'showQuickPick').resolves(undefined);
         sinon.stub(settings, 'getDefaultEnvManagerSetting').returns(ownerId);
@@ -156,6 +157,47 @@ suite('PythonEnvironmentApiImpl - capability queries', () => {
         assert.ok(environmentManagerVersion.calledOnceWithExactly());
         assert.strictEqual(clock.countTimers(), 0);
     });
+
+    for (const managerId of [PIP_MANAGER_ID, UV_MANAGER_ID]) {
+        test(`preserves ${managerId} for routing and hashes it only in telemetry`, async () => {
+            const name = managerId.split(':')[1];
+            const provider = packageProvider(name);
+            const manage = sinon.stub(provider, 'manage').resolves();
+            disposables.push(api.registerPackageManager(provider, { extensionId: PYTHON_EXTENSION_ID }));
+            configuredPackage.returns(managerId);
+
+            const manager = managers.getPackageManager(project.uri);
+            assert.ok(manager);
+            assert.strictEqual(manager.id, managerId);
+            assert.ok(sendTelemetry.calledWithExactly(EventNames.PACKAGE_MANAGER_REGISTERED, undefined, {
+                managerId: getTelemetryManagerId(managerId),
+            }));
+
+            assert.deepStrictEqual(
+                await api.getPackageManagerCapability(environment, PackageCapability.List, project),
+                { supported: true },
+            );
+            await clock.tickAsync(0);
+            assert.ok(pkgProbe.calledOnceWithExactly({ environment, project }));
+            assert.ok(sendTelemetry.calledWithExactly(EventNames.MANAGER_CAPABILITY_QUERY, undefined, {
+                managerId: getTelemetryManagerId(managerId),
+                managerKind: 'package',
+                managerVersion: '25.1',
+                capability: PackageCapability.List,
+                outcome: 'supported',
+                isLegacy: false,
+            }));
+
+            const options = { install: ['example'], runHeadless: true };
+            await manager.manage(environment, options);
+            assert.ok(manage.calledOnceWithExactly(environment, options));
+            assert.ok(sendTelemetry.calledWith(
+                EventNames.PACKAGE_MANAGEMENT,
+                sinon.match.number,
+                { managerId: getTelemetryManagerId(managerId), result: 'success', triggerSource: 'package' },
+            ));
+        });
+    }
 
     test('registered legacy providers infer supported and unsupported capabilities without advertised checks', async () => {
         registerOwner({ capabilities: undefined });

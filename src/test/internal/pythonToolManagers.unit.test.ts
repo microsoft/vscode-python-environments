@@ -21,10 +21,12 @@ import * as cache from '../../managers/builtin/cache';
 import { PipInstallCommand, PipListCommand } from '../../managers/builtin/commands';
 import * as helpers from '../../managers/builtin/helpers';
 import { PipPackageManager } from '../../managers/builtin/pipPackageManager';
+import * as pythonInstaller from '../../managers/builtin/pythonInstaller';
 import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import * as builtinUtils from '../../managers/builtin/utils';
-import * as uvInstaller from '../../managers/builtin/uvPythonInstaller';
-import { VenvManager } from '../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../managers/builtin/venvUtils';
 import {
     NativeInfo,
@@ -92,7 +94,7 @@ suite('Python tool manager capabilities', () => {
     });
 
     test('pip mutations and their inventory refresh receive the tool token without public UI', async () => {
-        const pip = new PipPackageManager(api, createMockLogOutputChannel(), {} as VenvManager);
+        const pip = new PipPackageManager(api, createMockLogOutputChannel(), {} as BuiltInEnvironmentManager);
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
         const install = sinon.stub(PipInstallCommand.prototype, 'execute').resolves();
         const list = sinon.stub(PipListCommand.prototype, 'execute').resolves([]);
@@ -109,7 +111,7 @@ suite('Python tool manager capabilities', () => {
     });
 
     test('pip private inventory rejects failure rather than returning stale packages', async () => {
-        const pip = new PipPackageManager(api, createMockLogOutputChannel(), {} as VenvManager);
+        const pip = new PipPackageManager(api, createMockLogOutputChannel(), {} as BuiltInEnvironmentManager);
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
         const list = sinon
             .stub(PipListCommand.prototype, 'execute')
@@ -336,7 +338,7 @@ suite('Python tool manager capabilities', () => {
     });
 
     test('pre-cancelled package requests do not start a command', async () => {
-        const pip = new PipPackageManager(api, createMockLogOutputChannel(), {} as VenvManager);
+        const pip = new PipPackageManager(api, createMockLogOutputChannel(), {} as BuiltInEnvironmentManager);
         const run = sinon.stub(helpers, 'runPython').resolves('');
         source.cancel();
         await assert.rejects(
@@ -359,7 +361,14 @@ suite('Python tool manager capabilities', () => {
             const create = sinon.stub(venvUtils, 'quickCreateVenv').resolves({ environment: created });
             const globals = sinon.stub().resolves([{ ...environment, version: '2.7.18' }, selected, newest]);
             const system = new SysPythonManager({} as NativePythonFinder, api, createMockLogOutputChannel());
-            const manager = new VenvManager({} as NativePythonFinder, api, system, createMockLogOutputChannel());
+            const manager = new BuiltInEnvironmentManager(
+                {} as NativePythonFinder,
+                api,
+                system,
+                createMockLogOutputChannel(),
+                new VenvEnvironmentManager(),
+                new UvEnvironmentManager(),
+            );
             const result = await manager[pythonToolSupport].create!(scope, {
                 token: source.token,
                 baseEnvironment: hasSelectedBase ? selected : undefined,
@@ -416,7 +425,14 @@ suite('Python tool manager capabilities', () => {
 
     test('an unsupported selected base is not silently replaced with a different Python version', async () => {
         const system = new SysPythonManager({} as NativePythonFinder, api, createMockLogOutputChannel());
-        const manager = new VenvManager({} as NativePythonFinder, api, system, createMockLogOutputChannel());
+        const manager = new BuiltInEnvironmentManager(
+            {} as NativePythonFinder,
+            api,
+            system,
+            createMockLogOutputChannel(),
+            new VenvEnvironmentManager(),
+            new UvEnvironmentManager(),
+        );
         const create = sinon.stub(venvUtils, 'quickCreateVenv').resolves({ environment });
         const globals = sinon.stub().resolves([environment]);
         await assert.rejects(
@@ -438,14 +454,21 @@ suite('Python tool manager capabilities', () => {
         sinon.stub(builtinUtils, 'refreshPythons').resolves([]);
         sinon.stub(venvUtils, 'findVirtualEnvironments').resolves([]);
         sinon.stub(venvUtils, 'getVenvForGlobal').resolves(undefined);
-        const prompt = sinon.stub(uvInstaller, 'promptInstallPythonViaUv').throws(new Error('Unexpected onboarding'));
-        const versionPicker = sinon.stub(uvInstaller, 'selectPythonVersionToInstall').resolves(undefined);
+        const prompt = sinon.stub(pythonInstaller, 'promptInstallPython').throws(new Error('Unexpected onboarding'));
+        const installPicker = sinon.stub(pythonInstaller, 'selectAndInstallPython').resolves(undefined);
         const system = new SysPythonManager({} as NativePythonFinder, api, createMockLogOutputChannel());
-        const venv = new VenvManager({} as NativePythonFinder, api, system, createMockLogOutputChannel());
+        const venv = new BuiltInEnvironmentManager(
+            {} as NativePythonFinder,
+            api,
+            system,
+            createMockLogOutputChannel(),
+            new VenvEnvironmentManager(),
+            new UvEnvironmentManager(),
+        );
         await venv[pythonToolSupport].initialize();
         assert.deepStrictEqual(await system[pythonToolSupport].getEnvironments('global'), []);
-        assert.ok(prompt.notCalled && versionPicker.notCalled && errors.notCalled);
+        assert.ok(prompt.notCalled && installPicker.notCalled && errors.notCalled);
         await system.create('global');
-        assert.ok(versionPicker.calledOnce, 'Explicit human install keeps its version picker');
+        assert.ok(installPicker.calledOnce, 'Explicit human install keeps its version picker');
     });
 });

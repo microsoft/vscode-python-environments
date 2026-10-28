@@ -28,7 +28,9 @@ import { PythonProjectManagerImpl } from '../../features/projectManager';
 import { SYSTEM_WORKSPACE_KEY } from '../../managers/builtin/cache';
 import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import * as systemUtils from '../../managers/builtin/utils';
-import { VenvManager } from '../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 import { createMockLogOutputChannel } from '../mocks/helper';
@@ -84,7 +86,14 @@ suite('Python tools stateless startup selection', () => {
             disposables,
         );
         const system = new SysPythonManager(nativeFinder, api, createMockLogOutputChannel());
-        const venv = new VenvManager(nativeFinder, api, system, createMockLogOutputChannel());
+        const venv = new BuiltInEnvironmentManager(
+            nativeFinder,
+            api,
+            system,
+            createMockLogOutputChannel(),
+            new VenvEnvironmentManager(),
+            new UvEnvironmentManager(),
+        );
         const pip: PackageManager = {
             name: 'pip',
             manage: sinon.stub().resolves(),

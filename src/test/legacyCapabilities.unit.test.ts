@@ -7,6 +7,7 @@ import type { EnvironmentManagerCapability, PackageManagerCapability } from '../
 import { EnvironmentCapability, PackageCapability } from '../capabilities';
 import { getLegacyEnvironmentManagerCapability, getLegacyPackageManagerCapability } from '../legacyCapabilities';
 import type { EnvironmentManager, PackageManager } from '../types';
+import { allSupportedEnvironmentCapabilities, allSupportedPackageCapabilities } from './capabilityFixtures';
 
 function unexpectedOperation(): never {
     throw new Error('Legacy capability inference must not invoke operations');
@@ -16,6 +17,39 @@ const legacySupported = { supported: true, isLegacy: true };
 const legacyUnsupported = { supported: false, reason: l10n.t('Capability not implemented'), isLegacy: true };
 
 suite('Legacy manager capabilities', () => {
+    test('package capability advertisements disable legacy inference even when methods are present', async () => {
+        const manager: PackageManager = {
+            name: 'advertised',
+            manage: unexpectedOperation,
+            refresh: unexpectedOperation,
+            getPackages: unexpectedOperation,
+            capabilities: allSupportedPackageCapabilities,
+        };
+
+        assert.deepStrictEqual(await getLegacyPackageManagerCapability(manager, PackageCapability.Install), {
+            supported: false,
+            reason: l10n.t('Capability not implemented'),
+        });
+    });
+
+    test('environment capability advertisements disable legacy inference even when methods are present', async () => {
+        const manager: EnvironmentManager = {
+            name: 'advertised',
+            preferredPackageManagerId: 'advertised:packages',
+            refresh: unexpectedOperation,
+            getEnvironments: unexpectedOperation,
+            get: unexpectedOperation,
+            set: unexpectedOperation,
+            resolve: unexpectedOperation,
+            capabilities: allSupportedEnvironmentCapabilities,
+        };
+
+        assert.deepStrictEqual(await getLegacyEnvironmentManagerCapability(manager, EnvironmentCapability.List), {
+            supported: false,
+            reason: l10n.t('Capability not implemented'),
+        });
+    });
+
     test('package capabilities require their callable methods without executing them', async () => {
         const manager: PackageManager = {
             name: 'legacy',

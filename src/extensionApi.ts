@@ -1,7 +1,7 @@
 import { Disposable, Event, EventEmitter, l10n, TaskExecution, Terminal, Uri } from 'vscode';
 import * as path from 'path';
 import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCapability, Support } from './capabilities';
-import { isKnownManagerCapability } from './capabilities';
+import { EnvironmentCapability, isKnownManagerCapability, PackageCapability } from './capabilities';
 import { explain as parsePep440Version } from '@renovatebot/pep440';
 import { EventNames } from './common/telemetry/constants';
 import { getTelemetryManagerId } from './common/telemetry/helpers';
@@ -84,6 +84,10 @@ type ManagerCapabilityQuery =
           capability: PackageManagerCapability;
           context: CapabilityContext & { environment: PythonEnvironment };
       };
+
+function logCapabilityQueryError(error: unknown): void {
+    traceError('Failed to query manager capability:', error);
+}
 
 export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     readonly __pythonTools: PythonToolsApi;
@@ -315,6 +319,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             if (!manager) {
                 throw new Error('No environment manager found');
             }
+            void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.Create, { scope })
+                .catch(logCapabilityQueryError);
             if (!manager.supportsCreate) {
                 throw new Error(`Environment manager does not support creating environments: ${manager.id}`);
             }
@@ -345,6 +351,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
                 throw new Error('No environment manager found');
             }
 
+            void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.Create, { scope })
+                .catch(logCapabilityQueryError);
             const result = await manager.create(scope, options);
             return result;
         }
@@ -355,6 +363,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (!manager) {
             return Promise.reject(new Error('No environment manager found'));
         }
+        void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.Remove, { environment })
+            .catch(logCapabilityQueryError);
         return manager.remove(environment, options);
     }
     async refreshEnvironments(scope: RefreshEnvironmentsScope): Promise<void> {
@@ -362,7 +372,11 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
 
         if (currentScope === undefined) {
             await waitForAllEnvManagers();
-            await Promise.all(this.envManagers.managers.map((manager) => manager.refresh(currentScope)));
+            await Promise.all(this.envManagers.managers.map((manager) => {
+                void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.List, { scope: currentScope })
+                    .catch(logCapabilityQueryError);
+                return manager.refresh(currentScope);
+            }));
             return Promise.resolve();
         }
 
@@ -371,13 +385,19 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (!manager) {
             return Promise.reject(new Error(`No environment manager found for: ${currentScope.fsPath}`));
         }
+        void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.List, { scope: currentScope })
+            .catch(logCapabilityQueryError);
         return manager.refresh(currentScope);
     }
     async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
         const currentScope = checkUri(scope) as GetEnvironmentsScope;
         if (currentScope === 'all' || currentScope === 'global') {
             await waitForAllEnvManagers();
-            const promises = this.envManagers.managers.map((manager) => manager.getEnvironments(currentScope));
+            const promises = this.envManagers.managers.map((manager) => {
+                void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.List, { scope: currentScope })
+                    .catch(logCapabilityQueryError);
+                return manager.getEnvironments(currentScope);
+            });
             const items = await Promise.all(promises);
             return items.flat();
         }
@@ -388,6 +408,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             return [];
         }
 
+        void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.List, { scope: currentScope })
+            .catch(logCapabilityQueryError);
         const items = await manager.getEnvironments(currentScope);
         return items;
     }
@@ -397,6 +419,29 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         await waitForEnvManager(
             currentScope ? (currentScope instanceof Uri ? [currentScope] : currentScope) : undefined,
         );
+        if (Array.isArray(currentScope) && !environment) {
+            const scopesByManager = new Map<InternalEnvironmentManager, Uri[]>();
+            for (const uri of currentScope) {
+                const manager = this.envManagers.getEnvironmentManager(uri);
+                if (manager) {
+                    scopesByManager.set(manager, [...(scopesByManager.get(manager) ?? []), uri]);
+                }
+            }
+            for (const [manager, scopes] of scopesByManager) {
+                void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.SetSelected, { scope: scopes })
+                    .catch(logCapabilityQueryError);
+            }
+        } else {
+            const manager = this.envManagers.getEnvironmentManager(
+                environment ?? (currentScope instanceof Uri ? currentScope : undefined),
+            );
+            if (manager) {
+                void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.SetSelected, {
+                    scope: currentScope,
+                    environment,
+                }).catch(logCapabilityQueryError);
+            }
+        }
         return this.envManagers.setEnvironment(currentScope, environment);
     }
     async getEnvironment(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
@@ -409,6 +454,11 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         // via onDidChangeEnvironment once it settles.
         const resolution = (async () => {
             await waitForEnvManager(currentScope ? [currentScope] : undefined);
+            const manager = this.envManagers.getEnvironmentManager(currentScope);
+            if (manager) {
+                void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.GetSelected, { scope: currentScope })
+                    .catch(logCapabilityQueryError);
+            }
             return this.envManagers.getEnvironment(currentScope);
         })();
 
@@ -444,6 +494,10 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             }
         });
 
+        for (const manager of new Set([...projectEnvManagers, ...this.envManagers.managers])) {
+            void this.getEnvironmentManagerCapability(manager.id, EnvironmentCapability.Resolve)
+                .catch(logCapabilityQueryError);
+        }
         return await handlePythonPath(context, this.envManagers.managers, projectEnvManagers);
     }
 
@@ -456,6 +510,18 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
         }
+        const hasInstall = !!options.install?.length;
+        const hasUninstall = !!options.uninstall?.length;
+        const interactive = !hasInstall && !hasUninstall;
+        for (const [capability, requested] of [
+            [options.upgrade ? PackageCapability.Upgrade : PackageCapability.Install, hasInstall || interactive],
+            [PackageCapability.Uninstall, hasUninstall || interactive],
+            [PackageCapability.Install, interactive && options.upgrade],
+        ] as const) {
+            if (requested) {
+                void this.getPackageManagerCapability(context, capability, manager.project).catch(logCapabilityQueryError);
+            }
+        }
         return manager.manage(context, options);
     }
     async refreshPackages(context: PythonEnvironment): Promise<void> {
@@ -464,6 +530,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (!manager) {
             return Promise.reject(new Error('No package manager found'));
         }
+        void this.getPackageManagerCapability(context, PackageCapability.List, manager.project)
+            .catch(logCapabilityQueryError);
         return manager.refresh(context);
     }
     async getPackages(context: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
@@ -472,6 +540,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         if (!manager) {
             return Promise.resolve(undefined);
         }
+        void this.getPackageManagerCapability(context, PackageCapability.List, manager.project)
+            .catch(logCapabilityQueryError);
         return manager.getPackages(context, options);
     }
     getPackageAvailableVersions(
@@ -499,6 +569,8 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
             }
             return undefined;
         }
+        void this.getPackageManagerCapability(context, PackageCapability.FetchAvailableVersions, manager.project)
+            .catch(logCapabilityQueryError);
         return manager.getPackageAvailableVersions(context, packageName, options);
     }
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
