@@ -1357,6 +1357,11 @@ Terminal reuse has limits imposed by VS Code: reloading the window or closing
 the terminal creates a new one, and multi-root or multi-project scenarios get
 one terminal per project.
 
+In PowerShell, Bash, Git Bash, and Zsh, pass unquoted argument values. The
+extension quotes them for the shell so characters such as `$`, apostrophes
+(including PowerShell's typographic single quotes), and `$(...)` are passed
+literally, with or without shell integration.
+
 #### `runInDedicatedTerminal`
 
 Like `runInTerminal`, but keeps a terminal per key so repeated runs reuse the
