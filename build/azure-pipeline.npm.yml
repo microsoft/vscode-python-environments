@@ -89,19 +89,16 @@ extends:
                   customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
                   nodeVersion: $(NodeVersion)
 
-              - script: |
-                  node -e "
-                    const { execFileSync } = require('node:child_process');
-                    const versionAt = (ref) => JSON.parse(execFileSync('git', ['show', ref + ':api/package.json'], { encoding: 'utf8' })).version;
-                    const previous = versionAt('HEAD^');
-                    const current = versionAt('HEAD');
-                    if (typeof previous !== 'string' || typeof current !== 'string') {
-                      throw new Error('Package version must be a string');
-                    }
-                    const changed = previous !== current && !current.includes('-');
-                    process.stdout.write('Package version: ' + previous + ' -> ' + current + '\n');
-                    process.stdout.write('##vso[task.setvariable variable=versionChanged;isOutput=true]' + changed + '\n');
-                  "
+              - bash: |
+                  set -euo pipefail
+                  previous=$(git show HEAD^:api/package.json | jq -er '.version | strings')
+                  current=$(git show HEAD:api/package.json | jq -er '.version | strings')
+                  changed=false
+                  if [[ "$previous" != "$current" && "$current" != *-* ]]; then
+                    changed=true
+                  fi
+                  echo "Package version: $previous -> $current"
+                  echo "##vso[task.setvariable variable=versionChanged;isOutput=true]$changed"
                 name: checkVersion
                 displayName: Check for a stable package version change
                 condition: and(succeeded(), in(variables['Build.Reason'], 'IndividualCI', 'BatchedCI'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
