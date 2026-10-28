@@ -1,6 +1,12 @@
 name: $(Date:yyyyMMdd)$(Rev:.r)
 
-trigger: none
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - api/package.json
 pr: none
 
 resources:
@@ -74,11 +80,31 @@ extends:
                   targetPath: $(Build.ArtifactStagingDirectory)
                   artifactName: npm-package
             steps:
+              - checkout: self
+                fetchDepth: 2
+
               - template: azure-pipelines/extension/templates/steps/setup.yml@templates
                 parameters:
                   installPython: false
                   customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
                   nodeVersion: $(NodeVersion)
+
+              - script: |
+                  node -e "
+                    const { execFileSync } = require('node:child_process');
+                    const versionAt = (ref) => JSON.parse(execFileSync('git', ['show', ref + ':api/package.json'], { encoding: 'utf8' })).version;
+                    const previous = versionAt('HEAD^');
+                    const current = versionAt('HEAD');
+                    if (typeof previous !== 'string' || typeof current !== 'string') {
+                      throw new Error('Package version must be a string');
+                    }
+                    const changed = previous !== current && !current.includes('-');
+                    process.stdout.write('Package version: ' + previous + ' -> ' + current + '\n');
+                    process.stdout.write('##vso[task.setvariable variable=versionChanged;isOutput=true]' + changed + '\n');
+                  "
+                name: checkVersion
+                displayName: Check for a stable package version change
+                condition: and(succeeded(), in(variables['Build.Reason'], 'IndividualCI', 'BatchedCI'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
 
               - script: npm ci
                 workingDirectory: $(Build.SourcesDirectory)/api
@@ -106,7 +132,7 @@ extends:
       - stage: PublishNPM
         displayName: Publish to NPM
         dependsOn: Build
-        condition: and(succeeded(), eq('${{ parameters.publishPackage }}', 'true'))
+        condition: and(succeeded(), or(eq('${{ parameters.publishPackage }}', 'true'), eq(dependencies.Build.outputs['BuildPackage.checkVersion.versionChanged'], 'true')))
         jobs:
           - job: PublishPackage
             displayName: Publish npm package

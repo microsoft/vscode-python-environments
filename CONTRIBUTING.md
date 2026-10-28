@@ -167,6 +167,8 @@ this stable baseline: preview-only API publishing needs a separate policy.
 Public GitHub lookups use bounded retries and fail closed. Local runs can set
 `GITHUB_TOKEN` to avoid anonymous rate limits; PRs use their read-only token.
 
+- **Releasing:** merging a stable version change in `api/package.json` into `main` automatically starts the [npm pipeline](./build/azure-pipeline.npm.yml), including its existing build, package tests, and MicroBuild approval process. Other manifest edits build and validate the package without publishing. The version check compares the merged commit with its parent, relying on the repository's squash-only merge policy; direct pushes to `main` also trigger it. Preview releases remain manual: queue the pipeline with `quality: preview` and `publishPackage: true`. Manual runs otherwise remain build-only unless `publishPackage` is explicitly enabled.
+
 ## Internal Python agent-tool bridge
 
 The extension's existing **flat** export also provides `__pythonTools.version === 1`.
