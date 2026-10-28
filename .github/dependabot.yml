@@ -15,7 +15,7 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
     schedule:
-      interval: "weekly"
+      interval: "daily"
     cooldown:
       default-days: 14
   - package-ecosystem: "github-actions"
@@ -29,7 +29,7 @@ updates:
       github-actions:
         patterns: ["*"]
     schedule:
-      interval: "weekly"
+      interval: "daily"
     cooldown:
       # Delay updates beyond the highest-risk window after a release.
       default-days: 14
