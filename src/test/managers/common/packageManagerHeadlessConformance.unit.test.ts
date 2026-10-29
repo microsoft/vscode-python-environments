@@ -22,7 +22,7 @@ import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
 import * as pipUtils from '../../../managers/builtin/pipUtils';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
 import { CondaInstallCommand } from '../../../managers/conda/commands/install';
 import { CondaListCommand } from '../../../managers/conda/commands/list';
 import { CondaPackageManager } from '../../../managers/conda/condaPackageManager';
@@ -210,7 +210,7 @@ suite('Package manager headless conformance', () => {
         } as unknown as LogOutputChannel;
         const pip = new PipPackageManager(api, log, {
             getProjectsByEnvironment: sinon.stub().returns([]),
-        } as unknown as VenvManager);
+        } as unknown as BuiltInEnvironmentManager);
         const conda = new CondaPackageManager(api, log);
         const poetry = new PoetryPackageManager(api, log, {} as PoetryManager).createForProject({
             name: 'project',

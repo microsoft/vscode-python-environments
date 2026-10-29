@@ -11,7 +11,7 @@ import { InlineScriptEnvManager } from './envManager';
 
 /**
  * Register the inline-script env manager when the activation-latched
- * `python-envs.inlineScripts.enabled` flag is true.
+ * `python-envs.inlineScripts.enabled` preview setting is true.
  */
 export async function registerInlineScriptFeatures(
     nativeFinder: NativePythonFinder,
@@ -23,7 +23,7 @@ export async function registerInlineScriptFeatures(
     workspaceState: Memento,
 ): Promise<void> {
     if (!activation.enabled) {
-        traceVerbose('Inline-script env manager: skipping registration (internal flag is off)');
+        traceVerbose('Inline-script env manager: skipping registration (preview setting is off)');
         return;
     }
     const { routingRegistry } = activation;
@@ -43,5 +43,5 @@ export async function registerInlineScriptFeatures(
     );
     disposables.push(mgr, api.registerEnvironmentManager(mgr));
     setImmediate(() => mgr.startActivationDiscovery());
-    traceInfo('Inline-script env manager: registered (internal flag is on)');
+    traceInfo('Inline-script env manager: registered (preview setting is on)');
 }

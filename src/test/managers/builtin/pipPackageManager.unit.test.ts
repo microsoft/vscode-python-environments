@@ -4,22 +4,25 @@
 import * as assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { LogOutputChannel, Uri } from 'vscode';
+import { CancellationTokenSource, LogOutputChannel, Uri } from 'vscode';
 import {
     Package,
+    PackageCapability,
     PythonEnvironment,
     PythonEnvironmentApi,
     isPackageVersionLookupNotSupportedError,
 } from '../../../api';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
+import { pythonToolSupport } from '../../../internal/pythonToolSupport';
 import { PipListCommand } from '../../../managers/builtin/commands/list';
 import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
 import * as packageChanges from '../../../managers/common/packageChanges';
 import { createMockLogOutputChannel } from '../../mocks/helper';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
+import { VENV_MANAGER_ID } from '../../../common/constants';
 
 suite('PipPackageManager', () => {
     teardown(() => {
@@ -36,7 +39,7 @@ suite('PipPackageManager', () => {
             error: sinon.stub(),
             info: sinon.stub(),
         } as unknown as LogOutputChannel;
-        const manager = new PipPackageManager(api, log, {} as VenvManager);
+        const manager = new PipPackageManager(api, log, {} as BuiltInEnvironmentManager);
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
         const listPackages = sinon.stub(PipListCommand.prototype, 'execute');
         listPackages
@@ -56,7 +59,7 @@ suite('PipPackageManager', () => {
         const manager = new PipPackageManager(
             { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
             { error: sinon.stub(), info: sinon.stub() } as unknown as LogOutputChannel,
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
         const listPackages = sinon.stub(PipListCommand.prototype, 'execute').rejects(new Error('pip list failed'));
@@ -75,7 +78,7 @@ suite('PipPackageManager', () => {
         const manager = new PipPackageManager(
             { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
             log,
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
         sinon.stub(PipListCommand.prototype, 'execute').rejects(new Error('pip list failed'));
@@ -97,6 +100,15 @@ suite('PipPackageManager', () => {
             manager.getPackageAvailableVersions(environment, 'requests'),
             isPackageVersionLookupNotSupportedError,
         );
+        const support = await manager.capabilities[PackageCapability.FetchAvailableVersions]({ environment });
+        assert.strictEqual(support.supported, false);
+        if (!support.supported) {
+            assert.strictEqual(
+                support.reason,
+                'Package version lookup requires pip 21.2 or newer; the environment has pip 20.3.4.',
+            );
+        }
+        assert.strictEqual((await manager.capabilities[PackageCapability.FetchAvailableVersions]({})).supported, false);
     });
 
     test('propagates version lookup command failures for supported pip', async () => {
@@ -104,7 +116,7 @@ suite('PipPackageManager', () => {
         const environment = createEnvironment();
         const lookupError = new Error('pip index failed');
         sinon.stub(helpers, 'shouldUseUv').resolves(false);
-        const runPython = sinon.stub(helpers, 'runPython');
+        const runPython = sinon.stub(helpers, 'runPython').resolves('pip 25.1 from /path/to/pip (python 3.12)');
         runPython.onFirstCall().resolves('pip 25.1 from /path/to/pip (python 3.12)');
         runPython.onSecondCall().rejects(lookupError);
 
@@ -112,6 +124,9 @@ suite('PipPackageManager', () => {
             manager.getPackageAvailableVersions(environment, 'requests'),
             (error: unknown) => error === lookupError,
         );
+        assert.deepStrictEqual(await manager.capabilities[PackageCapability.FetchAvailableVersions]({ environment }), {
+            supported: true,
+        });
     });
 
     test('propagates pip version command failures during version lookup', async () => {
@@ -123,6 +138,10 @@ suite('PipPackageManager', () => {
 
         await assert.rejects(
             manager.getPackageAvailableVersions(environment, 'requests'),
+            (error: unknown) => error === versionError,
+        );
+        await assert.rejects(
+            manager.capabilities[PackageCapability.FetchAvailableVersions]({ environment }),
             (error: unknown) => error === versionError,
         );
     });
@@ -191,54 +210,61 @@ suite('PipPackageManager', () => {
         );
     });
 
-    test('uses UV version lookup without querying the Pip version', async () => {
+    test('uses pip directly even when automatic uv selection would be enabled', async () => {
         const manager = createManager();
         const environment = createEnvironment();
         const shouldUseUv = sinon.stub(helpers, 'shouldUseUv').resolves(true);
         const getUvExecutable = sinon.stub(helpers, 'getUvExecutable').resolves('workspace-uv');
         const runPython = sinon.stub(helpers, 'runPython');
-        const runUV = sinon
-            .stub(helpers, 'runUV')
-            .resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
+        runPython.onFirstCall().resolves('pip 25.1 from pip (python 3.12)');
+        runPython.onSecondCall().resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
+        const runUV = sinon.stub(helpers, 'runUV').resolves(JSON.stringify({ versions: ['2.32.5', '2.31.0'] }));
 
         const versions = await manager.getPackageAvailableVersions(environment, 'requests');
 
-        assert.ok(runPython.notCalled);
-        assert.ok(
-            shouldUseUv.calledOnceWithExactly(
-                manager.log,
-                environment.environmentPath.fsPath,
-                environment.environmentPath.fsPath,
-                undefined,
-            ),
-        );
-        assert.ok(
-            getUvExecutable.calledOnceWithExactly(manager.log, environment.environmentPath.fsPath, undefined),
-        );
-        assert.strictEqual(runUV.firstCall.args[5], 'workspace-uv');
+        assert.ok(runPython.calledTwice);
+        assert.ok(shouldUseUv.notCalled);
+        assert.ok(getUvExecutable.notCalled);
+        assert.ok(runUV.notCalled);
         assert.deepStrictEqual(
             versions.map((version) => version.public),
             ['2.32.5', '2.31.0'],
         );
     });
 
-    test('rejects package management for Python 2 environments', async () => {
+    test('advertises and enforces the Python 2 package management restriction', async () => {
         const shouldUseUvStub = sinon.stub(helpers, 'shouldUseUv');
         const environment = createMockPythonEnvironment({
             envPath: path.join(process.cwd(), 'python2'),
             version: '2.7.18',
-            managerId: 'ms-python.python:venv',
+            managerId: VENV_MANAGER_ID,
         });
         const manager = new PipPackageManager(
             {} as PythonEnvironmentApi,
             {} as LogOutputChannel,
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
 
-        await assert.rejects(
-            manager.manage(environment, { install: ['flask'] }),
-            /Python 2\.\* is not supported \(deprecated\)/,
-        );
+        for (const capability of [PackageCapability.Install, PackageCapability.Uninstall, PackageCapability.Upgrade]) {
+            assert.deepStrictEqual(await manager.capabilities[capability]({ environment }), {
+                supported: false,
+                reason: 'Python 2.* is not supported (deprecated)',
+            });
+            assert.deepStrictEqual(
+                await manager.capabilities[capability]({
+                    environment: { ...environment, version: '3.12.0' },
+                }),
+                { supported: true },
+            );
+            assert.deepStrictEqual(await manager.capabilities[capability]({}), { supported: true });
+        }
+        for (const options of [
+            { install: ['flask'] },
+            { uninstall: ['flask'] },
+            { install: ['flask'], upgrade: true },
+        ]) {
+            await assert.rejects(manager.manage(environment, options), /Python 2\.\* is not supported \(deprecated\)/);
+        }
         assert.strictEqual(shouldUseUvStub.callCount, 0);
     });
 
@@ -251,12 +277,12 @@ suite('PipPackageManager', () => {
         sinon.stub(packageChanges, 'updatePackagesAndNotify').resolves([]);
         const environment = createMockPythonEnvironment({
             envPath: path.join(process.cwd(), '.venv'),
-            managerId: 'ms-python.python:venv',
+            managerId: VENV_MANAGER_ID,
         });
         const manager = new PipPackageManager(
             {} as PythonEnvironmentApi,
             createMockLogOutputChannel(),
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
 
         await manager.manage(environment, { uninstall: ['flask'] });
@@ -264,11 +290,54 @@ suite('PipPackageManager', () => {
         assert.strictEqual(withProgressStub.firstCall.args[0].title, 'Uninstalling packages');
     });
 
+    test('keeps headless uninstall, upgrade, version, and direct dependency queries on pip', async () => {
+        const source = new CancellationTokenSource();
+        const scope = Uri.file(path.join(process.cwd(), 'project with spaces'));
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(scope.fsPath, '.venv'),
+            version: '3.12.0',
+            managerId: 'ms-python.python:venv',
+        });
+        const manager = new PipPackageManager(
+            { createPackageItem: sinon.stub().callsFake((info) => info) } as unknown as PythonEnvironmentApi,
+            createMockLogOutputChannel(),
+            {} as BuiltInEnvironmentManager,
+        );
+        const changes = sinon.spy();
+        manager.onDidChangePackages(changes);
+        const runUV = sinon.stub(helpers, 'runUV');
+        const runPython = sinon.stub(helpers, 'runPython').resolves('');
+        runPython.onThirdCall().resolves(JSON.stringify([{ name: 'requests', version: '2.32.5' }]));
+        runPython.onCall(3).resolves('pip 25.1 from pip (python 3.12)');
+        runPython.onCall(4).resolves(JSON.stringify([{ name: 'Requests' }]));
+
+        try {
+            await manager[pythonToolSupport].manage(
+                environment,
+                { uninstall: ['old-package'], install: ['requests'], upgrade: true },
+                source.token,
+                scope,
+            );
+            assert.strictEqual((await manager.getVersion(environment))?.public, '25.1');
+            assert.deepStrictEqual(await manager.getDirectPackageNames(environment), new Set(['requests']));
+            assert.ok(runUV.notCalled);
+            assert.deepStrictEqual(runPython.firstCall.args[1], ['-m', 'pip', 'uninstall', '-y', 'old-package']);
+            assert.deepStrictEqual(runPython.secondCall.args[1], ['-m', 'pip', 'install', '--upgrade', 'requests']);
+            assert.deepStrictEqual(runPython.getCall(4).args[1], [
+                '-m', 'pip', 'list', '--format=json', '--not-required', '--disable-pip-version-check',
+            ]);
+            assert.strictEqual(changes.firstCall.args[0].manager, manager);
+        } finally {
+            manager.dispose();
+            source.dispose();
+        }
+    });
+
     function createManager(): PipPackageManager {
         return new PipPackageManager(
             { createPackageItem: sinon.stub() } as unknown as PythonEnvironmentApi,
             { error: sinon.stub(), info: sinon.stub() } as unknown as LogOutputChannel,
-            {} as VenvManager,
+            {} as BuiltInEnvironmentManager,
         );
     }
 

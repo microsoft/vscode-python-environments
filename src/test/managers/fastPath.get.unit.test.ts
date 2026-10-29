@@ -18,7 +18,10 @@ import * as windowApis from '../../common/window.apis';
 import * as sysCache from '../../managers/builtin/cache';
 import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import * as sysUtils from '../../managers/builtin/utils';
-import { VenvManager } from '../../managers/builtin/venvManager';
+import * as pymanager from '../../managers/builtin/pymanagerPythonInstaller';
+import { BuiltInEnvironmentManager } from '../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 import { CondaEnvManager } from '../../managers/conda/condaEnvManager';
@@ -27,6 +30,7 @@ import { PipenvManager } from '../../managers/pipenv/pipenvManager';
 import * as pipenvUtils from '../../managers/pipenv/pipenvUtils';
 import { PyEnvManager } from '../../managers/pyenv/pyenvManager';
 import * as pyenvUtils from '../../managers/pyenv/pyenvUtils';
+import { VENV_MANAGER_ID, CONDA_MANAGER_ID, SYSTEM_MANAGER_ID, PYENV_MANAGER_ID, PIPENV_MANAGER_ID } from '../../common/constants';
 
 interface ManagerUnderTest {
     get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined>;
@@ -108,23 +112,25 @@ function createManagerCases(): ManagerCase[] {
     return [
         {
             name: 'VenvManager',
-            managerId: 'ms-python.python:venv',
+            managerId: VENV_MANAGER_ID,
             persistedPath: path.resolve('test-workspace', '.venv'),
             createContext: (sandbox: sinon.SinonSandbox) => {
                 const getPersistedStub = sandbox.stub(venvUtils, 'getVenvForWorkspace');
                 const resolveStub = sandbox.stub(venvUtils, 'resolveVenvPythonEnvironmentPath');
-                const manager = new VenvManager(
+                const manager = new BuiltInEnvironmentManager(
                     createMockNativeFinder(),
                     createMockApi(testUri),
                     {} as EnvironmentManager,
                     createMockLog(),
+                    new VenvEnvironmentManager(),
+                    new UvEnvironmentManager(),
                 );
                 return { manager, getPersistedStub, resolveStub };
             },
         },
         {
             name: 'CondaEnvManager',
-            managerId: 'ms-python.python:conda',
+            managerId: CONDA_MANAGER_ID,
             persistedPath: path.resolve('test', 'conda', 'envs', 'myenv'),
             createContext: (sandbox: sinon.SinonSandbox) => {
                 const getPersistedStub = sandbox.stub(condaUtils, 'getCondaForWorkspace');
@@ -136,7 +142,7 @@ function createManagerCases(): ManagerCase[] {
         },
         {
             name: 'SysPythonManager',
-            managerId: 'ms-python.python:system',
+            managerId: SYSTEM_MANAGER_ID,
             persistedPath: path.resolve('test', 'bin', 'python3'),
             supportsGlobalScope: true,
             createContext: (sandbox: sinon.SinonSandbox) => {
@@ -150,7 +156,7 @@ function createManagerCases(): ManagerCase[] {
         },
         {
             name: 'PyEnvManager',
-            managerId: 'ms-python.python:pyenv',
+            managerId: PYENV_MANAGER_ID,
             persistedPath: path.resolve('test', '.pyenv', 'versions', '3.11.0', 'bin', 'python'),
             createContext: (sandbox: sinon.SinonSandbox) => {
                 const getPersistedStub = sandbox.stub(pyenvUtils, 'getPyenvForWorkspace');
@@ -162,7 +168,7 @@ function createManagerCases(): ManagerCase[] {
         },
         {
             name: 'PipenvManager',
-            managerId: 'ms-python.python:pipenv',
+            managerId: PIPENV_MANAGER_ID,
             persistedPath: path.resolve('test', '.local', 'share', 'virtualenvs', 'project-abc123', 'bin', 'python'),
             createContext: (sandbox: sinon.SinonSandbox) => {
                 const getPersistedStub = sandbox.stub(pipenvUtils, 'getPipenvForWorkspace');
@@ -284,6 +290,7 @@ suite('Manager get() fast path', () => {
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        sandbox.stub(pymanager, 'detectPymanager').resolves({ kind: 'absent' });
         sandbox.stub(windowApis, 'withProgress').callsFake((_opts, cb) => cb(undefined as never, undefined as never));
         // fastPath.ts now does a real fs.access on the persisted path; these tests use
         // synthetic paths that don't exist on disk, so pretend every path is present.
@@ -303,15 +310,17 @@ suite('Manager get() fast path', () => {
     suite('VenvManager specific', () => {
         test('fast path: background init failure resets _initialized for retry', async () => {
             const persistedPath = path.resolve('test-workspace', '.venv');
-            const mockEnv = createMockEnv('ms-python.python:venv', persistedPath);
+            const mockEnv = createMockEnv(VENV_MANAGER_ID, persistedPath);
             const getVenvStub = sandbox.stub(venvUtils, 'getVenvForWorkspace').resolves(persistedPath);
             const resolveVenvStub = sandbox.stub(venvUtils, 'resolveVenvPythonEnvironmentPath').resolves(mockEnv);
 
-            const manager = new VenvManager(
+            const manager = new BuiltInEnvironmentManager(
                 createMockNativeFinder(),
                 createMockApi(testUri),
                 {} as EnvironmentManager,
                 createMockLog(),
+                new VenvEnvironmentManager(),
+                new UvEnvironmentManager(),
             );
 
             const internalRefreshStub = sandbox.stub(
@@ -333,7 +342,7 @@ suite('Manager get() fast path', () => {
 
         test('fast path: uses scope.fsPath when getPythonProject returns undefined', async () => {
             const persistedPath = path.resolve('test-workspace', '.venv');
-            const mockEnv = createMockEnv('ms-python.python:venv', persistedPath);
+            const mockEnv = createMockEnv(VENV_MANAGER_ID, persistedPath);
             const getVenvStub = sandbox.stub(venvUtils, 'getVenvForWorkspace').resolves(persistedPath);
             const resolveVenvStub = sandbox.stub(venvUtils, 'resolveVenvPythonEnvironmentPath').resolves(mockEnv);
 
@@ -343,11 +352,13 @@ suite('Manager get() fast path', () => {
                 createPythonEnvironmentItem: sinon.stub(),
             } as unknown as sinon.SinonStubbedInstance<PythonEnvironmentApi>;
 
-            const manager = new VenvManager(
+            const manager = new BuiltInEnvironmentManager(
                 createMockNativeFinder(),
                 mockApi,
                 {} as EnvironmentManager,
                 createMockLog(),
+                new VenvEnvironmentManager(),
+                new UvEnvironmentManager(),
             );
             const result = await manager.get(testUri);
 

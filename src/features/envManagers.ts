@@ -1086,6 +1086,15 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         context: Uri | undefined,
         project: PythonProject | undefined,
     ): InternalEnvironmentManager | undefined {
+        const cachedEnv = this._activeSelection.get(this.getProjectSelectionKey(project));
+        const cachedManager = cachedEnv
+            ? this._environmentManagers.get(cachedEnv.envId.managerId)
+            : undefined;
+
+        if (context === undefined && cachedManager) {
+            return cachedManager;
+        }
+
         const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
         if (defaultEnvManagerId !== undefined) {
             const settingsManager = this._environmentManagers.get(defaultEnvManagerId);
@@ -1094,12 +1103,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             }
         }
 
-        const cachedEnv = this._activeSelection.get(this.getProjectSelectionKey(project));
-        if (cachedEnv) {
-            const cachedManager = this._environmentManagers.get(cachedEnv.envId.managerId);
-            if (cachedManager) {
-                return cachedManager;
-            }
+        if (cachedManager) {
+            return cachedManager;
         }
 
         return undefined;

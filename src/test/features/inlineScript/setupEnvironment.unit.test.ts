@@ -13,7 +13,7 @@ import {
     getInlineScriptMetadataRoutingIdentity,
     InlineScriptRoutingRegistry,
 } from '../../../common/inlineScript/routingRegistry';
-import { InlineScriptStrings } from '../../../common/localize';
+import { InlineScriptStrings, PythonInstallStrings } from '../../../common/localize';
 import { createDeferred } from '../../../common/utils/deferred';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
@@ -334,6 +334,48 @@ suite('notifyInlineScriptSetupOutcome', () => {
 
         sinon.assert.calledTwice(infoStub);
         sinon.assert.notCalled(errorStub);
+    });
+
+    test('preserves installer cancellation guidance about unfinished background work', () => {
+        const infoStub = sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled', message: PythonInstallStrings.cancelled });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        sinon.assert.calledOnce(infoStub);
+        assert.deepStrictEqual(infoStub.firstCall.args, [PythonInstallStrings.cancelled]);
+        sinon.assert.notCalled(errorStub);
+    });
+
+    test('shows the provider-specific failure instead of replacing it with a generic setup error', () => {
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, {
+            kind: 'failed',
+            category: 'install-failure',
+            message: PythonInstallStrings.managerUnusable,
+        });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        sinon.assert.calledOnce(errorStub);
+        assert.deepStrictEqual(errorStub.firstCall.args, [PythonInstallStrings.managerUnusable]);
+    });
+
+    test('does not report an installer failure a second time', () => {
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        const warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, {
+            kind: 'failed',
+            category: 'install-failure',
+            message: PythonInstallStrings.installFailed,
+            alreadyReported: true,
+        });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        sinon.assert.notCalled(errorStub);
+        sinon.assert.notCalled(warningStub);
     });
 });
 

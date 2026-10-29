@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { ExtensionTerminalOptions, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
-import { VENV_MANAGER_ID } from '../../../common/constants';
+import { VENV_MANAGER_ID, CONDA_MANAGER_ID } from '../../../common/constants';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as shellDetector from '../../../features/common/shellDetector';
@@ -52,7 +52,7 @@ suite('Terminal Utils - getEnvironmentForTerminal', () => {
         return createMockPythonEnvironment({
             name: id,
             id,
-            managerId: 'ms-python.python:conda',
+            managerId: CONDA_MANAGER_ID,
             envPath: path.resolve('external-environments', id, 'python'),
         });
     }
@@ -1040,5 +1040,20 @@ suite('Terminal Utils - waitForShellIntegration', () => {
 
         const result = await racePromise;
         assert.strictEqual(result, true, 'should not regress when detection throws');
+    });
+
+    test('detects shell integration that becomes available while listeners are registered', async () => {
+        const shellIntegration = {};
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('bash');
+        onDidChangeTerminalShellIntegrationStub.callsFake(() => {
+            (terminal as { shellIntegration?: unknown }).shellIntegration = shellIntegration;
+            return { dispose: () => undefined };
+        });
+
+        const result = await waitForShellIntegration(terminal, 60_000);
+
+        assert.strictEqual(result, true);
+        assert.strictEqual(terminal.shellIntegration, shellIntegration);
     });
 });

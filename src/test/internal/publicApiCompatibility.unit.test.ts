@@ -20,14 +20,18 @@ import * as managerReady from '../../features/common/managerReady';
 import { pythonToolSupport } from '../../internal/pythonToolSupport';
 import * as helpers from '../../managers/builtin/helpers';
 import { PipPackageManager } from '../../managers/builtin/pipPackageManager';
-import { VenvManager } from '../../managers/builtin/venvManager';
+import { UvPackageManager } from '../../managers/builtin/uvPackageManager';
+import { BuiltInPackageManager } from '../../managers/builtin/builtInPackageManager';
+import { BuiltInEnvironmentManager } from '../../managers/builtin/builtInEnvironmentManager';
 import * as packageChanges from '../../managers/common/packageChanges';
+import { InternalPackageManager } from '../../managers/common/registeredManagers';
 import { CondaPackageManager } from '../../managers/conda/condaPackageManager';
 import * as condaUtils from '../../managers/conda/condaUtils';
 import { PoetryManager } from '../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../managers/poetry/poetryPackageManager';
 import * as poetryUtils from '../../managers/poetry/poetryUtils';
 import { createMockLogOutputChannel } from '../mocks/helper';
+import { VENV_MANAGER_ID } from '../../common/constants';
 
 interface SpawnRecord {
     executable: string;
@@ -54,7 +58,7 @@ suite('Public package API execution policy', () => {
         await fs.ensureDir(prefix);
         const executable = path.join(prefix, process.platform === 'win32' ? 'python.exe' : 'python');
         environment = {
-            envId: { id: 'test', managerId: 'ms-python.python:venv' },
+            envId: { id: 'test', managerId: VENV_MANAGER_ID },
             name: 'test',
             displayName: 'test',
             displayPath: executable,
@@ -115,6 +119,15 @@ suite('Public package API execution policy', () => {
     });
 
     function publicApi(manager: PackageManager): PythonEnvironmentApi {
+        const project = { name: 'project', uri: scope };
+        const registeredManager = new InternalPackageManager(
+            `test:${manager.name}`,
+            manager,
+            manager.createForProject ? project : undefined,
+        );
+        disposables.push(registeredManager);
+        // Isolate operation process policy from capability telemetry's version subprocess.
+        sinon.stub(registeredManager, 'getVersion').resolves(undefined);
         const event = () => {
             const emitter = new EventEmitter<void>();
             disposables.push(emitter);
@@ -126,9 +139,9 @@ suite('Public package API execution policy', () => {
                 managers: [],
                 onDidChangeActiveEnvironment: event(),
                 onDidChangePackageProviderPackages: event(),
-                getPackageManager: () => manager,
+                getPackageManager: () => registeredManager,
             } as unknown as Args[0],
-            { getProjects: () => [], onDidChangeProjects: event() } as unknown as Args[1],
+            { getProjects: () => [project], onDidChangeProjects: event() } as unknown as Args[1],
             {} as Args[2],
             {} as Args[3],
             { onDidChangeEnvironmentVariables: event() } as unknown as Args[4],
@@ -151,7 +164,12 @@ suite('Public package API execution policy', () => {
             }
             sinon.stub(helpers, 'shouldUseUv').resolves(kind === 'uv');
             sinon.stub(helpers, 'getUvExecutable').resolves(path.join(temp, '.pyprojectx', 'main', 'uv'));
-            return new PipPackageManager(api, log, {} as VenvManager);
+            return kind === 'uv'
+                ? new BuiltInPackageManager(
+                    new PipPackageManager(api, log, {} as BuiltInEnvironmentManager),
+                    new UvPackageManager(api, log, {} as BuiltInEnvironmentManager),
+                )
+                : new PipPackageManager(api, log, {} as BuiltInEnvironmentManager);
         }
 
         test(`${kind}: public progress tokens do not enable agent process policy`, async () => {

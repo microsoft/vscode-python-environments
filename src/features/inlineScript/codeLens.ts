@@ -134,7 +134,7 @@ export class InlineScriptCodeLensProvider implements CodeLensProvider, Disposabl
 
 /**
  * Register the inline-script CodeLens provider for local `.py` files. Only called when the PEP 723
- * inline-script feature flag is enabled, so it is a no-op for everyone else.
+ * inline-script preview is enabled for this activation, so it is a no-op for everyone else.
  */
 export function registerInlineScriptCodeLens(
     routing: InlineScriptRoutingRegistry,
