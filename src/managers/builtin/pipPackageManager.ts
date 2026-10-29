@@ -171,6 +171,11 @@ export class PipPackageManager implements PackageManager, Disposable {
         scope?: Uri,
     ): Promise<void> {
         throwIfCancelled(toolToken);
+        const support = await this.packageManagementCapability({ environment });
+        if (!support.supported) {
+            throw new Error(support.reason);
+        }
+
         let toInstall: string[] = [...(options.install ?? [])];
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
@@ -191,11 +196,6 @@ export class PipPackageManager implements PackageManager, Disposable {
             } else {
                 return;
             }
-        }
-
-        const support = await this.packageManagementCapability({ environment });
-        if (!support.supported) {
-            throw new Error(support.reason);
         }
 
         const execute = async (token?: CancellationToken): Promise<void> => {
