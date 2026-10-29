@@ -80,19 +80,19 @@ extends:
                   customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
                   nodeVersion: $(NodeVersion)
 
-              - script: npm install
+              - script: npm ci
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Install package dependencies
-
-              - script: npm run copy:sources
-                workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Copy API facade, types, errors, and capabilities to API package sources
 
               - script: npm run compile
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Compile TypeScript
 
-              - script: npm run test:package
+              - script: npm run check:release -- --provenance
+                workingDirectory: $(Build.SourcesDirectory)/api
+                displayName: Verify latest stable baseline and released API sources
+
+              - script: npm test
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Pack and validate npm package
 
@@ -113,9 +113,25 @@ extends:
             templateContext:
               isReleaseJob: true
             steps:
+              - checkout: self
+                persistCredentials: false
+
               - download: current
                 artifact: npm-package
                 displayName: Download npm-package artifact
+
+              - task: NodeTool@0
+                inputs:
+                  versionSpec: $(NodeVersion)
+                displayName: Select Node version
+
+              - script: npm ci --ignore-scripts
+                workingDirectory: $(Build.SourcesDirectory)/api
+                displayName: Install release validator dependencies
+
+              - script: npm run check:release -- --artifact-directory "$(Pipeline.Workspace)/npm-package"
+                workingDirectory: $(Build.SourcesDirectory)/api
+                displayName: Revalidate packed compatibility baseline before publishing
 
               - template: MicroBuild.Publish.yml@MicroBuildTemplate
                 parameters:

@@ -35,6 +35,31 @@ export async function activate() {
 }
 ```
 
+## Extension compatibility
+
+The npm package and extension are versioned independently. Each npm release declares
+an exact `minimumExtensionVersion` in its `package.json`. `PythonEnvironments.api()`
+checks the installed extension version against that floor before activating it or
+returning its API, including when the extension is already active. An older extension
+is rejected with an error explaining which version is required; update the extension
+and reload VS Code. Missing or invalid version metadata is also rejected.
+
+Versions use SemVer ordering, not string comparison. For example, a `1.40.0` floor
+accepts `1.40.0`, `1.40.1`, and `1.41.0` (including odd-minor preview-channel builds),
+but rejects `1.40.0-rc.1`. A newer prerelease such as `1.41.0-rc.1` meets that floor.
+Build metadata does not affect ordering.
+
+The minimum is fixed for an already-published npm release. New npm releases use the
+latest stable extension as their baseline, which can raise the minimum even when
+their API changes would otherwise work on an older extension. Pin an older npm
+package if your extension must retain support for an older runtime.
+
+Acquire the API through this helper: type-only imports and direct access to the
+extension's exports bypass the check. The floor does not replace feature detection
+for optional manager methods or guarantee compatibility with future breaking releases.
+Compatibility errors use `vscode.l10n.t()`; the npm package does not configure the
+consuming extension's localization bundles, so untranslated messages fall back to English.
+
 ## Manager capabilities
 
 Capabilities report general manager support without invoking an operation:

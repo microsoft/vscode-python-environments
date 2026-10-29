@@ -13,7 +13,9 @@ Use this manual to:
 - resolve environment variables; or
 - contribute an environment manager, package manager, or project creator.
 
-The runtime facade is [`src/api.ts`](../src/api.ts). The authoritative public
+The shared runtime facade is [`src/api.ts`](../src/api.ts); the npm entry point
+[`api/runtime/main.ts`](../api/runtime/main.ts) adds the extension-version check.
+The authoritative public
 contracts are in [`src/types.ts`](../src/types.ts), with public errors and type
 guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
 Capability types, catalog key sets, and raw-provider resolvers are in
@@ -99,11 +101,14 @@ export async function activate(
 
 1. Finds the extension with ID `ms-python.vscode-python-envs`
    (exported as `EXTENSION_ID`).
-2. Activates it when necessary.
-3. Returns its `PythonEnvironmentApi`.
+2. Verifies that its version meets the npm package's `minimumExtensionVersion`.
+3. Activates it when necessary.
+4. Returns its `PythonEnvironmentApi`.
 
-It rejects when the extension is missing or disabled, activation fails, or the
-extension does not expose its API. Acquire the object once and reuse it.
+It rejects when the extension is missing or disabled, its version is too old or
+invalid, activation fails, or the extension does not expose its API. Version checks
+apply to already-active extensions too and reject before activation or access to
+exports. Acquire the object once and reuse it.
 
 ### How to read this manual
 
@@ -1983,9 +1988,24 @@ before capture, as well as internal checks, do not emit this event.
 The public API is intended to avoid breaking changes. Check
 [`api/CHANGELOG.md`](../api/CHANGELOG.md) when updating the package.
 
+The npm package and VS Code extension are independently versioned. Each npm
+release's `package.json` declares an exact stable `minimumExtensionVersion`.
+The npm helper accepts installed versions greater than or equal to that floor
+using SemVer precedence. A `1.40.0` floor rejects `1.40.0-rc.1`, but accepts
+`1.41.0-rc.1`, odd-minor preview builds such as `1.41.0`, and build metadata.
+Incompatible versions produce an error asking the consumer to update the
+extension and reload VS Code; invalid or missing version metadata also rejects.
+
+New npm releases use the latest stable extension as their baseline. Already
+published packages keep their original floor, so supporting an older extension
+may require pinning an older npm package. This is a minimum-version guarantee,
+not protection against future breaking extension changes. Type-only imports or
+direct access to the extension's exports bypass the helper's runtime check.
+
 ## Related documentation
 
 - [`src/api.ts`](../src/api.ts) - runtime API facade
+- [`api/runtime/main.ts`](../api/runtime/main.ts) - npm compatibility guard
 - [`src/types.ts`](../src/types.ts) - authoritative public type contracts
 - [`src/publicErrors.ts`](../src/publicErrors.ts) - public errors and type guards
 - [`api/README.md`](../api/README.md) - npm package quick start

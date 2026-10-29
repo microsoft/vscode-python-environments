@@ -43,7 +43,7 @@ jobs:
         run: npm ci
 
       - name: Run Linter
-        run: npm run lint
+        run: npm run lint -- api/runtime api/scripts api/test
 
   ts-unit-tests:
     name: TypeScript Unit Tests
