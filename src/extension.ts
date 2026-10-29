@@ -220,7 +220,17 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         context.subscriptions.push(registerInlineScriptDiagnostics());
     }
 
-    setPythonApi(envManagers, projectManager, projectCreators, terminalManager, envVarManager);
+    const environmentManagerRegistration = createDeferred<void>();
+    // The smoke-test-only consumer may attach after a startup failure has already occurred.
+    void environmentManagerRegistration.promise.catch(() => undefined);
+    setPythonApi(
+        envManagers,
+        projectManager,
+        projectCreators,
+        terminalManager,
+        envVarManager,
+        environmentManagerRegistration.promise,
+    );
     const api = await getPythonApi();
     const sysPythonManager = createDeferred<SysPythonManager>();
 
@@ -692,8 +702,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                           )
                         : Promise.resolve(),
                 ),
-                safeRegister('shellStartupVars', shellStartupVarsMgr.initialize()),
             ]);
+            environmentManagerRegistration.resolve();
+
+            await safeRegister('shellStartupVars', shellStartupVarsMgr.initialize());
 
             context.subscriptions.push(registerPackageWatchers(envManagers, terminalActivation, outputChannel));
 
@@ -731,6 +743,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                 traceError('Post-initialization tasks failed:', postInitError);
             }
         } catch (error) {
+            environmentManagerRegistration.reject(error);
             clearHangWatchdog();
             traceError('Failed to initialize environment managers:', error);
             sendTelemetryEvent(

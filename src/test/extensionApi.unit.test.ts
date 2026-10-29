@@ -36,6 +36,7 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
         const mockProjectCreators = {} as unknown as ApiArgs[2];
         const mockTerminalManager = {} as unknown as ApiArgs[3];
         const mockEnvVarManager = { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4];
+        const environmentManagerRegistration = createDeferred<void>();
 
         const api = new PythonEnvironmentApiImpl(
             mockEnvManagers,
@@ -43,8 +44,11 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
             mockProjectCreators,
             mockTerminalManager,
             mockEnvVarManager,
+            [],
+            environmentManagerRegistration.promise,
         );
         assert.strictEqual(api.__pythonTools.version, 1);
+        assert.strictEqual(api.__environmentManagerRegistration, environmentManagerRegistration.promise);
         assert.strictEqual(typeof api.getEnvironment, 'function');
 
         let firedEventPayload: unknown = null;
