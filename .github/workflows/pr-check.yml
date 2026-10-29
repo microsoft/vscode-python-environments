@@ -11,6 +11,58 @@ env:
   NODE_VERSION: '22.21.1'
 
 jobs:
+  api-compatibility:
+    name: API package compatibility
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Identify API release inputs
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/api-changed-files"
+          if grep -Eq '^(src/(api|types|publicErrors|capabilities|legacyCapabilities)\.ts$|api/(package(-lock)?\.json$|runtime/|scripts/|test/|tsconfig|\.npmignore$)|\.github/workflows/pr-(check|file-check)\.yml$|build/azure-pipeline\.npm\.yml$)' "$RUNNER_TEMP/api-changed-files"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Node
+        if: steps.scope.outputs.relevant == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install API dependencies
+        if: steps.scope.outputs.relevant == 'true'
+        run: npm ci
+        working-directory: api
+
+      - name: Validate latest stable extension baseline
+        if: steps.scope.outputs.relevant == 'true'
+        run: npm run check:release
+        working-directory: api
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Build and test API package
+        if: steps.scope.outputs.relevant == 'true'
+        run: npm run compile && npm test
+        working-directory: api
+
   build-vsix:
     name: Create VSIX
     runs-on: ubuntu-latest
@@ -42,7 +94,7 @@ jobs:
         run: npm ci
 
       - name: Run Linter
-        run: npm run lint
+        run: npm run lint -- api/runtime api/scripts api/test
 
   ts-unit-tests:
     name: TypeScript Unit Tests

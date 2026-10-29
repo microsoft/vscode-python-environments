@@ -5,6 +5,18 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0]
+
+### Added
+
+- `minimumExtensionVersion` metadata recording the independently versioned extension baseline required by this npm release.
+- An npm-only compatibility guard that rejects older or invalid extension versions before activation or access to the API, with localized update guidance.
+- PR validation against the latest stable extension release, packed-metadata checks, and publish-time verification that shared API sources have shipped in that stable release.
+
+### Changed
+
+- New npm releases require the latest stable extension baseline. Existing npm releases keep their original minimum; consumers targeting older extensions may need to pin an older npm package.
+
 ## [1.7.0]
 
 ### Added

@@ -112,12 +112,60 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 
 ## Public API package (`@vscode/python-environments`)
 
-The npm package under [`api/`](./api) is the public API facade other extensions consume. Its sources — `api/src/main.ts`, `api/src/types.ts`, and `api/src/publicErrors.ts` — are **copies** of [`src/api.ts`](./src/api.ts), [`src/types.ts`](./src/types.ts), and [`src/publicErrors.ts`](./src/publicErrors.ts) respectively — the single sources of truth — and are **not committed** (see [`api/.gitignore`](./api/.gitignore)).
+The npm package under [`api/`](./api) is the public API facade other extensions consume.
+Its generated `api/src` sources are **not committed** (see [`api/.gitignore`](./api/.gitignore)).
 
-- Edit the public API only in `src/api.ts` (the runtime facade: `PythonEnvironments.api()` helper and `EXTENSION_ID`), `src/types.ts` (public contracts: interfaces, types, enums), and `src/publicErrors.ts` (concrete public error classes and type guards). `api/src/*.ts` files are build artifacts — never edit or commit them.
-- `api/src/main.ts`, `api/src/types.ts`, and `api/src/publicErrors.ts` are produced by the publish pipeline ([`build/azure-pipeline.npm.yml`](./build/azure-pipeline.npm.yml)), which copies `src/api.ts` to `api/src/main.ts`, `src/types.ts` to `api/src/types.ts`, and `src/publicErrors.ts` to `api/src/publicErrors.ts` before compiling. The api package is therefore built in CI only; to build it locally, copy the files first (e.g. `cp src/api.ts api/src/main.ts && cp src/types.ts api/src/types.ts && cp src/publicErrors.ts api/src/publicErrors.ts`).
-- `src/api.ts`, `src/types.ts`, and `src/publicErrors.ts` are validated on every PR by the extension's own lint and TypeScript compile.
-- **Versioning and compatibility:** the published package version in [`api/package.json`](./api/package.json) is maintained independently of the extension version in [`package.json`](./package.json) — the two do not need to match. Compatibility is based on the API shape exported by the installed Python Environments extension at runtime. Package updates must preserve backwards-compatible contracts unless the API package version intentionally communicates a breaking change; consumers should treat newly added members as optional when they may run against older installed extension versions. Any PR that edits `src/api.ts`, `src/types.ts`, or `src/publicErrors.ts` must bump `api/package.json` (use the `skip api version` label to bypass) and add an entry to [`api/CHANGELOG.md`](./api/CHANGELOG.md) (use the `skip api changelog` label to bypass).
+- Edit shared public sources in `src/api.ts`, `src/types.ts`, `src/publicErrors.ts`,
+  `src/capabilities.ts`, and `src/legacyCapabilities.ts`. They are copied under the
+  same filenames into `api/src`. The npm-only entry point is maintained in
+  `api/runtime/main.ts` and copied to `api/src/main.ts`.
+- `npm --prefix api run compile` regenerates these copies and a private
+  `packageMetadata.ts` module from `api/package.json`, then builds declarations,
+  ESM, and CommonJS. Never edit generated sources or maintain a second version
+  constant. Install dependencies with `npm --prefix api ci` first.
+- Run `npm --prefix api test` after compilation. This tests the release validator
+  and packs/installs the package for modern/legacy TypeScript and ESM/CommonJS
+  runtime checks. `npm --prefix api run check:release` checks the live baseline;
+  add `-- --provenance` to verify original and staged sources against that release.
+- Shared API sources are also checked by the extension's lint and TypeScript
+  compile. The PR's **API package compatibility** job builds/tests npm release
+  inputs and validates their minimum against the latest stable release.
+  Documentation-only and unrelated PRs do not perform the external lookup.
+  Configure that job as a required check in branch protection.
+
+### API versioning and publication
+
+The npm version in [`api/package.json`](./api/package.json) is independent of the
+extension version in [`package.json`](./package.json). Each new npm release must
+declare `minimumExtensionVersion` as an exact stable SemVer matching GitHub's
+designated latest stable extension release tag (without its leading `v`). Ranges,
+prerelease floors, and build metadata are rejected. The helper checks installed
+extension versions before activation using normal SemVer precedence, including
+already-active extensions. Published npm releases keep their original minimum.
+
+Any PR editing a shared public API source or `api/runtime/**/*.ts` must bump the
+npm version, update [`api/CHANGELOG.md`](./api/CHANGELOG.md), and update
+[`docs/README.md`](./docs/README.md). The existing `skip api version`,
+`skip api changelog`, and `skip api docs` labels apply to those file checks, but
+do not bypass compatibility or publication validation.
+
+Release in this order: merge API changes, ship the stable extension, update the
+npm minimum/version/changelog, then build and publish npm. Development can merge
+before the extension ships: source provenance is checked at packaging, not on PRs.
+The npm pipeline resolves the stable release tag to an immutable commit and
+requires all five shared source files, including their staged copies, to match.
+Only line-ending differences are ignored; even comment-only differences block
+publication. This conservative provenance check is not a semantic API analyzer.
+The npm-only wrapper can evolve without changing those shared extension sources.
+
+The packed manifest and both compiled runtime floors must agree. The publish
+stage checks the actual tarball against the latest stable release again. If a
+new stable release appeared during review or between packaging and publishing,
+explicitly update the minimum, rebuild, retest, and rerun the pipeline; do not
+restamp the existing artifact. Both `latest` and `next` npm tags currently use
+this stable baseline: preview-only API publishing needs a separate policy.
+Public GitHub lookups use bounded retries and fail closed. Local runs can set
+`GITHUB_TOKEN` to avoid anonymous rate limits; PRs use their read-only token.
 
 ## Internal Python agent-tool bridge
 
