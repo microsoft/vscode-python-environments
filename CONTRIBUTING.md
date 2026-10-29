@@ -143,14 +143,17 @@ prerelease floors, and build metadata are rejected. The helper checks installed
 extension versions before activation using normal SemVer precedence, including
 already-active extensions. Published npm releases keep their original minimum.
 
-Any PR editing a shared public API source or `api/runtime/**/*.ts` must bump the
-npm version, update [`api/CHANGELOG.md`](./api/CHANGELOG.md), and update
-[`docs/README.md`](./docs/README.md). The existing `skip api version`,
-`skip api changelog`, and `skip api docs` labels apply to those file checks, but
-do not bypass compatibility or publication validation.
+Defer npm version bumps to release PRs by applying `skip api version` to API
+implementation PRs. Any PR editing a shared public API source or
+`api/runtime/**/*.ts` must still update [`api/CHANGELOG.md`](./api/CHANGELOG.md)
+and [`docs/README.md`](./docs/README.md). The existing `skip api changelog` and
+`skip api docs` labels apply to those file checks. None of these labels bypass
+compatibility or publication validation.
 
-Release in this order: merge API changes, ship the stable extension, update the
-npm minimum/version/changelog, then build and publish npm. Development can merge
+Release in this order: merge API changes without an npm version bump, ship the
+stable extension, then merge an npm release PR updating
+`minimumExtensionVersion`, the npm version, and the changelog. The stable npm
+version bump starts the publication pipeline automatically. Development can merge
 before the extension ships: source provenance is checked at packaging, not on PRs.
 The npm pipeline resolves the stable release tag to an immutable commit and
 requires all five shared source files, including their staged copies, to match.
@@ -166,6 +169,8 @@ restamp the existing artifact. Both `latest` and `next` npm tags currently use
 this stable baseline: preview-only API publishing needs a separate policy.
 Public GitHub lookups use bounded retries and fail closed. Local runs can set
 `GITHUB_TOKEN` to avoid anonymous rate limits; PRs use their read-only token.
+
+- **Releasing:** merging a stable version change in `api/package.json` into `main` automatically starts the [npm pipeline](./build/azure-pipeline.npm.yml), including its existing build, package tests, and MicroBuild approval process. Other manifest edits build and validate the package without publishing. The version check compares the merged commit with its parent, relying on the repository's squash-only merge policy; direct pushes to `main` also trigger it. Preview releases remain manual: queue the pipeline with `quality: preview` and `publishPackage: true`. Manual runs otherwise remain build-only unless `publishPackage` is explicitly enabled.
 
 ## Internal Python agent-tool bridge
 
