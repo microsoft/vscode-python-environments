@@ -159,37 +159,64 @@ export interface ApiReadyResult {
 }
 
 /**
- * Wait for the API to be fully ready, including manager registration.
- *
- * This waits for the async initialization that happens in setImmediate() after
- * extension.activate() returns. Without this, calls to getEnvironments() may
- * hang waiting for managers that haven't registered yet.
- *
- * @param api - The Python environment API
- * @param timeoutMs - Maximum time to wait (default: 30 seconds)
- * @returns Result indicating if API is ready
- *
- * @example
- * const result = await waitForApiReady(api, 30_000);
- * if (!result.ready) {
- *     this.skip(); // Skip test if managers not available
- * }
+ * Wait for built-in environment manager registration without starting environment discovery.
  */
-export async function waitForApiReady(
-    api: { getEnvironments: (scope: 'all' | 'global') => Promise<unknown[]> },
+export async function waitForEnvironmentManagerRegistration(
+    api: { readonly __environmentManagerRegistration: Promise<void> },
     timeoutMs: number = 30_000,
 ): Promise<ApiReadyResult> {
-    // Race the getEnvironments call against a timeout
-    // This ensures managers have registered before we proceed
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(
-            () => reject(new Error(`API not ready within ${timeoutMs}ms - managers may not have registered`)),
+        timeoutHandle = setTimeout(
+            () => reject(new Error(`Environment managers did not register within ${timeoutMs}ms`)),
             timeoutMs,
         );
     });
 
     try {
-        // If getEnvironments completes, managers are ready
+        await Promise.race([api.__environmentManagerRegistration, timeoutPromise]);
+        return { ready: true };
+    } catch (error) {
+        return {
+            ready: false,
+            error: error instanceof Error ? error.message : String(error),
+        };
+    } finally {
+        if (timeoutHandle !== undefined) {
+            clearTimeout(timeoutHandle);
+        }
+    }
+}
+
+/**
+ * Wait for environment discovery to complete.
+ *
+ * This intentionally exercises getEnvironments(), so use
+ * waitForEnvironmentManagerRegistration() for registration-only checks.
+ *
+ * @param api - The Python environment API
+ * @param timeoutMs - Maximum time to wait (default: 30 seconds)
+ * @returns Result indicating if discovery completed
+ *
+ * @example
+ * const result = await waitForEnvironmentDiscovery(api, 30_000);
+ * if (!result.ready) {
+ *     this.skip();
+ * }
+ */
+export async function waitForEnvironmentDiscovery(
+    api: { getEnvironments: (scope: 'all' | 'global') => Promise<unknown[]> },
+    timeoutMs: number = 30_000,
+): Promise<ApiReadyResult> {
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(
+            () => reject(new Error(`Environment discovery did not complete within ${timeoutMs}ms`)),
+            timeoutMs,
+        );
+    });
+
+    try {
         await Promise.race([api.getEnvironments('all'), timeoutPromise]);
         return { ready: true };
     } catch (error) {
@@ -198,6 +225,10 @@ export async function waitForApiReady(
             ready: false,
             error: error instanceof Error ? error.message : String(error),
         };
+    } finally {
+        if (timeoutHandle !== undefined) {
+            clearTimeout(timeoutHandle);
+        }
     }
 }
 

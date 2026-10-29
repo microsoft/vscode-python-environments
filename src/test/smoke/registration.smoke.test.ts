@@ -19,16 +19,29 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
+import { EnvironmentCapability } from '../../capabilities';
+import {
+    CONDA_MANAGER_ID,
+    PIPENV_MANAGER_ID,
+    POETRY_MANAGER_ID,
+    PYENV_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
+    VENV_MANAGER_ID,
+} from '../../common/constants';
 import { ENVS_EXTENSION_ID, MAX_EXTENSION_ACTIVATION_TIME } from '../constants';
-import { waitForApiReady, waitForCondition } from '../testUtils';
+import { waitForCondition, waitForEnvironmentManagerRegistration } from '../testUtils';
+
+type RegistrationSmokeApi = PythonEnvironmentApi & {
+    readonly __environmentManagerRegistration: Promise<void>;
+};
 
 suite('Smoke: Registration Checks', function () {
     this.timeout(MAX_EXTENSION_ACTIVATION_TIME);
 
-    let api: PythonEnvironmentApi;
+    let api: RegistrationSmokeApi;
 
     suiteSetup(async function () {
-        const extension = vscode.extensions.getExtension<PythonEnvironmentApi>(ENVS_EXTENSION_ID);
+        const extension = vscode.extensions.getExtension<RegistrationSmokeApi>(ENVS_EXTENSION_ID);
         assert.ok(extension, `Extension ${ENVS_EXTENSION_ID} not found`);
 
         if (!extension.isActive) {
@@ -39,9 +52,7 @@ suite('Smoke: Registration Checks', function () {
         api = extension.exports;
         assert.ok(api, 'API not exported');
 
-        // Wait for environment managers to register (happens async in setImmediate)
-        // This will fail if the pet binary is not available - which is correct behavior
-        const result = await waitForApiReady(api, 45_000);
+        const result = await waitForEnvironmentManagerRegistration(api, 45_000);
         assert.ok(result.ready, `Environment managers failed to initialize: ${result.error}`);
     });
 
@@ -362,20 +373,21 @@ suite('Smoke: Registration Checks', function () {
     // =========================================================================
 
     test('Built-in environment managers are registered', async function () {
-        // Get all environments to verify managers are working
-        const environments = await api.getEnvironments('all');
-
-        // We can't guarantee environments exist, but the call should succeed
-        assert.ok(Array.isArray(environments), 'getEnvironments should return an array');
-
-        // If environments exist, verify they have the expected shape
-        if (environments.length > 0) {
-            const env = environments[0];
-            assert.ok(env.envId, 'Environment should have envId');
-            assert.ok(env.envId.id, 'envId should have id');
-            assert.ok(env.envId.managerId, 'envId should have managerId');
-            assert.ok(env.name, 'Environment should have name');
-            assert.ok(env.displayName, 'Environment should have displayName');
+        const managerIds = [
+            SYSTEM_MANAGER_ID,
+            VENV_MANAGER_ID,
+            CONDA_MANAGER_ID,
+            PYENV_MANAGER_ID,
+            PIPENV_MANAGER_ID,
+            POETRY_MANAGER_ID,
+        ];
+        for (const managerId of managerIds) {
+            const support = await api.getEnvironmentManagerCapability(managerId, EnvironmentCapability.List);
+            const failureReason = support.supported ? 'unknown reason' : support.reason;
+            assert.ok(
+                support.supported,
+                `${managerId} did not register with environment-listing support: ${failureReason}`,
+            );
         }
     });
 

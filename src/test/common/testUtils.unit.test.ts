@@ -2,7 +2,13 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
-import { retryUntilSuccess, sleep, waitForApiReady, waitForCondition } from '../testUtils';
+import {
+    retryUntilSuccess,
+    sleep,
+    waitForCondition,
+    waitForEnvironmentDiscovery,
+    waitForEnvironmentManagerRegistration,
+} from '../testUtils';
 
 suite('Test Utilities', () => {
     suite('sleep', () => {
@@ -173,12 +179,12 @@ suite('Test Utilities', () => {
         });
     });
 
-    suite('waitForApiReady', () => {
+    suite('waitForEnvironmentDiscovery', () => {
         test('should return ready:true when getEnvironments succeeds', async () => {
             const mockApi = {
                 getEnvironments: async () => [],
             };
-            const result = await waitForApiReady(mockApi, 1000);
+            const result = await waitForEnvironmentDiscovery(mockApi, 1000);
             assert.deepStrictEqual(result, { ready: true });
         });
 
@@ -186,9 +192,9 @@ suite('Test Utilities', () => {
             const mockApi = {
                 getEnvironments: (): Promise<unknown[]> => new Promise(() => {}), // Never resolves
             };
-            const result = await waitForApiReady(mockApi, 100);
+            const result = await waitForEnvironmentDiscovery(mockApi, 100);
             assert.strictEqual(result.ready, false);
-            assert.ok(result.error?.includes('API not ready within 100ms'));
+            assert.ok(result.error?.includes('Environment discovery did not complete within 100ms'));
         });
 
         test('should return ready:false when getEnvironments throws', async () => {
@@ -197,9 +203,37 @@ suite('Test Utilities', () => {
                     throw new Error('Manager not registered');
                 },
             };
-            const result = await waitForApiReady(mockApi, 1000);
+            const result = await waitForEnvironmentDiscovery(mockApi, 1000);
             assert.strictEqual(result.ready, false);
             assert.ok(result.error?.includes('Manager not registered'));
+        });
+    });
+
+    suite('waitForEnvironmentManagerRegistration', () => {
+        test('should return ready:true when registration completes', async () => {
+            const result = await waitForEnvironmentManagerRegistration(
+                { __environmentManagerRegistration: Promise.resolve() },
+                1000,
+            );
+            assert.deepStrictEqual(result, { ready: true });
+        });
+
+        test('should return ready:false when registration times out', async () => {
+            const result = await waitForEnvironmentManagerRegistration(
+                { __environmentManagerRegistration: new Promise(() => {}) },
+                100,
+            );
+            assert.strictEqual(result.ready, false);
+            assert.ok(result.error?.includes('Environment managers did not register within 100ms'));
+        });
+
+        test('should return the registration failure', async () => {
+            const result = await waitForEnvironmentManagerRegistration(
+                { __environmentManagerRegistration: Promise.reject(new Error('PET binary not found')) },
+                1000,
+            );
+            assert.strictEqual(result.ready, false);
+            assert.ok(result.error?.includes('PET binary not found'));
         });
     });
 });

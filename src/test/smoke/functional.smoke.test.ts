@@ -19,7 +19,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { ENVS_EXTENSION_ID, MAX_EXTENSION_ACTIVATION_TIME } from '../constants';
-import { waitForApiReady, waitForCondition } from '../testUtils';
+import { waitForCondition, waitForEnvironmentDiscovery } from '../testUtils';
 
 suite('Smoke: Functional Checks', function () {
     this.timeout(MAX_EXTENSION_ACTIVATION_TIME);
@@ -38,10 +38,8 @@ suite('Smoke: Functional Checks', function () {
         api = extension.exports;
         assert.ok(api, 'API not exported');
 
-        // Wait for environment managers to register (happens async in setImmediate)
-        // This will fail if the pet binary is not available - which is correct behavior
-        const result = await waitForApiReady(api, 45_000);
-        assert.ok(result.ready, `Environment managers failed to initialize: ${result.error}`);
+        const result = await waitForEnvironmentDiscovery(api, 45_000);
+        assert.ok(result.ready, `Environment discovery failed: ${result.error}`);
     });
 
     // =========================================================================
