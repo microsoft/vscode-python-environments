@@ -126,8 +126,7 @@ suite('Inline environment package command guard', () => {
 
     function createManagers(environment: PythonEnvironment): EnvironmentManagers {
         const managerMock: Partial<EnvironmentManagers> = {
-            getEnvironmentManager: () =>
-                ({ get: async () => environment } as unknown as InternalEnvironmentManager),
+            getEnvironment: async () => environment,
             getPackageManager: () => packageManager,
         };
         return managerMock as EnvironmentManagers;
