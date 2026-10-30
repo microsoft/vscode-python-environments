@@ -569,6 +569,20 @@ async function toAbsoluteInterpreterPath(interpreterPath: string, scope: Uri | u
         // Keep bare commands intact when they are absent from the extension host's PATH.
         // The native finder can resolve them using its own environment (for example, the
         // integrated terminal's shell environment).
+        if (!scope) {
+            return interpreterPath;
+        }
+        const workspaceFolder = getWorkspaceFolder(scope);
+        const workspacePath = workspaceFolder?.uri.fsPath ?? scope.fsPath;
+        const workspaceCandidate = path.resolve(workspacePath, interpreterPath);
+        try {
+            if ((await fs.stat(workspaceCandidate)).isDirectory()) {
+                return workspaceCandidate;
+            }
+        } catch {
+            // A missing bare name may still be resolvable by the native finder (for example, by
+            // an integrated-terminal environment manager), so pass it through unchanged.
+        }
         return interpreterPath;
     }
     if (!scope) {

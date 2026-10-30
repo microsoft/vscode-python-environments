@@ -504,6 +504,33 @@ suite('Interpreter Selection - Priority Chain', () => {
                 assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(command));
             });
 
+            test('should resolve a bare workspace directory to its absolute path', async () => {
+                const workspaceUri = Uri.file(await fs.mkdtemp(path.join(os.tmpdir(), 'dip-workspace-')));
+                const workspaceFolder = { name: 'workspace', uri: workspaceUri } as WorkspaceFolder;
+                const envDirectory = path.join(workspaceUri.fsPath, '.venv');
+                await fs.mkdir(envDirectory);
+                sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+                sandbox.stub(workspaceApis, 'getWorkspaceFolder').returns(workspaceFolder);
+                sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([workspaceFolder]);
+                useDefaultInterpreterPath('.venv');
+                mockNativeFinder.resolve.rejects(new Error('not found'));
+                mockVenvManager.get.resolves(undefined);
+
+                try {
+                    await resolveEnvironmentByPriority(
+                        workspaceUri,
+                        mockEnvManagers as unknown as EnvironmentManagers,
+                        mockProjectManager as unknown as PythonProjectManager,
+                        mockNativeFinder as unknown as NativePythonFinder,
+                        mockApi as unknown as PythonEnvironmentApi,
+                    );
+
+                    assert.ok(mockNativeFinder.resolve.calledOnceWithExactly(envDirectory));
+                } finally {
+                    await fs.remove(workspaceUri.fsPath);
+                }
+            });
+
             test('should treat the default value "python" as not configured', async () => {
                 await putCommandOnPath('python');
                 sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
