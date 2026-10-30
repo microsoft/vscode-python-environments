@@ -190,6 +190,8 @@ suite('getShellActivationCommands', () => {
                 ShellConstants.GITBASH,
                 ShellConstants.ZSH,
                 ShellConstants.KSH,
+                ShellConstants.CSH,
+                ShellConstants.TCSH,
             ]) {
                 assert.strictEqual(result.shellActivation.get(shell), undefined, `${shell} should not be activated`);
                 assert.strictEqual(
@@ -213,12 +215,18 @@ suite('getShellActivationCommands', () => {
         test('POSIX shells are activated when the activate script exists', async () => {
             isWindowsStub.returns(false);
             await fs.writeFile(path.join(tmpDir, 'activate'), '');
+            await fs.writeFile(path.join(tmpDir, 'activate.csh'), '');
 
             const result = await getShellActivationCommands(tmpDir);
 
             for (const shell of [ShellConstants.SH, ShellConstants.BASH, ShellConstants.ZSH]) {
                 assert.deepStrictEqual(result.shellActivation.get(shell), [
                     { executable: 'source', args: [path.join(tmpDir, 'activate')] },
+                ]);
+            }
+            for (const shell of [ShellConstants.CSH, ShellConstants.TCSH]) {
+                assert.deepStrictEqual(result.shellActivation.get(shell), [
+                    { executable: 'source', args: [path.join(tmpDir, 'activate.csh')] },
                 ]);
             }
         });
