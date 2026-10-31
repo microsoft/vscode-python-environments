@@ -842,7 +842,6 @@ suite('Terminal closed during activation lifecycle (Fixes #1867)', () => {
 
         // Simulate terminal close during activation
         sinon.stub(terminalActivation, 'activate').callsFake(async (t) => {
-            (t as { exitStatus?: { reason: number } }).exitStatus = { reason: 1 };
             onDidCloseEmitter.fire(t);
         });
 

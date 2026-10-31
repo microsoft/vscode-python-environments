@@ -1,6 +1,6 @@
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
-import { Disposable, EventEmitter, ProgressLocation, Terminal, Uri } from 'vscode';
+import { Disposable, EventEmitter, l10n, ProgressLocation, Terminal, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
 import { ActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
@@ -323,7 +323,7 @@ export class TerminalManagerImpl implements TerminalManager {
             }
 
             if (closedDuringInit || newTerminal.exitStatus !== undefined) {
-                throw new Error('Terminal has already been disposed');
+                throw new Error(l10n.t('Terminal has already been disposed'));
             }
 
             return newTerminal;
@@ -374,7 +374,7 @@ export class TerminalManagerImpl implements TerminalManager {
 
         const newTerminal = await this.create(environment, { cwd, name });
         if (newTerminal.exitStatus !== undefined) {
-            throw new Error('Terminal has already been disposed');
+            throw new Error(l10n.t('Terminal has already been disposed'));
         }
         this.dedicatedTerminals.set(key, newTerminal);
 
@@ -411,7 +411,7 @@ export class TerminalManagerImpl implements TerminalManager {
         const cwd = stat.isDirectory() ? uri.fsPath : path.dirname(uri.fsPath);
         const newTerminal = await this.create(environment, { cwd });
         if (newTerminal.exitStatus !== undefined) {
-            throw new Error('Terminal has already been disposed');
+            throw new Error(l10n.t('Terminal has already been disposed'));
         }
         this.projectTerminals.set(key, newTerminal);
 
