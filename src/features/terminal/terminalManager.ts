@@ -318,6 +318,8 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     private dedicatedTerminals = new Map<string, Terminal>();
+    private pendingDedicatedTerminals = new Map<string, Promise<Terminal>>();
+
     async getDedicatedTerminal(
         terminalKey: Uri | string,
         project: Uri | PythonProject,
@@ -329,45 +331,72 @@ export class TerminalManagerImpl implements TerminalManager {
         if (!createNew) {
             const terminal = this.dedicatedTerminals.get(key);
             if (terminal) {
-                return terminal;
+                if (terminal.exitStatus === undefined) {
+                    return terminal;
+                }
+                this.dedicatedTerminals.delete(key);
+            }
+            const pending = this.pendingDedicatedTerminals.get(key);
+            if (pending) {
+                return pending;
             }
         }
 
         const puri = project instanceof Uri ? project : project.uri;
         const config = getConfiguration('python', terminalKey instanceof Uri ? terminalKey : puri);
-        const projectStat = await fsapi.stat(puri.fsPath);
-        const projectDir = projectStat.isDirectory() ? puri.fsPath : path.dirname(puri.fsPath);
 
-        let cwd: string;
-        let name: string;
+        const createPromise = (async () => {
+            try {
+                const projectStat = await fsapi.stat(puri.fsPath);
+                const projectDir = projectStat.isDirectory() ? puri.fsPath : path.dirname(puri.fsPath);
 
-        if (terminalKey instanceof Uri) {
-            const uriStat = await fsapi.stat(terminalKey.fsPath);
-            const uriDir = uriStat.isDirectory() ? terminalKey.fsPath : path.dirname(terminalKey.fsPath);
-            cwd = config.get<boolean>('terminal.executeInFileDir', false) ? uriDir : projectDir;
-            // Follow Python extension's naming: 'Python: {filename}' for dedicated terminals
-            const fileName = path.basename(terminalKey.fsPath).replace('.py', '');
-            name = `Python: ${fileName}`;
-        } else {
-            // When terminalKey is a string, use project directory and the string as name
-            cwd = projectDir;
-            name = `Python: ${terminalKey}`;
+                let cwd: string;
+                let name: string;
+
+                if (terminalKey instanceof Uri) {
+                    const uriStat = await fsapi.stat(terminalKey.fsPath);
+                    const uriDir = uriStat.isDirectory() ? terminalKey.fsPath : path.dirname(terminalKey.fsPath);
+                    cwd = config.get<boolean>('terminal.executeInFileDir', false) ? uriDir : projectDir;
+                    // Follow Python extension's naming: 'Python: {filename}' for dedicated terminals
+                    const fileName = path.basename(terminalKey.fsPath).replace('.py', '');
+                    name = `Python: ${fileName}`;
+                } else {
+                    // When terminalKey is a string, use project directory and the string as name
+                    cwd = projectDir;
+                    name = `Python: ${terminalKey}`;
+                }
+
+                const newTerminal = await this.create(environment, { cwd, name });
+                if (newTerminal.exitStatus !== undefined) {
+                    throw new Error('Terminal has already been disposed');
+                }
+                this.dedicatedTerminals.set(key, newTerminal);
+
+                const disable = onDidCloseTerminal((terminal) => {
+                    if (terminal === newTerminal) {
+                        if (this.dedicatedTerminals.get(key) === newTerminal) {
+                            this.dedicatedTerminals.delete(key);
+                        }
+                        disable.dispose();
+                    }
+                });
+
+                return newTerminal;
+            } finally {
+                this.pendingDedicatedTerminals.delete(key);
+            }
+        })();
+
+        if (!createNew) {
+            this.pendingDedicatedTerminals.set(key, createPromise);
         }
 
-        const newTerminal = await this.create(environment, { cwd, name });
-        this.dedicatedTerminals.set(key, newTerminal);
-
-        const disable = onDidCloseTerminal((terminal) => {
-            if (terminal === newTerminal) {
-                this.dedicatedTerminals.delete(key);
-                disable.dispose();
-            }
-        });
-
-        return newTerminal;
+        return createPromise;
     }
 
     private projectTerminals = new Map<string, Terminal>();
+    private pendingProjectTerminals = new Map<string, Promise<Terminal>>();
+
     async getProjectTerminal(
         project: Uri | PythonProject,
         environment: PythonEnvironment,
@@ -378,22 +407,47 @@ export class TerminalManagerImpl implements TerminalManager {
         if (!createNew) {
             const terminal = this.projectTerminals.get(key);
             if (terminal) {
-                return terminal;
+                if (terminal.exitStatus === undefined) {
+                    return terminal;
+                }
+                this.projectTerminals.delete(key);
+            }
+            const pending = this.pendingProjectTerminals.get(key);
+            if (pending) {
+                return pending;
             }
         }
-        const stat = await fsapi.stat(uri.fsPath);
-        const cwd = stat.isDirectory() ? uri.fsPath : path.dirname(uri.fsPath);
-        const newTerminal = await this.create(environment, { cwd });
-        this.projectTerminals.set(key, newTerminal);
 
-        const disable = onDidCloseTerminal((terminal) => {
-            if (terminal === newTerminal) {
-                this.projectTerminals.delete(key);
-                disable.dispose();
+        const createPromise = (async () => {
+            try {
+                const stat = await fsapi.stat(uri.fsPath);
+                const cwd = stat.isDirectory() ? uri.fsPath : path.dirname(uri.fsPath);
+                const newTerminal = await this.create(environment, { cwd });
+                if (newTerminal.exitStatus !== undefined) {
+                    throw new Error('Terminal has already been disposed');
+                }
+                this.projectTerminals.set(key, newTerminal);
+
+                const disable = onDidCloseTerminal((terminal) => {
+                    if (terminal === newTerminal) {
+                        if (this.projectTerminals.get(key) === newTerminal) {
+                            this.projectTerminals.delete(key);
+                        }
+                        disable.dispose();
+                    }
+                });
+
+                return newTerminal;
+            } finally {
+                this.pendingProjectTerminals.delete(key);
             }
-        });
+        })();
 
-        return newTerminal;
+        if (!createNew) {
+            this.pendingProjectTerminals.set(key, createPromise);
+        }
+
+        return createPromise;
     }
 
     private async activateUsingCommand(api: PythonEnvironmentApi, t: Terminal): Promise<void> {
