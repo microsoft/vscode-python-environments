@@ -8,6 +8,7 @@ import { sendTelemetryEvent } from '../telemetry/sender';
 import { isWindows } from '../utils/platformUtils';
 import { handlePythonPath } from '../utils/pythonPath';
 import {
+    QuickPickWithButtonsOptions,
     showErrorMessage,
     showInputBox,
     showOpenDialog,
@@ -47,6 +48,9 @@ interface EnvironmentPickOptions {
     showBackButton?: boolean;
     projects: PythonProject[];
 }
+
+type EnvironmentPickItem = QuickPickItem | (QuickPickItem & { result: PythonEnvironment });
+
 async function browseForPython(
     managers: InternalEnvironmentManager[],
     projectEnvManagers: InternalEnvironmentManager[],
@@ -144,15 +148,17 @@ async function createEnvironment(
 }
 
 async function pickEnvironmentImpl(
-    items: (QuickPickItem | (QuickPickItem & { result: PythonEnvironment }))[],
+    items: EnvironmentPickItem[],
     managers: InternalEnvironmentManager[],
     projectEnvManagers: InternalEnvironmentManager[],
     options: EnvironmentPickOptions,
+    itemLoader?: QuickPickWithButtonsOptions<EnvironmentPickItem>['itemLoader'],
 ): Promise<PythonEnvironment | undefined> {
     const selected = await showQuickPickWithButtons(items, {
         placeHolder: Pickers.Environments.selectEnvironment,
         ignoreFocusOut: true,
         showBackButton: options?.showBackButton,
+        itemLoader,
     });
 
     if (selected && !Array.isArray(selected)) {
@@ -177,7 +183,7 @@ export async function pickEnvironment(
     projectEnvManagers: InternalEnvironmentManager[],
     options: EnvironmentPickOptions,
 ): Promise<PythonEnvironment | undefined> {
-    const items: (QuickPickItem | (QuickPickItem & { result: PythonEnvironment }))[] = [
+    const items: EnvironmentPickItem[] = [
         {
             label: Interpreter.enterInterpreterPath,
             iconPath: new ThemeIcon('edit'),
@@ -222,30 +228,45 @@ export async function pickEnvironment(
         );
     }
 
-    for (const manager of managers) {
-        items.push({
-            label: manager.displayName,
-            kind: QuickPickItemKind.Separator,
-        });
-        const envs = await manager.getEnvironments('all');
-        items.push(
-            ...envs.map((e) => {
-                const pathDescription = e.displayPath;
-                const description =
-                    e.description && e.description.trim() ? `${e.description} (${pathDescription})` : pathDescription;
+    const managerItems: (EnvironmentPickItem[] | undefined)[] = [];
+    const itemLoader: QuickPickWithButtonsOptions<EnvironmentPickItem>['itemLoader'] =
+        managers.length > 0
+            ? async (updateItems) => {
+                  await Promise.all(
+                      managers.map(async (manager, index) => {
+                          try {
+                              const envs = await manager.getEnvironments('all');
+                              managerItems[index] = [
+                                  {
+                                      label: manager.displayName,
+                                      kind: QuickPickItemKind.Separator,
+                                  },
+                                  ...envs.map((e) => {
+                                      const pathDescription = e.displayPath;
+                                      const description =
+                                          e.description && e.description.trim()
+                                              ? `${e.description} (${pathDescription})`
+                                              : pathDescription;
 
-                return {
-                    label: e.displayName ?? e.name,
-                    description: description,
-                    result: e,
-                    manager: manager,
-                    iconPath: getIconPath(e.iconPath),
-                };
-            }),
-        );
-    }
+                                      return {
+                                          label: e.displayName ?? e.name,
+                                          description: description,
+                                          result: e,
+                                          manager: manager,
+                                          iconPath: getIconPath(e.iconPath),
+                                      };
+                                  }),
+                              ];
+                              updateItems([...items, ...managerItems.flatMap((current) => current ?? [])]);
+                          } catch (ex) {
+                              traceError(`Failed to get environments from ${manager.id}`, ex);
+                          }
+                      }),
+                  );
+              }
+            : undefined;
 
-    return pickEnvironmentImpl(items, managers, projectEnvManagers, options);
+    return pickEnvironmentImpl(items, managers, projectEnvManagers, options, itemLoader);
 }
 
 export async function pickEnvironmentFrom(environments: PythonEnvironment[]): Promise<PythonEnvironment | undefined> {
