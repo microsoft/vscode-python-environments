@@ -7,7 +7,9 @@ import * as sinon from 'sinon';
 import { CancellationTokenSource, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { Interpreter } from '../../common/localize';
+import * as logging from '../../common/logging';
 import { pickEnvironment } from '../../common/pickers/environments';
+import { createDeferred } from '../../common/utils/deferred';
 import * as managerPicker from '../../common/pickers/managers';
 import * as pythonPath from '../../common/utils/pythonPath';
 import * as windowApis from '../../common/window.apis';
@@ -172,6 +174,108 @@ suite('Environment Picker Interpreter Path Entry', () => {
         );
         sinon.assert.notCalled(input);
         sinon.assert.notCalled(showError);
+    });
+});
+
+suite('Environment Picker Discovery', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    function createManager(
+        id: string,
+        getEnvironments: sinon.SinonStub,
+    ): InternalEnvironmentManager {
+        return {
+            id,
+            displayName: id,
+            getEnvironments,
+        } as unknown as InternalEnvironmentManager;
+    }
+
+    test('shows known choices immediately and publishes concurrent discovery results in manager order', async () => {
+        const recommended = createMockPythonEnvironment({ envPath: path.join(process.cwd(), 'recommended', 'python') });
+        const environmentA = createMockPythonEnvironment({ envPath: path.join(process.cwd(), 'manager-a', 'python') });
+        const environmentB = createMockPythonEnvironment({ envPath: path.join(process.cwd(), 'manager-b', 'python') });
+        const environmentsA = createDeferred<PythonEnvironment[]>();
+        const environmentsB = createDeferred<PythonEnvironment[]>();
+        const getEnvironmentsA = sinon.stub().returns(environmentsA.promise);
+        const getEnvironmentsB = sinon.stub().returns(environmentsB.promise);
+        const managers = [
+            createManager('manager-a', getEnvironmentsA),
+            createManager('manager-b', getEnvironmentsB),
+        ];
+        const pickerResult = createDeferred<undefined>();
+        const firstUpdate = createDeferred<void>();
+        const updates: (readonly { label: string; result?: PythonEnvironment }[])[] = [];
+        let initialItems: readonly { label: string; result?: PythonEnvironment }[] = [];
+        let loader: Promise<void> | undefined;
+
+        const picker = sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items, options) => {
+            initialItems = items;
+            loader = options?.itemLoader?.((updatedItems) => {
+                updates.push(updatedItems);
+                firstUpdate.resolve();
+            });
+            return pickerResult.promise;
+        });
+
+        const selection = pickEnvironment(managers, [], { projects: [], recommended });
+
+        sinon.assert.calledOnce(picker);
+        assert.ok(initialItems.some((item) => item.label === Interpreter.browsePath));
+        assert.ok(initialItems.some((item) => item.result === recommended));
+        sinon.assert.calledOnceWithExactly(getEnvironmentsA, 'all');
+        sinon.assert.calledOnceWithExactly(getEnvironmentsB, 'all');
+
+        environmentsB.resolve([environmentB]);
+        await firstUpdate.promise;
+
+        assert.ok(updates[0].some((item) => item.result === environmentB));
+        assert.ok(!updates[0].some((item) => item.result === environmentA));
+
+        environmentsA.resolve([environmentA]);
+        await loader;
+
+        const finalLabels = updates[updates.length - 1].map((item) => item.label);
+        assert.ok(finalLabels.indexOf('manager-a') < finalLabels.indexOf('manager-b'));
+        const finalItems = updates[updates.length - 1];
+        assert.ok(finalItems.some((item) => item.result === environmentA));
+        assert.ok(finalItems.some((item) => item.result === environmentB));
+
+        pickerResult.resolve(undefined);
+        assert.strictEqual(await selection, undefined);
+    });
+
+    test('keeps healthy choices selectable when a manager fails', async () => {
+        const error = new Error('discovery failed');
+        const environment = createMockPythonEnvironment({ envPath: path.join(process.cwd(), 'healthy', 'python') });
+        const failedGetEnvironments = sinon.stub().throws(error);
+        const healthyGetEnvironments = sinon.stub().resolves([environment]);
+        const trace = sinon.stub(logging, 'traceError');
+
+        sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (initialItems, options) => {
+            let currentItems = initialItems;
+            await options?.itemLoader?.((updatedItems) => {
+                currentItems = updatedItems;
+            });
+            assert.ok(currentItems.some((item) => item.label === Interpreter.browsePath));
+            return currentItems.find(
+                (item) => (item as { result?: PythonEnvironment }).result === environment,
+            );
+        });
+
+        const selected = await pickEnvironment(
+            [
+                createManager('failed-manager', failedGetEnvironments),
+                createManager('healthy-manager', healthyGetEnvironments),
+            ],
+            [],
+            { projects: [] },
+        );
+
+        assert.strictEqual(selected, environment);
+        sinon.assert.calledOnceWithExactly(trace, 'Failed to get environments from failed-manager', error);
     });
 });
 
