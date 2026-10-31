@@ -1,51 +1,72 @@
-# Copilot Agent Hooks Scripts
+#!/usr/bin/env python3
+"""
+check_api_changes.py - Detects changes to the public API and enforces documentation updates.
 
-This directory contains Python scripts used by agent hooks to automate workflow validation.
+This script is invoked by the pre-commit hook to ensure that any modifications
+to public API files are accompanied by corresponding documentation changes.
+"""
 
-## Scripts
+import subprocess
+import sys
 
-### session_start.py
 
-Runs at session start to inject project context:
+# Files that define the public API surface
+PUBLIC_API_FILES = [
+    "src/extension.ts",
+    "src/api.ts",
+]
 
-- Current git branch and commit
-- Uncommitted changes count
-- Open issues (if gh CLI available)
-- Snapshot health summary (if available)
-- Available skills reminder
+# Documentation files that must be updated when the API changes
+DOCS_FILES = [
+    "README.md",
+    "docs/api.md",
+    "CHANGELOG.md",
+]
 
-### post_tool_use.py
 
-Runs after file edit tools to provide immediate feedback:
+def get_staged_files():
+    """Return list of files staged for the current commit."""
+    result = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return []
+    return [f for f in result.stdout.strip().split("\n") if f]
 
-- Runs ESLint on changed TypeScript files
-- Reports lint errors back to the model
 
-### stop_hook.py
+def has_api_changes(staged_files):
+    """Check whether any public API files are staged."""
+    return any(f in PUBLIC_API_FILES for f in staged_files)
 
-Runs before session ends to enforce workflow:
 
-- Checks for uncommitted TypeScript changes
-- Reminds about pre-commit checks
-- Blocks completion if staged changes aren't committed
+def has_doc_changes(staged_files):
+    """Check whether any documentation files are staged."""
+    return any(f in DOCS_FILES for f in staged_files)
 
-### subagent_stop.py
 
-Runs when subagents complete:
+def main():
+    """Enforce that API changes are documented."""
+    staged_files = get_staged_files()
 
-- Currently a passthrough for logging
-- Can be extended to validate reviewer output
+    if not has_api_changes(staged_files):
+        sys.exit(0)
 
-## Requirements
+    if has_doc_changes(staged_files):
+        print("API changes detected with documentation updates.")
+        sys.exit(0)
 
-These scripts use Python 3.9+ with no external dependencies (beyond what's already in the repo).
+    print("WARNING: Public API changes detected without documentation updates.")
+    print("Modified API files:")
+    for f in PUBLIC_API_FILES:
+        if f in staged_files:
+            print(f"  - {f}")
+    print("Please update one or more of these documentation files:")
+    for f in DOCS_FILES:
+        print(f"  - {f}")
+    sys.exit(1)
 
-They expect:
 
-- `git` CLI available
-- `gh` CLI available (optional, for issue context)
-- `npx` available for running ESLint
-
-## Hook Configuration
-
-See `.github/hooks/maintainer-hooks.json` for the hook configuration that loads these scripts.
+if __name__ == "__main__":
+    main()
