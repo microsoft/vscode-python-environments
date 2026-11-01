@@ -582,4 +582,68 @@ suite('computeDisambiguationSuffixes Tests', () => {
         assert.strictEqual(suffixes.get('user2-project'), 'user2/project');
         assert.notStrictEqual(suffixes.get('user1-project'), suffixes.get('user2-project'));
     });
+    test('Differentiates same-directory interpreters with different casing on Windows drive paths', () => {
+        const env1 = createTestEnv({
+            id: 'c-upper-py',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: 'C:\\Python313\\python.exe',
+        });
+        const env2 = createTestEnv({
+            id: 'c-lower-py3',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: 'c:\\python313\\python3.exe',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('c-upper-py'), 'python.exe');
+        assert.strictEqual(suffixes.get('c-lower-py3'), 'python3.exe');
+    });
+
+    test('Differentiates pre-release and free-threaded versions with suffix tags in displayName', () => {
+        const env1 = createTestEnv({
+            id: 'py313-standard',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'python',
+            displayName: 'python (3.13.0)',
+            execPath: '/usr/bin/python3.13',
+        });
+        const env2 = createTestEnv({
+            id: 'py313-freethreaded',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'python',
+            displayName: 'python (3.13.0t)',
+            execPath: '/usr/bin/python3.13t',
+        });
+
+        const suffixes = computeDisambiguationSuffixes([env1, env2]);
+
+        assert.strictEqual(suffixes.get('py313-standard'), 'python3.13');
+        assert.strictEqual(suffixes.get('py313-freethreaded'), 'python3.13t');
+    });
+
+    test('Guarantees deterministic numbering for duplicate identical-path environments', () => {
+        const env1 = createTestEnv({
+            id: 'dup-env-b',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: '/usr/local/bin/python3',
+        });
+        const env2 = createTestEnv({
+            id: 'dup-env-a',
+            managerId: SYSTEM_MANAGER_ID,
+            name: 'Python 3.13.0',
+            execPath: '/usr/local/bin/python3',
+        });
+
+        const suffixesOrder1 = computeDisambiguationSuffixes([env1, env2]);
+        const suffixesOrder2 = computeDisambiguationSuffixes([env2, env1]);
+
+        assert.strictEqual(suffixesOrder1.get('dup-env-a'), 'usr/local/bin/python3 (1)');
+        assert.strictEqual(suffixesOrder1.get('dup-env-b'), 'usr/local/bin/python3 (2)');
+        assert.strictEqual(suffixesOrder2.get('dup-env-a'), 'usr/local/bin/python3 (1)');
+        assert.strictEqual(suffixesOrder2.get('dup-env-b'), 'usr/local/bin/python3 (2)');
+    });
 });

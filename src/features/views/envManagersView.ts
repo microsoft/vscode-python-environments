@@ -33,8 +33,8 @@ const ENV_STATE_KEYS = [COPIED_STATE, SELECTED_STATE];
  * @example getBaseName('.venv (3.12)') returns '.venv'
  * @example getBaseName('myenv (3.14.1)') returns 'myenv'
  */
-function getBaseName(displayName: string): string {
-    return displayName.replace(/\s*\((?:[0-9.]+|no-python)\)\s*$/, '').trim();
+function getBaseName(displayName: string = ''): string {
+    return (displayName || '').replace(/\s*\((?:[0-9]+[a-zA-Z0-9._+-]*|no-python)\)\s*$/, '').trim();
 }
 
 /**
@@ -50,7 +50,7 @@ function isVirtualEnv(env: PythonEnvironment): boolean {
         return true;
     }
 
-    const envPath = (env.environmentPath.fsPath || '').replace(/\\/g, '/');
+    const envPath = (env.environmentPath?.fsPath || env.execInfo?.run?.executable || '').replace(/\\/g, '/');
     const parts = envPath.split('/').filter((p) => p.length > 0);
 
     let binIndex = -1;
@@ -108,7 +108,7 @@ function isPythonLessEnv(env: PythonEnvironment): boolean {
         return true;
     }
     const exec = (env.execInfo?.run?.executable || '').replace(/\\/g, '/').toLowerCase();
-    if (exec.endsWith('/conda') || exec.endsWith('/conda.exe') || exec.endsWith('/conda.bat')) {
+    if (/(?:^|\/)conda(?:\.exe|\.bat)?$/i.test(exec)) {
         return true;
     }
     return false;
@@ -152,12 +152,13 @@ export function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<st
         const dirMap = new Map<string, PythonEnvironment[]>();
         for (const env of similarEnvs) {
             if (!isVirtualEnv(env) && !isPythonLessEnv(env)) {
-                const execPath = (env.execInfo?.run?.executable || env.environmentPath.fsPath).replace(/\\/g, '/');
+                const execPath = (env.execInfo?.run?.executable || env.environmentPath?.fsPath || '').replace(/\\/g, '/');
                 const parts = execPath.split('/').filter((p) => p.length > 0);
                 const dirPath = parts.slice(0, -1).join('/');
-                const list = dirMap.get(dirPath) ?? [];
+                const dirKey = process.platform === 'win32' ? dirPath.toLowerCase() : dirPath;
+                const list = dirMap.get(dirKey) ?? [];
                 list.push(env);
-                dirMap.set(dirPath, list);
+                dirMap.set(dirKey, list);
             }
         }
 
@@ -213,12 +214,13 @@ export function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<st
                 };
             }
 
-            const execPath = (env.execInfo?.run?.executable || env.environmentPath.fsPath).replace(/\\/g, '/');
+            const execPath = (env.execInfo?.run?.executable || env.environmentPath?.fsPath || '').replace(/\\/g, '/');
             const parts = execPath.split('/').filter((p) => p.length > 0);
             const execName = parts[parts.length - 1] || '';
             const dirParts = parts.slice(0, -1);
             const dirPath = dirParts.join('/');
-            const sameDirEnvs = dirMap.get(dirPath);
+            const dirKey = process.platform === 'win32' ? dirPath.toLowerCase() : dirPath;
+            const sameDirEnvs = dirMap.get(dirKey);
             const isSameDir = sameDirEnvs !== undefined && sameDirEnvs.length > 1;
 
             if (isSameDir) {
@@ -286,8 +288,9 @@ export function computeDisambiguationSuffixes(envs: PythonEnvironment[]): Map<st
             finalCounts.set(item.currentSuffix, (finalCounts.get(item.currentSuffix) ?? 0) + 1);
         }
 
+        const sortedItems = [...items].sort((a, b) => a.env.envId.id.localeCompare(b.env.envId.id));
         const seenCounts = new Map<string, number>();
-        for (const item of items) {
+        for (const item of sortedItems) {
             if ((finalCounts.get(item.currentSuffix) ?? 0) > 1) {
                 const seen = (seenCounts.get(item.currentSuffix) ?? 0) + 1;
                 seenCounts.set(item.currentSuffix, seen);
