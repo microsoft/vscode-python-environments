@@ -206,6 +206,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      * Only mutated by setEnvironment() / setEnvironments() / refreshEnvironment().
      */
     private readonly _activeSelection = new Map<string, PythonEnvironment | undefined>();
+    private _globalSelectionManagerId: string | undefined;
     /**
      * The last explicit selection for each scope, keyed like `_activeSelection`: the manager that stores
      * it, and whether the user made it. Explicit selections are user selections and environments chosen
@@ -1130,16 +1131,25 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     ): 'recorded' | 'cleared' | 'kept' | 'unchanged' {
         if (environment && explicit && manager.id !== INLINE_SCRIPT_MANAGER_ID) {
             this._explicitSelections.set(key, { managerId: manager.id, userSelected });
+            if (key === 'global') {
+                this._globalSelectionManagerId = manager.id;
+            }
             return 'recorded';
         }
         const current = this._explicitSelections.get(key);
         if (!current) {
+            if (key === 'global') {
+                this._globalSelectionManagerId = manager.id;
+            }
             return 'unchanged';
         }
         if (!userSelected && current.userSelected) {
             return 'kept';
         }
         this._explicitSelections.delete(key);
+        if (key === 'global') {
+            this._globalSelectionManagerId = getDefaultEnvManagerSetting(this.pm, undefined);
+        }
         return 'cleared';
     }
 
@@ -1239,8 +1249,15 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             ? this._environmentManagers.get(cachedEnv.envId.managerId)
             : undefined;
 
-        if (context === undefined && cachedManager) {
-            return cachedManager;
+        if (context === undefined) {
+            // A manager may return another manager's fallback environment; route through
+            // the manager that selected it, not the owner of the announced descriptor.
+            const globalManager = this._globalSelectionManagerId
+                ? this._environmentManagers.get(this._globalSelectionManagerId)
+                : cachedManager;
+            if (globalManager) {
+                return globalManager;
+            }
         }
 
         const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
