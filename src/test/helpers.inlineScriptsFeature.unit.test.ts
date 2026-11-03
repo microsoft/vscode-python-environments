@@ -26,12 +26,12 @@ suite('isInlineScriptsFeatureEnabled', () => {
         sinon.restore();
     });
 
-    test('returns false by default (no setting written)', () => {
+    test('returns false when the effective setting value is false', () => {
         configGet.withArgs('inlineScripts.enabled', false).returns(false);
         assert.strictEqual(isInlineScriptsFeatureEnabled(), false);
     });
 
-    test('returns true when the user explicitly enables the setting', () => {
+    test('returns true when the effective setting value is true', () => {
         configGet.withArgs('inlineScripts.enabled', false).returns(true);
         assert.strictEqual(isInlineScriptsFeatureEnabled(), true);
     });

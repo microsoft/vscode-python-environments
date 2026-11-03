@@ -206,10 +206,8 @@ suite('getAllExtraSearchPaths Integration Tests', () => {
 
         test('Legacy paths with untildify support', async () => {
             // Mock → Legacy paths with tilde expansion
-            // Note: getPythonSettingAndUntildify only untildifies strings, not array items
-            // So we return the venvPath with tilde (will be untildified) and venvFolders pre-expanded
             pythonConfig.get.withArgs('venvPath').returns('~/virtualenvs');
-            pythonConfig.get.withArgs('venvFolders').returns(['/home/user/conda/envs']); // Pre-expanded
+            pythonConfig.get.withArgs('venvFolders').returns(['~/conda/envs']);
             envConfig.inspect.withArgs('globalSearchPaths').returns({ globalValue: [] });
             envConfig.inspect.withArgs('workspaceSearchPaths').returns({});
 

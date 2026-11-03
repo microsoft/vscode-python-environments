@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
+import * as fs from 'fs-extra';
 import * as path from 'path';
 import { commands, ConfigurationChangeEvent, Disposable, l10n, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../api';
@@ -11,6 +12,7 @@ import { EventNames } from '../common/telemetry/constants';
 import { sendTelemetryEvent } from '../common/telemetry/sender';
 import { resolveVariables } from '../common/utils/internalVariables';
 import { normalizePath } from '../common/utils/pathUtils';
+import { isWindows } from '../common/utils/platformUtils';
 import { showWarningMessage } from '../common/window.apis';
 import {
     getConfiguration,
@@ -26,6 +28,12 @@ import type {
 } from './projectManager';
 import type { InternalEnvironmentManager } from '../managers/common/registeredManagers';
 import { NativeEnvInfo, NativePythonFinder } from '../managers/common/nativePythonFinder';
+
+/**
+ * The default value of `python.defaultInterpreterPath`. Like the Python extension, treat it as "not
+ * configured" so auto-discovery (which prefers a workspace venv) picks the interpreter.
+ */
+const DEFAULT_INTERPRETER_PATH_SETTING = 'python';
 
 /**
  * Result from the priority chain resolution.
@@ -109,7 +117,11 @@ async function resolvePriorityChainCore(
 
     // PRIORITY 3: User-configured python.defaultInterpreterPath
     const userInterpreterPath = getUserConfiguredSetting<string>('python', 'defaultInterpreterPath', scope);
-    if (userInterpreterPath) {
+    if (userInterpreterPath === DEFAULT_INTERPRETER_PATH_SETTING) {
+        traceVerbose(
+            `${logPrefix} defaultInterpreterPath is the default '${userInterpreterPath}', using auto-discovery`,
+        );
+    } else if (userInterpreterPath) {
         const expandedInterpreterPath = resolveVariables(userInterpreterPath, scope);
         if (expandedInterpreterPath.includes('${')) {
             if (scope) {
@@ -132,38 +144,24 @@ async function resolvePriorityChainCore(
                 );
             }
         } else {
-            const expandedInterpreterPath = resolveVariables(userInterpreterPath, scope);
-            if (expandedInterpreterPath.includes('${')) {
-                traceWarn(
-                    `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' contains unresolved variables, falling back to auto-discovery`,
-                );
-                const error: SettingResolutionError = {
-                    setting: 'defaultInterpreterPath',
-                    kind: 'pathUnresolvedVariables',
-                    configuredValue: userInterpreterPath,
-                };
-                errors.push(error);
-            } else {
-                const resolved = await tryResolveInterpreterPath(
-                    nativeFinder,
-                    api,
-                    expandedInterpreterPath,
-                    envManagers,
-                );
-                if (resolved) {
-                    traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
-                    return { result: resolved, errors };
-                }
-                const error: SettingResolutionError = {
-                    setting: 'defaultInterpreterPath',
-                    kind: 'pathCannotResolve',
-                    configuredValue: userInterpreterPath,
-                };
-                errors.push(error);
-                traceWarn(
-                    `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' unresolvable, falling back to auto-discovery`,
-                );
+            // Resolve relative paths against the workspace folder so the native finder doesn't
+            // resolve them against an unrelated current working directory (which can produce a
+            // malformed, duplicated path such as <workspace>/<workspace-name>/.venv/...).
+            const absoluteInterpreterPath = await toAbsoluteInterpreterPath(expandedInterpreterPath, scope);
+            const resolved = await tryResolveInterpreterPath(nativeFinder, api, absoluteInterpreterPath, envManagers);
+            if (resolved) {
+                traceVerbose(`${logPrefix} Priority 3: Using defaultInterpreterPath: ${userInterpreterPath}`);
+                return { result: resolved, errors };
             }
+            const error: SettingResolutionError = {
+                setting: 'defaultInterpreterPath',
+                kind: 'pathCannotResolve',
+                configuredValue: userInterpreterPath,
+            };
+            errors.push(error);
+            traceWarn(
+                `${logPrefix} defaultInterpreterPath '${userInterpreterPath}' unresolvable, falling back to auto-discovery`,
+            );
         }
     }
 
@@ -278,6 +276,10 @@ async function autoDiscoverEnvironment(
  * @param projectManager - The project manager
  * @param nativeFinder - Native Python finder for path resolution
  * @param api - The Python environment API
+ * @param activationToReadyDurationMs - Time from activation until environment managers were ready, for telemetry
+ * @param globalScopeDeferredRef - Receives whether the global scope was resolved in the background
+ * @param changeEvent - The settings change that triggered a re-run. The global scope is resolved again only when
+ *   a setting it depends on changed, so a user's global selection is kept otherwise.
  */
 export async function applyInitialEnvironmentSelection(
     envManagers: EnvironmentManagers,
@@ -286,6 +288,7 @@ export async function applyInitialEnvironmentSelection(
     api: PythonEnvironmentApi,
     activationToReadyDurationMs?: number,
     globalScopeDeferredRef?: { value: 'deferred' | 'not_deferred' | 'unknown' },
+    changeEvent?: ConfigurationChangeEvent,
 ): Promise<void> {
     const folders = getWorkspaceFolders() ?? [];
     traceInfo(
@@ -325,8 +328,12 @@ export async function applyInitialEnvironmentSelection(
                 hasPersistedSelection: env !== undefined,
             });
 
-            // Cache only — NO settings.json write (shouldPersistSettings = false)
-            await envManagers.setEnvironment(folder.uri, env, false);
+            // Cache only — NO settings.json write (shouldPersistSettings = false). An environment chosen by a
+            // setting is explicit, so it is honored even when it is not owned by the manager that routing picks
+            // for the folder.
+            await envManagers.setEnvironment(folder.uri, env, false, {
+                explicit: isExplicitSelection(result, env),
+            });
 
             if (env) {
                 workspaceFolderResolved = true;
@@ -365,7 +372,9 @@ export async function applyInitialEnvironmentSelection(
             });
 
             // Cache only — NO settings.json write
-            await envManagers.setEnvironments('global', env, false);
+            await envManagers.setEnvironments('global', env, false, {
+                explicit: isExplicitSelection(result, env),
+            });
 
             traceInfo(`[interpreterSelection] global: ${env?.displayName ?? 'none'} (source: ${result.source})`);
 
@@ -376,17 +385,26 @@ export async function applyInitialEnvironmentSelection(
         }
     };
 
-    if (workspaceFolderResolved) {
+    // pythonProjects never applies to the global scope. Resolving it again when only that changed would replace
+    // a user's global selection with the unchanged result of the other settings.
+    const globalSettingsChanged =
+        !changeEvent ||
+        changeEvent.affectsConfiguration('python-envs.defaultEnvManager') ||
+        changeEvent.affectsConfiguration('python.defaultInterpreterPath');
+
+    if (!globalSettingsChanged) {
+        traceVerbose('[interpreterSelection] Settings for the global scope did not change, keeping its environment');
+    } else if (workspaceFolderResolved) {
         // Defer global scope so it doesn't block post-selection startup.
         traceInfo('[interpreterSelection] Workspace env resolved, deferring global scope to background');
         if (globalScopeDeferredRef) {
             globalScopeDeferredRef.value = 'deferred';
         }
         resolveGlobalScope()
-            .then(async (globalErrors) => {
+            .then((globalErrors) => {
                 const liveGlobalErrors = filterLiveSettingErrors(globalErrors, envManagers);
                 if (liveGlobalErrors.length > 0) {
-                    await notifyUserOfSettingErrors(liveGlobalErrors);
+                    notifyUserOfSettingErrorsInBackground(liveGlobalErrors);
                 }
             })
             .catch((err) => traceError(`[interpreterSelection] Background global scope resolution failed: ${err}`));
@@ -403,7 +421,7 @@ export async function applyInitialEnvironmentSelection(
     const liveErrors = filterLiveSettingErrors(allErrors, envManagers);
 
     if (liveErrors.length > 0) {
-        await notifyUserOfSettingErrors(liveErrors);
+        notifyUserOfSettingErrorsInBackground(liveErrors);
     }
 
     // Numeric values must go via the measures argument (properties are dropped).
@@ -463,6 +481,12 @@ function filterLiveSettingErrors(
         }
         return true;
     });
+}
+
+function notifyUserOfSettingErrorsInBackground(errors: SettingResolutionError[]): void {
+    notifyUserOfSettingErrors(errors).catch((err) =>
+        traceError(`[interpreterSelection] Failed to show setting error notification: ${err}`),
+    );
 }
 
 async function notifyUserOfSettingErrors(errors: SettingResolutionError[]): Promise<void> {
@@ -546,6 +570,80 @@ function getProjectSpecificEnvManager(projectManager: PythonProjectManager, scop
 }
 
 /**
+ * Resolve a (variable-expanded) interpreter path to an absolute path.
+ *
+ * A bare command name such as `python3` refers to the interpreter found on `PATH`, as in a terminal.
+ * Other relative paths (e.g. `.venv/bin/python`) are resolved against the workspace folder
+ * identified by the scope, because the native finder would resolve them against its own,
+ * unrelated working directory and can produce malformed paths (including a duplicated
+ * workspace segment). Global relative paths are left unchanged because there is no workspace
+ * context to resolve against.
+ *
+ * @param interpreterPath - The interpreter path after variable substitution.
+ * @param scope - The workspace folder URI, or undefined for global scope.
+ * @returns An absolute interpreter path when possible, otherwise the input unchanged.
+ */
+async function toAbsoluteInterpreterPath(interpreterPath: string, scope: Uri | undefined): Promise<string> {
+    if (path.isAbsolute(interpreterPath)) {
+        return interpreterPath;
+    }
+    if (!/[\\/]/.test(interpreterPath)) {
+        const onPath = await findCommandOnPath(interpreterPath);
+        if (onPath) {
+            return onPath;
+        }
+    }
+    if (!scope) {
+        return interpreterPath;
+    }
+    const workspaceFolder = getWorkspaceFolder(scope);
+    return path.resolve(workspaceFolder?.uri.fsPath ?? scope.fsPath, interpreterPath);
+}
+
+/**
+ * Finds an executable on `PATH` and returns its absolute path.
+ *
+ * On Windows only `.com` and `.exe` files are considered, as when a process is started without a
+ * shell; batch-file shims cannot be launched that way. Unlike `which`, this accepts Windows App
+ * Execution Aliases (the `python.exe` that the Microsoft Store and the Python install manager place
+ * in `WindowsApps`), which exist but cannot be `stat`ed. Relative `PATH` entries are skipped because
+ * they would resolve against the extension host's working directory.
+ */
+async function findCommandOnPath(command: string): Promise<string | undefined> {
+    const extensions = isWindows() ? ['.com', '.exe'] : [''];
+    const names =
+        isWindows() && extensions.some((ext) => command.toLowerCase().endsWith(ext))
+            ? [command]
+            : extensions.map((ext) => command + ext);
+    for (const entry of (process.env.PATH ?? '').split(path.delimiter)) {
+        const dir = entry.replace(/^"(.*)"$/, '$1');
+        if (!dir || !path.isAbsolute(dir)) {
+            continue;
+        }
+        for (const name of names) {
+            const candidate = path.join(dir, name);
+            if (await isCommandFile(candidate)) {
+                return candidate;
+            }
+        }
+    }
+    return undefined;
+}
+
+async function isCommandFile(candidate: string): Promise<boolean> {
+    try {
+        if (isWindows()) {
+            await fs.access(candidate, fs.constants.F_OK);
+            return true;
+        }
+        await fs.access(candidate, fs.constants.X_OK);
+        return (await fs.stat(candidate)).isFile();
+    } catch {
+        return false;
+    }
+}
+
+/**
  * Try to resolve an interpreter path via nativeFinder and return a PriorityChainResult.
  * Returns undefined if resolution fails.
  */
@@ -568,14 +666,15 @@ async function tryResolveInterpreterPath(
             }
 
             if (manager && resolvedEnv) {
-                // Create a wrapper environment that uses the user's specified path
+                // Create a wrapper environment that uses the user's specified path, named like the
+                // resolved environment so the status bar and views show a normal interpreter label.
                 const newEnv: PythonEnvironment = {
                     envId: {
                         id: `defaultInterpreterPath:${interpreterPath}`,
                         managerId: manager.id,
                     },
-                    name: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
-                    displayName: 'defaultInterpreterPath: ' + (resolved.version ?? ''),
+                    name: resolvedEnv.name,
+                    displayName: resolvedEnv.displayName,
                     version: resolved.version ?? '',
                     displayPath: interpreterPath,
                     environmentPath: Uri.file(interpreterPath),
@@ -622,7 +721,26 @@ export function registerInterpreterSettingsChangeListener(
                 '[interpreterSelection] Interpreter settings changed, re-evaluating priority chain for all scopes',
             );
             // Re-run the interpreter selection priority chain to apply new settings immediately
-            await applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api);
+            await applyInitialEnvironmentSelection(
+                envManagers,
+                projectManager,
+                nativeFinder,
+                api,
+                undefined,
+                undefined,
+                e,
+            );
         }
     });
+}
+
+/**
+ * Whether a priority-chain result is an explicit choice. Settings choose explicitly, except that when the manager a
+ * setting names has no environment of its own, the fallback it returns (owned by another manager) is not a choice.
+ */
+function isExplicitSelection(result: PriorityChainResult, env: PythonEnvironment | undefined): boolean {
+    if (result.source === 'autoDiscovery') {
+        return false;
+    }
+    return result.environment !== undefined || env?.envId.managerId === result.manager.id;
 }

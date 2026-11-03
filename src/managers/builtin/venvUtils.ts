@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
     CancellationError,
+    CancellationToken,
     l10n,
     LogOutputChannel,
     ProgressLocation,
@@ -18,7 +19,6 @@ import {
     PythonEnvironmentInfo,
     RemoveEnvironmentOptions,
 } from '../../api';
-import { ENVS_EXTENSION_ID } from '../../common/constants';
 import { Common, VenvManagerStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
 import { getWorkspacePersistentState } from '../../common/persistentState';
@@ -36,20 +36,97 @@ import {
 } from '../../common/window.apis';
 import { getConfiguration } from '../../common/workspace.apis';
 import {
+    PythonToolError,
+    PythonToolOperation,
+    throwIfCancelled,
+    waitForToolRead,
+} from '../../internal/pythonToolSupport';
+import { ProcessTerminationError, ProcessTimeoutError } from '../../common/utils/processRunner';
+import {
     isNativeEnvInfo,
     NativeEnvInfo,
     NativePythonEnvironmentKind,
     NativePythonFinder,
 } from '../common/nativePythonFinder';
 import { getShellActivationCommands, shortenVersionString, sortEnvironments } from '../common/utils';
-import { runPython, runUV, shouldUseUv } from './helpers';
+import { shouldUseUv } from './helpers';
 import { getProjectInstallable, PipPackages, shouldProceedAfterPyprojectValidation } from './pipUtils';
 import { resolveSystemPythonEnvironmentPath } from './utils';
-import { addUvEnvironment, removeUvEnvironment, UV_ENVS_KEY } from './uvEnvironments';
+import { UvEnvironmentManager } from './uvEnvironmentManager';
+import { VENV_GLOBAL_KEY, VENV_WORKSPACE_KEY, VenvEnvironmentManager } from './venvEnvironmentManager';
 import { createStepBasedVenvFlow } from './venvStepBasedFlow';
 
-export const VENV_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:venv:WORKSPACE_SELECTED`;
-export const VENV_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:venv:GLOBAL_SELECTED`;
+export { VENV_GLOBAL_KEY, VENV_WORKSPACE_KEY };
+
+/** Creation command inputs, with execution policy prepared by the shared workflow. */
+export interface EnvironmentCreationOptions {
+    readonly executable: string;
+    readonly environmentPath: string;
+    readonly cwd: string;
+    readonly log: LogOutputChannel | undefined;
+    readonly token?: CancellationToken;
+    readonly timeout: number | undefined;
+    readonly toolExecution: boolean;
+}
+
+/** Command execution and environment tracking backend; selection and ownership belong to the facade. */
+export interface EnvironmentCreationBackend {
+    readonly usesUv: boolean;
+    create(options: EnvironmentCreationOptions): Promise<void>;
+    trackEnvironment?(
+        environmentPath: string,
+        kind?: NativePythonEnvironmentKind,
+        token?: CancellationToken,
+    ): Promise<void>;
+}
+
+export interface EnvironmentLifecycleBackends {
+    readonly venv: VenvEnvironmentManager;
+    readonly uv: UvEnvironmentManager;
+}
+
+export type EnvironmentBackendSelector = (
+    base: PythonEnvironment,
+    root: Uri,
+    token?: CancellationToken,
+) => Promise<EnvironmentCreationBackend>;
+
+const defaultVenvManager = new VenvEnvironmentManager();
+const defaultUvManager = new UvEnvironmentManager();
+const defaultBackends: EnvironmentLifecycleBackends = {
+    venv: defaultVenvManager,
+    uv: defaultUvManager,
+};
+
+/**
+ * Selects the creation backend using the existing uv policy.
+ * @param base Selected base interpreter, including uv tracking identity.
+ * @param root Creation scope used to resolve a workspace-local uv executable.
+ * @param token Cancellation token for backend availability checks.
+ */
+export async function selectEnvironmentBackend(
+    log: LogOutputChannel,
+    base: PythonEnvironment,
+    root: Uri,
+    token?: CancellationToken,
+    venv: EnvironmentCreationBackend = defaultVenvManager,
+    uv: EnvironmentCreationBackend = defaultUvManager,
+): Promise<EnvironmentCreationBackend> {
+    return (await shouldUseUv(log, base.environmentPath.fsPath, root.fsPath, token)) ? uv : venv;
+}
+
+function getBackendForKind(
+    kind: NativePythonEnvironmentKind | undefined,
+    backends: EnvironmentLifecycleBackends = defaultBackends,
+): VenvEnvironmentManager | UvEnvironmentManager | undefined {
+    if (backends.uv.isSupportedKind(kind)) {
+        return backends.uv;
+    }
+    if (backends.venv.isSupportedKind(kind)) {
+        return backends.venv;
+    }
+    return undefined;
+}
 
 /**
  * Result of environment creation operation.
@@ -74,8 +151,8 @@ export interface CreateEnvironmentResult {
     pkgInstallationCancelled?: boolean;
 }
 
-export async function clearVenvCache(): Promise<void> {
-    const keys = [VENV_WORKSPACE_KEY, VENV_GLOBAL_KEY, UV_ENVS_KEY];
+export async function clearVenvCache(backends: EnvironmentLifecycleBackends = defaultBackends): Promise<void> {
+    const keys = [...backends.venv.cacheKeys, ...backends.uv.cacheKeys];
     const state = await getWorkspacePersistentState();
     await state.clear(keys);
 }
@@ -159,7 +236,11 @@ function getName(binPath: string): string {
 /** Controls how {@link getPythonInfo} formats an environment's user-facing name. */
 export type VenvNameStyle = 'default' | 'inlineScript';
 
-async function getPythonInfo(env: NativeEnvInfo, nameStyle: VenvNameStyle = 'default'): Promise<PythonEnvironmentInfo> {
+async function getPythonInfo(
+    env: NativeEnvInfo,
+    nameStyle: VenvNameStyle = 'default',
+    backends: EnvironmentLifecycleBackends = defaultBackends,
+): Promise<PythonEnvironmentInfo> {
     // Handle broken environments that have an error field
     if (env.error) {
         const venvName = env.name ?? (env.prefix ? path.basename(env.prefix) : 'Unknown');
@@ -194,12 +275,7 @@ async function getPythonInfo(env: NativeEnvInfo, nameStyle: VenvNameStyle = 'def
         const isInlineScript = nameStyle === 'inlineScript';
         const name = isInlineScript ? l10n.t('script env ({0})', sv) : `${venvName} (${sv})`;
         const shortDisplayName = isInlineScript ? l10n.t('{0} (script)', sv) : `${sv} (${venvName})`;
-        let description = undefined;
-        if (env.kind === NativePythonEnvironmentKind.venvUv) {
-            description = l10n.t('uv');
-        } else if (env.kind === NativePythonEnvironmentKind.uvWorkspace) {
-            description = l10n.t('uv workspace');
-        }
+        const description = getBackendForKind(env.kind, backends)?.getDescription(env.kind);
 
         const binDir = path.dirname(env.executable);
 
@@ -239,27 +315,23 @@ export async function findVirtualEnvironments(
     log: LogOutputChannel,
     manager: EnvironmentManager,
     uris?: Uri[],
+    backends: EnvironmentLifecycleBackends = defaultBackends,
 ): Promise<PythonEnvironment[]> {
     const collection: PythonEnvironment[] = [];
     const data = await nativeFinder.refresh(hardRefresh, uris);
-    const envs = data
-        .filter((e) => isNativeEnvInfo(e))
-        .map((e) => e as NativeEnvInfo)
-        .filter(
-            (e) =>
-                e.kind === NativePythonEnvironmentKind.venv ||
-                e.kind === NativePythonEnvironmentKind.venvUv ||
-                e.kind === NativePythonEnvironmentKind.uvWorkspace ||
-                e.kind === NativePythonEnvironmentKind.virtualEnv ||
-                e.kind === NativePythonEnvironmentKind.virtualEnvWrapper,
-        );
+    const envs = data.filter((e): e is NativeEnvInfo => isNativeEnvInfo(e));
 
     for (const e of envs) {
+        const backend = getBackendForKind(e.kind, backends);
+        if (!backend || !(await backend.shouldIncludeDiscovered(e))) {
+            continue;
+        }
+
         // Include environments with errors (broken environments) so users can see and diagnose them
         if (e.error) {
             log.warn(`Broken venv environment detected: ${e.error} - ${JSON.stringify(e)}`);
             try {
-                const env = api.createPythonEnvironmentItem(await getPythonInfo(e), manager);
+                const env = api.createPythonEnvironmentItem(await getPythonInfo(e, 'default', backends), manager);
                 collection.push(env);
                 log.info(`Found broken venv environment: ${env.name}`);
             } catch (err) {
@@ -273,14 +345,11 @@ export async function findVirtualEnvironments(
             continue;
         }
 
-        const env = api.createPythonEnvironmentItem(await getPythonInfo(e), manager);
+        const env = api.createPythonEnvironmentItem(await getPythonInfo(e, 'default', backends), manager);
         collection.push(env);
         log.info(`Found venv environment: ${env.name}`);
 
-        // Track UV environments using environmentPath for consistency
-        if (e.kind === NativePythonEnvironmentKind.venvUv || e.kind === NativePythonEnvironmentKind.uvWorkspace) {
-            await addUvEnvironment(env.environmentPath.fsPath);
-        }
+        await backend.trackEnvironment(env.environmentPath.fsPath, e.kind);
     }
     return collection;
 }
@@ -364,6 +433,8 @@ export interface CreateWithProgressOptions {
     readonly progressTitle?: string;
     /** Controls how the created environment's user-facing name is formatted. */
     readonly nameStyle?: VenvNameStyle;
+    readonly operation?: PythonToolOperation;
+    readonly selectBackend?: EnvironmentBackendSelector;
 }
 
 /**
@@ -416,74 +487,126 @@ export async function createWithProgress(
     options?: CreateWithProgressOptions,
 ): Promise<CreateEnvironmentResult | undefined> {
     const pythonPath = getVenvPythonPath(envPath);
-
-    return await withProgress(
-        {
-            location: ProgressLocation.Notification,
-            title:
-                options?.progressTitle ??
-                l10n.t(
-                    'Creating virtual environment named {0} using python version {1}.',
-                    path.basename(envPath),
-                    basePython.version,
-                ),
-        },
-        async () => {
-            const result: CreateEnvironmentResult = {};
-            try {
-                const useUv = await shouldUseUv(log, basePython.environmentPath.fsPath);
-                // env creation
-                const baseExecutable = await getBaseInterpreterForVenv(basePython);
-                if (baseExecutable) {
-                    if (useUv) {
-                        await runUV(
-                            ['venv', '--verbose', '--seed', '--python', baseExecutable, envPath],
-                            venvRoot.fsPath,
-                            log,
-                        );
-                    } else {
-                        await runPython(baseExecutable, ['-m', 'venv', envPath], venvRoot.fsPath, manager.log);
-                    }
-                    if (!(await fsapi.pathExists(pythonPath))) {
-                        throw new Error('no python executable found in virtual environment');
-                    }
-                }
-
-                // handle admin of new env
-                const resolved = await nativeFinder.resolve(pythonPath);
-                const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved, options?.nameStyle), manager);
-
-                if (
-                    trackUvEnvironment &&
-                    useUv &&
-                    (resolved.kind === NativePythonEnvironmentKind.venvUv ||
-                        resolved.kind === NativePythonEnvironmentKind.uvWorkspace)
-                ) {
-                    await addUvEnvironment(env.environmentPath.fsPath);
-                }
-
-                // install packages
-                if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
-                    try {
-                        await api.managePackages(env, {
-                            upgrade: false,
-                            install: packages?.install,
-                            uninstall: packages?.uninstall ?? [],
-                        });
-                    } catch (e) {
-                        // error occurred while installing packages
-                        result.pkgInstallationErr = e instanceof Error ? e.message : String(e);
-                        result.pkgInstallationCancelled = e instanceof CancellationError;
-                    }
-                }
-                result.environment = env;
-            } catch (e) {
-                log.error(`Failed to create virtual environment: ${e}`);
-                result.envCreationErr = `Failed to create virtual environment: ${e}`;
+    const operation = options?.operation;
+    const token = operation?.token;
+    const create = async (): Promise<CreateEnvironmentResult> => {
+        const result: CreateEnvironmentResult = {};
+        try {
+            throwIfCancelled(token);
+            const backend = options?.selectBackend
+                ? await options.selectBackend(basePython, venvRoot, token)
+                : await selectEnvironmentBackend(log, basePython, venvRoot, token);
+            const baseExecutable = await getBaseInterpreterForVenv(basePython);
+            if (operation && !baseExecutable) {
+                throw new Error(l10n.t('Unable to determine the base Python executable.'));
             }
-            return result;
-        },
-    );
+            throwIfCancelled(token);
+            if (baseExecutable) {
+                await backend.create({
+                    executable: baseExecutable,
+                    environmentPath: envPath,
+                    cwd: venvRoot.fsPath,
+                    log: backend.usesUv ? log : manager.log,
+                    token,
+                    timeout: operation ? 300_000 : undefined,
+                    toolExecution: !!operation,
+                });
+                throwIfCancelled(token);
+                if (!(await fsapi.pathExists(pythonPath))) {
+                    throw new Error('no python executable found in virtual environment');
+                }
+            }
+
+            const resolution = nativeFinder.resolve(pythonPath);
+            const resolved = token ? await waitForToolRead(resolution, token) : await resolution;
+            throwIfCancelled(token);
+            const env = api.createPythonEnvironmentItem(await getPythonInfo(resolved, options?.nameStyle), manager);
+            if (operation) {
+                result.environment = env;
+            }
+            if (trackUvEnvironment && backend.usesUv) {
+                await (backend.trackEnvironment
+                    ? backend.trackEnvironment(env.environmentPath.fsPath, resolved.kind, token)
+                    : defaultUvManager.trackEnvironment(env.environmentPath.fsPath, resolved.kind, token));
+            }
+
+            if (packages && (packages.install.length > 0 || packages.uninstall.length > 0)) {
+                try {
+                    throwIfCancelled(token);
+                    const packageOptions = {
+                        upgrade: false,
+                        install: packages.install,
+                        uninstall: packages.uninstall ?? [],
+                    };
+                    if (operation) {
+                        await operation.managePackages(env, { ...packageOptions, runHeadless: true });
+                    } else {
+                        await api.managePackages(env, packageOptions);
+                    }
+                } catch (error) {
+                    if (operation) {
+                        if (error instanceof CancellationError) {
+                            throw error;
+                        }
+                        throw new PythonToolError(
+                            error instanceof PythonToolError
+                                ? error.code
+                                : error instanceof ProcessTerminationError
+                                  ? 'PROCESS_TERMINATION_FAILED'
+                                  : error instanceof ProcessTimeoutError
+                                    ? 'TIMEOUT'
+                                    : 'PACKAGE_INSTALL_FAILED',
+                            l10n.t(
+                                'The environment was created, but installing project dependencies failed: {0}',
+                                error instanceof Error ? error.message : String(error),
+                            ),
+                            env,
+                        );
+                    }
+                    result.pkgInstallationErr = error instanceof Error ? error.message : String(error);
+                    result.pkgInstallationCancelled = error instanceof CancellationError;
+                }
+            }
+            result.environment = env;
+            throwIfCancelled(token);
+        } catch (error) {
+            log.error(`Failed to create virtual environment: ${error}`);
+            if (operation) {
+                if (error instanceof CancellationError || error instanceof PythonToolError) {
+                    throw error;
+                }
+                throw new PythonToolError(
+                    error instanceof ProcessTerminationError
+                        ? 'PROCESS_TERMINATION_FAILED'
+                        : error instanceof ProcessTimeoutError
+                          ? 'TIMEOUT'
+                          : 'CREATION_FAILED',
+                    l10n.t(
+                        'Failed to create virtual environment: {0}',
+                        error instanceof Error ? error.message : String(error),
+                    ),
+                    result.environment,
+                );
+            }
+            result.envCreationErr = `Failed to create virtual environment: ${error}`;
+        }
+        return result;
+    };
+    return operation
+        ? create()
+        : withProgress(
+              {
+                  location: ProgressLocation.Notification,
+                  title:
+                      options?.progressTitle ??
+                      l10n.t(
+                          'Creating virtual environment named {0} using python version {1}.',
+                          path.basename(envPath),
+                          basePython.version,
+                      ),
+              },
+              create,
+          );
 }
 
 export function ensureGlobalEnv(basePythons: PythonEnvironment[], log: LogOutputChannel): PythonEnvironment[] {
@@ -514,6 +637,8 @@ export async function quickCreateVenv(
     baseEnv: PythonEnvironment,
     venvRoot: Uri,
     additionalPackages?: string[],
+    operation?: PythonToolOperation,
+    selectBackend?: EnvironmentBackendSelector,
 ): Promise<CreateEnvironmentResult | undefined> {
     const project = api.getPythonProject(venvRoot);
 
@@ -521,7 +646,10 @@ export async function quickCreateVenv(
     const result = await getProjectInstallable(api, project ? [project] : undefined, {
         deduplicateProjectPackages: true,
         preferredRoot: venvRoot,
+        token: operation?.token,
+        runHeadless: !!operation,
     });
+    throwIfCancelled(operation?.token);
     const installables = result.installables;
     const allPackages = [];
     allPackages.push(...(installables?.flatMap((i) => i.args ?? []) ?? []));
@@ -529,28 +657,70 @@ export async function quickCreateVenv(
         allPackages.push(...additionalPackages);
     }
 
-    const validationError = result.validationError;
-    const shouldProceed = await shouldProceedAfterPyprojectValidation(validationError, allPackages);
+    const validationError = result.validationErrors[0];
+    if (operation && validationError) {
+        throw new PythonToolError(
+            'INVALID_PROJECT',
+            l10n.t(
+                'Fix {0} before installing project dependencies: {1}',
+                validationError.fileUri.fsPath,
+                validationError.message,
+            ),
+        );
+    }
+    const shouldProceed =
+        operation ||
+        (await shouldProceedAfterPyprojectValidation(result.validationErrors, {
+            allPyprojectTomlsSelected: true,
+        }));
     if (!shouldProceed) {
         return undefined;
     }
 
     // Check if .venv already exists
     let venvPath = path.join(venvRoot.fsPath, '.venv');
-    if (await fsapi.pathExists(venvPath)) {
+    throwIfCancelled(operation?.token);
+    const venvExists = await fsapi.pathExists(venvPath);
+    throwIfCancelled(operation?.token);
+    if (venvExists) {
+        if (operation) {
+            throw new PythonToolError(
+                'ENVIRONMENT_EXISTS',
+                l10n.t(
+                    'An environment directory already exists at {0}. Resolve or remove it before creating another environment.',
+                    venvPath,
+                ),
+            );
+        }
         // increment to create a unique name, e.g. .venv-1
         let i = 1;
-        while (await fsapi.pathExists(`${venvPath}-${i}`)) {
+        while (true) {
+            const candidateExists = await fsapi.pathExists(`${venvPath}-${i}`);
+            if (!candidateExists) {
+                break;
+            }
             i++;
         }
         venvPath = `${venvPath}-${i}`;
     }
 
     // createWithProgress handles building CreateEnvironmentResult and adding err msgs
-    return await createWithProgress(nativeFinder, api, log, manager, baseEnv, venvRoot, venvPath, {
-        install: allPackages,
-        uninstall: [],
-    });
+    throwIfCancelled(operation?.token);
+    return await createWithProgress(
+        nativeFinder,
+        api,
+        log,
+        manager,
+        baseEnv,
+        venvRoot,
+        venvPath,
+        {
+            install: allPackages,
+            uninstall: [],
+        },
+        true,
+        { operation, selectBackend },
+    );
 }
 
 export async function createPythonVenv(
@@ -561,8 +731,12 @@ export async function createPythonVenv(
     basePythons: PythonEnvironment[],
     venvRoot: Uri,
     options: { showQuickAndCustomOptions: boolean; additionalPackages?: string[] },
+    selectBackend?: EnvironmentBackendSelector,
 ): Promise<CreateEnvironmentResult | undefined> {
-    return createStepBasedVenvFlow(nativeFinder, api, log, manager, basePythons, venvRoot, options);
+    return createStepBasedVenvFlow(nativeFinder, api, log, manager, basePythons, venvRoot, {
+        ...options,
+        selectBackend,
+    });
 }
 
 export function isDriveRoot(fsPath: string): boolean {
@@ -615,6 +789,7 @@ export async function removeVenv(
     environment: PythonEnvironment,
     log: LogOutputChannel,
     options?: RemoveEnvironmentOptions,
+    backends: EnvironmentLifecycleBackends = defaultBackends,
 ): Promise<boolean> {
     const pythonPath = os.platform() === 'win32' ? 'python.exe' : 'python';
 
@@ -651,7 +826,8 @@ export async function removeVenv(
             async () => {
                 try {
                     await fsapi.remove(envPath);
-                    await removeUvEnvironment(environment.environmentPath.fsPath);
+                    await backends.uv.untrackEnvironment(environment.environmentPath.fsPath);
+                    await backends.venv.untrackEnvironment(environment.environmentPath.fsPath);
                     return true;
                 } catch (e) {
                     log.error(`Failed to remove virtual environment: ${e}`);
@@ -674,16 +850,13 @@ export async function resolveVenvPythonEnvironmentPath(
     manager: EnvironmentManager,
     baseManager: EnvironmentManager,
     nameStyle: VenvNameStyle = 'default',
+    backends: EnvironmentLifecycleBackends = defaultBackends,
 ): Promise<PythonEnvironment | undefined> {
     try {
         const resolved = await nativeFinder.resolve(fsPath);
-
-        if (
-            resolved.kind === NativePythonEnvironmentKind.venv ||
-            resolved.kind === NativePythonEnvironmentKind.venvUv ||
-            resolved.kind === NativePythonEnvironmentKind.uvWorkspace
-        ) {
-            const envInfo = await getPythonInfo(resolved, nameStyle);
+        const backend = getBackendForKind(resolved.kind, backends);
+        if (backend && (await backend.shouldResolve(resolved))) {
+            const envInfo = await getPythonInfo(resolved, nameStyle, backends);
             return api.createPythonEnvironmentItem(envInfo, manager);
         }
     } catch (ex) {

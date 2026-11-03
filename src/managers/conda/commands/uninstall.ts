@@ -22,6 +22,12 @@ export class CondaUninstallCommand extends UninstallCommand {
     }
 
     async execute(executeArgs: UninstallExecuteArgs): Promise<void> {
-        await runCondaExecutable(this.buildCommand(executeArgs), this.log, executeArgs.cancellationToken);
+        await runCondaExecutable(
+            this.buildCommand(executeArgs),
+            this.log,
+            executeArgs.cancellationToken,
+            executeArgs.toolExecution ? 300_000 : undefined,
+            executeArgs.toolExecution,
+        );
     }
 }

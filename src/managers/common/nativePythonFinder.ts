@@ -1544,6 +1544,9 @@ function getPythonSettingAndUntildify<T>(name: string, scope?: Uri): T | undefin
     if (typeof value === 'string') {
         return value ? (untildify(value as string) as unknown as T) : undefined;
     }
+    if (Array.isArray(value)) {
+        return untildifyArray(value) as unknown as T;
+    }
     return value;
 }
 

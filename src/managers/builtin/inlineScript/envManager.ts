@@ -5,6 +5,8 @@ import type { Stats } from 'fs';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import {
+    CancellationError,
+    CancellationToken,
     Disposable,
     Event,
     EventEmitter,
@@ -32,12 +34,8 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../../api';
-import {
-    CONDA_MANAGER_ID,
-    INLINE_SCRIPT_MANAGER_ID,
-    PYENV_MANAGER_ID,
-    SYSTEM_MANAGER_ID,
-} from '../../../common/constants';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../../capabilities';
+import { CONDA_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID, PYENV_MANAGER_ID, SYSTEM_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../../common/constants';
 import { getErrorMessage } from '../../../common/errors/utils';
 import { computeCacheKey, normalizeDependency } from '../../../common/inlineScript/cacheKey';
 import { InlineScriptEnvironmentModifiedError } from '../../../common/inlineScript/errors';
@@ -62,7 +60,7 @@ import {
     selectStaleEntries,
     writeMetaJson,
 } from '../../../common/inlineScript/cacheLayout';
-import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
+import { pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
 import { InlineScriptMetadata, readInlineScriptMetadataFromFile } from '../../../common/inlineScript/metadata';
 import {
     getInlineScriptMetadataRoutingIdentity,
@@ -85,15 +83,23 @@ import { createDeferred, Deferred } from '../../../common/utils/deferred';
 import { isFileNotFoundError } from '../../../common/utils/filesystem';
 import { isSameOrParentPath, normalizePath } from '../../../common/utils/pathUtils';
 import { PythonVersion } from '../../../common/pythonVersion';
-import { PythonVersionSpecifier, splitClause } from '../../../common/pythonVersionSpecifier';
+import { PythonVersionSpecifier } from '../../../common/pythonVersionSpecifier';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
 import { getOpenTextDocuments, onDidDeleteFiles, onDidRenameFiles } from '../../../common/workspace.apis';
 import { NativePythonFinder } from '../../common/nativePythonFinder';
 import { sortEnvironments } from '../../common/utils';
 import { resolveSystemPythonEnvironmentPath } from '../utils';
-import * as uvPythonInstaller from '../uvPythonInstaller';
+import { promptInstallPythonDetailed } from '../pythonInstaller';
 import { createWithProgress, hasMinimumPathDepth, isDriveRoot, resolveVenvPythonEnvironmentPath } from '../venvUtils';
 import { InlineAssociationAccessor, InlineScriptAssociationStore } from './associationStore';
+import {
+    EnvironmentToolSupport,
+    PythonToolError,
+    PythonToolOperation,
+    pythonToolSupport,
+    throwIfCancelled,
+    waitForToolRead,
+} from '../../../internal/pythonToolSupport';
 
 const BASE_INTERPRETER_MANAGER_IDS = new Set([SYSTEM_MANAGER_ID, CONDA_MANAGER_ID, PYENV_MANAGER_ID]);
 
@@ -161,6 +167,9 @@ interface BuildCacheEntryResult {
 interface BaseInterpreterSelectionResult {
     readonly selectedBase?: SelectedBaseInterpreter;
     readonly errorCategory?: InlineScriptEnvErrorCategory;
+    readonly cancelled?: boolean;
+    readonly message?: string;
+    readonly alreadyReported?: boolean;
 }
 
 interface SelectBaseInterpreterResult {
@@ -171,7 +180,13 @@ interface SelectBaseInterpreterResult {
 type InstallPythonAndRefreshResult =
     | { readonly kind: 'installed'; readonly installedPath: string }
     | { readonly kind: 'declined' }
-    | { readonly kind: 'failed' };
+    | { readonly kind: 'cancelled'; readonly message?: string }
+    | {
+          readonly kind: 'failed';
+          readonly category: InlineScriptEnvErrorCategory;
+          readonly message?: string;
+          readonly alreadyReported?: boolean;
+      };
 
 interface DiscoveryRefreshPass {
     readonly promise: Promise<boolean>;
@@ -179,6 +194,7 @@ interface DiscoveryRefreshPass {
 }
 
 interface PendingCreationContext {
+    operation?: PythonToolOperation;
     promise: Promise<PythonEnvironment | undefined>;
     sourceMetadataIdentityHashes?: readonly string[];
     hasStartedRecordingSourceMetadataIdentityHashes: boolean;
@@ -280,6 +296,30 @@ interface SavedMetadataSnapshot {
 
 /** Manages extension-owned PEP 723 script environments. */
 export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        [EnvironmentCapability.List]: supportedCapability,
+        [EnvironmentCapability.Resolve]: async () => ({
+            supported: false,
+            reason: l10n.t('Inline-script environments do not support resolving interpreter or environment URIs.'),
+        }),
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
+        [EnvironmentCapability.Remove]: supportedCapability,
+        [EnvironmentCapability.Create]: async ({ scope }) => {
+            const scriptUri = scope !== undefined && scope !== 'all' ? this.getScriptUri(scope) : undefined;
+            if (!scriptUri) {
+                return {
+                    supported: false,
+                    reason: l10n.t('Inline-script creation requires exactly one local file URI.'),
+                };
+            }
+            // Read the bounded header afresh so saved metadata edits affect the next query.
+            return (await readInlineScriptMetadataFromFile(scriptUri))
+                ? { supported: true }
+                : { supported: false, reason: l10n.t('The script must contain valid PEP 723 metadata.') };
+        },
+    };
+
     private readonly pendingSetups = new Map<string, Promise<PythonEnvironment | undefined>>();
     private readonly pendingCreations = new Map<string, PendingCreationContext>();
     private readonly directlyResolvedBaseInterpreters = new Map<string, PythonEnvironment>();
@@ -326,13 +366,43 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     public readonly name = 'inline-script';
     public readonly displayName = l10n.t('Inline scripts');
-    public readonly preferredPackageManagerId = 'ms-python.python:pip';
+    public readonly preferredPackageManagerId = DEFAULT_PACKAGE_MANAGER_ID;
     public readonly description: string | undefined = undefined;
     public readonly tooltip: string | MarkdownString = new MarkdownString(
         l10n.t('Environments built from PEP 723 inline script metadata.'),
         true,
     );
     public readonly iconPath: IconPath = new ThemeIcon('file-code');
+    readonly [pythonToolSupport]: EnvironmentToolSupport = {
+        initialize: async () => {},
+        canConfigure: async (scope) => {
+            const script = this.getScriptUri(scope);
+            if (!script) {
+                return false;
+            }
+            try {
+                return !!(await readInlineScriptMetadataFromFile(script, true));
+            } catch (error) {
+                throw new PythonToolError('INVALID_PROJECT', getErrorMessage(error));
+            }
+        },
+        get: (scope) => this.get(scope),
+        getEnvironments: (scope) => this.getEnvironments(scope),
+        resolve: (scope) => this.resolve(scope),
+        create: async (scope, operation) => {
+            const environment = await this.create(scope, { quickCreate: true }, operation);
+            if (!environment) {
+                throw new PythonToolError(
+                    'CREATION_FAILED',
+                    l10n.t(
+                        'Inline-script setup could not produce a usable environment. Check its PEP 723 metadata and the Python Environments output.',
+                    ),
+                );
+            }
+            return environment;
+        },
+        set: (scope, environment, token) => this.set(scope, environment, token),
+    };
 
     constructor(
         private readonly nativeFinder: NativePythonFinder,
@@ -374,11 +444,14 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     async create(
         scope: CreateEnvironmentScope,
         options?: CreateEnvironmentOptions,
+        operation?: PythonToolOperation,
     ): Promise<PythonEnvironment | undefined> {
+        throwIfCancelled(operation?.token);
         this.activeCreateOperations += 1;
         try {
             return await this.waitForCacheMaintenance(async () => {
                 try {
+                    throwIfCancelled(operation?.token);
                     const scriptUri = this.getScriptUri(scope);
                     if (!scriptUri) {
                         this.log.warn('Inline-script environment creation requires exactly one local file URI.');
@@ -388,6 +461,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
                     const metadata = await readInlineScriptMetadataFromFile(scriptUri);
                     if (!metadata) {
+                        if (operation) {
+                            throw new PythonToolError(
+                                'INVALID_PROJECT',
+                                l10n.t('No valid PEP 723 metadata was found in {0}.', scriptUri.fsPath),
+                            );
+                        }
                         this.log.warn(`No valid PEP 723 metadata found in ${scriptUri.fsPath}.`);
                         return undefined;
                     }
@@ -402,13 +481,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                         return undefined;
                     }
 
-                    const setupKey = this.getPendingSetupKey(scriptUri, metadata, packages, options);
+                    const setupKey = `${operation ? 'tool:' : ''}${this.getPendingSetupKey(scriptUri, metadata, packages, options)}`;
                     const pending = this.pendingSetups.get(setupKey);
                     if (pending) {
-                        return await pending;
+                        return operation
+                            ? await waitForToolRead(pending, operation.token, CACHE_LOCK_TIMEOUT_MS)
+                            : await pending;
                     }
 
-                    const setup = this.createForScript(scriptUri, metadata, packages, options);
+                    const setup = this.createForScript(scriptUri, metadata, packages, options, operation);
                     this.pendingSetups.set(setupKey, setup);
                     try {
                         return await setup;
@@ -420,6 +501,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 } catch (error) {
                     this.sendInlineScriptEnvErrorTelemetry('setup-failure');
                     this.log.error(`Failed to set up inline-script environment: ${getErrorMessage(error)}`);
+                    if (operation) {
+                        throw error;
+                    }
                     return undefined;
                 }
             });
@@ -433,9 +517,22 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         metadata: InlineScriptMetadata,
         packages: readonly string[],
         options?: CreateEnvironmentOptions,
+        operation?: PythonToolOperation,
     ): Promise<PythonEnvironment | undefined> {
-        const baseSelection = await this.selectOrInstallBaseInterpreter(metadata, options?.quickCreate === true);
+        throwIfCancelled(operation?.token);
+        const baseSelection = await this.selectOrInstallBaseInterpreter(
+            metadata,
+            options?.quickCreate === true,
+            operation,
+        );
         if (!baseSelection.selectedBase) {
+            if (baseSelection.cancelled) {
+                this.routingRegistry.noteSetupOutcome(scriptUri, {
+                    kind: 'cancelled',
+                    ...(baseSelection.message ? { message: baseSelection.message } : {}),
+                });
+                return undefined;
+            }
             if (baseSelection.errorCategory) {
                 this.sendInlineScriptEnvErrorTelemetry(baseSelection.errorCategory);
             }
@@ -443,10 +540,22 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 kind: 'failed',
                 category: baseSelection.errorCategory ?? 'setup-failure',
                 requiresPython: metadata.requiresPython,
+                ...(baseSelection.message ? { message: baseSelection.message } : {}),
+                ...(baseSelection.alreadyReported ? { alreadyReported: true } : {}),
             });
             this.log.warn(
                 `No compatible Python is available for inline-script environment creation: ${scriptUri.fsPath}.`,
             );
+            if (operation) {
+                throw new PythonToolError(
+                    'MISSING_PYTHON',
+                    l10n.t(
+                        'Install a Python interpreter compatible with requires-python {0} before setting up {1}.',
+                        metadata.requiresPython ?? '3',
+                        scriptUri.fsPath,
+                    ),
+                );
+            }
             return undefined;
         }
         const selectedBase = baseSelection.selectedBase;
@@ -459,10 +568,18 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const sourceMetadataIdentityHash = metadataIdentity ? hashSourceMetadataIdentity(metadataIdentity) : undefined;
         const pending = this.pendingCreations.get(cacheKey);
         if (pending) {
+            if (operation && !pending.operation) {
+                throw new PythonToolError(
+                    'ENVIRONMENT_BUSY',
+                    l10n.t('A human-initiated setup is using this inline-script environment. Retry when it finishes.'),
+                );
+            }
             const joinedAfterPendingCreationStartedRecordingSourceMetadataIdentityHashes =
                 pending.hasStartedRecordingSourceMetadataIdentityHashes;
             this.addPendingCreationSourceMetadataIdentityHash(pending, sourceMetadataIdentityHash);
-            const environment = await pending.promise;
+            const environment = operation
+                ? await waitForToolRead(pending.promise, operation.token, CACHE_LOCK_TIMEOUT_MS)
+                : await pending.promise;
             if (!environment) {
                 this.notePendingCreationFailure(scriptUri, metadata, pending);
             }
@@ -475,6 +592,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             );
         }
         const pendingCreation: PendingCreationContext = {
+            operation,
             promise: Promise.resolve(undefined),
             sourceMetadataIdentityHashes: mergeSourceMetadataIdentityHashes(undefined, sourceMetadataIdentityHash),
             hasStartedRecordingSourceMetadataIdentityHashes: false,
@@ -551,8 +669,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private async selectOrInstallBaseInterpreter(
         metadata: InlineScriptMetadata,
         quickCreate: boolean,
+        operation?: PythonToolOperation,
     ): Promise<BaseInterpreterSelectionResult> {
-        const selection = await this.selectBaseInterpreter(metadata);
+        const selection = await this.selectBaseInterpreter(metadata, operation);
         if (selection.selectedBase) {
             return { selectedBase: selection.selectedBase };
         }
@@ -618,8 +737,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return [];
     }
 
-    async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
-        return this.waitForCacheMaintenance(() => this.enqueueSelection(() => this.setInternal(scope, environment)));
+    async set(scope: SetEnvironmentScope, environment?: PythonEnvironment, token?: CancellationToken): Promise<void> {
+        throwIfCancelled(token);
+        return this.waitForCacheMaintenance(() =>
+            this.enqueueSelection(() => this.setInternal(scope, environment, token)),
+        );
     }
 
     async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
@@ -1074,7 +1196,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return uri?.scheme === 'file' ? uri : undefined;
     }
 
-    private async setInternal(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
+    private async setInternal(
+        scope: SetEnvironmentScope,
+        environment?: PythonEnvironment,
+        token?: CancellationToken,
+    ): Promise<void> {
+        throwIfCancelled(token);
         const scripts = this.getScriptUris(scope);
         if (scripts.length === 0) {
             return;
@@ -1139,6 +1266,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         try {
+            throwIfCancelled(token);
             const persistenceUpdates = updates.filter((update) => update.needsPersistence);
             if (persistenceUpdates.length > 0) {
                 await this.updatePersistedAssociations(
@@ -2280,7 +2408,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             this.clearValidatedRouteableState(uri);
             return;
         }
-        this.routingRegistry.setValidatedAssociation(uri, true);
+        this.routingRegistry.setValidatedAssociation(uri, true, environment.version);
     }
 
     private async updateValidatedStateForSelection(script: ScriptReference): Promise<void> {
@@ -2315,6 +2443,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         this.routingRegistry.setValidatedAssociation(
             script.uri,
             this.routingRegistry.getMetadataIdentity(script.uri) === savedMetadata.identity,
+            environment.version,
         );
     }
 
@@ -3242,12 +3371,20 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         );
     }
 
-    private async selectBaseInterpreter(metadata: InlineScriptMetadata): Promise<SelectBaseInterpreterResult> {
+    private async selectBaseInterpreter(
+        metadata: InlineScriptMetadata,
+        operation?: PythonToolOperation,
+    ): Promise<SelectBaseInterpreterResult> {
         let globalEnvironments: readonly PythonEnvironment[] = [];
         let discoveryFailed = false;
         try {
-            globalEnvironments = await this.api.getEnvironments('global');
+            globalEnvironments = operation
+                ? await operation.getGlobalEnvironments()
+                : await this.api.getEnvironments('global');
         } catch (error) {
+            if (operation) {
+                throw error;
+            }
             discoveryFailed = true;
             this.log.warn(`Unable to query discovered base interpreters: ${getErrorMessage(error)}`);
         }
@@ -3339,21 +3476,16 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
 
         const requiresPython = metadata.requiresPython?.trim() || undefined;
-        const lowerBound = extractLowerBoundVersion(requiresPython);
-        const versionSelection = await this.selectInstallablePythonVersion(requiresPython, lowerBound);
-        if (requiresPython && !versionSelection.version) {
-            this.log.warn(
-                'Cannot install a Python for this inline script because no compatible install version could be selected.',
-            );
-            return {
-                errorCategory: versionSelection.errorCategory ?? 'no-compatible-python',
-            };
-        }
-
-        const installResult = await this.installPythonAndRefresh(requiresPython, versionSelection.version);
+        const installResult = await this.installPythonAndRefresh(requiresPython);
         if (installResult.kind !== 'installed') {
+            if (installResult.kind === 'cancelled') {
+                return { cancelled: true, message: installResult.message };
+            }
             return {
-                errorCategory: installResult.kind === 'declined' ? 'compatible-python-declined' : 'install-failure',
+                errorCategory: installResult.kind === 'declined' ? 'compatible-python-declined' : installResult.category,
+                ...(installResult.kind === 'failed'
+                    ? { message: installResult.message, alreadyReported: installResult.alreadyReported }
+                    : {}),
             };
         }
         const installedPath = installResult.installedPath;
@@ -3400,68 +3532,6 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return { selectedBase: selected };
     }
 
-    private async selectInstallablePythonVersion(
-        requiresPython: string | undefined,
-        lowerBound: string | undefined,
-    ): Promise<{ readonly version?: string; readonly errorCategory?: InlineScriptEnvErrorCategory }> {
-        if (!requiresPython) {
-            return { version: lowerBound };
-        }
-        const prereleaseLowerBound = this.extractPrereleaseLowerBound(requiresPython);
-        if (prereleaseLowerBound) {
-            return { version: prereleaseLowerBound };
-        }
-        const lowerBoundRelease = PythonVersion.tryParse(lowerBound);
-        let needsCompleteCatalog = false;
-        if (lowerBound && lowerBoundRelease?.major === 3) {
-            if (/^>=\s*[^,]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
-                return { version: lowerBound };
-            }
-            // PEP 440 `==3.13` is exact, while uv treats `3.13` as a broad minor selector.
-            if (/^==\s*[^,*]+$/.test(requiresPython) && this.matchesInstallConstraint(requiresPython, lowerBound)) {
-                if (lowerBoundRelease.precision >= 3) {
-                    return { version: lowerBound };
-                }
-                needsCompleteCatalog = true;
-            }
-        }
-
-        let available: uvPythonInstaller.UvPythonVersion[];
-        try {
-            const uvLookupResult = await uvPythonInstaller.ensureUvForInlineScriptVersionLookupDetailed(
-                requiresPython,
-                this.log,
-            );
-            if (uvLookupResult !== 'available') {
-                return {
-                    errorCategory: uvLookupResult === 'declined' ? 'compatible-python-declined' : 'install-failure',
-                };
-            }
-            available = needsCompleteCatalog
-                ? await uvPythonInstaller.getAvailablePythonVersions({ allVersions: true })
-                : await uvPythonInstaller.getAvailablePythonVersions();
-        } catch (error) {
-            this.log.warn(`Unable to query Python versions available from uv: ${getErrorMessage(error)}`);
-            return { errorCategory: 'install-failure' };
-        }
-        if (available.length === 0) {
-            return { errorCategory: 'install-failure' };
-        }
-        const version = available
-            .flatMap((candidate) => {
-                const parsed = PythonVersion.tryParse(candidate.version);
-                return parsed &&
-                    candidate.implementation === 'cpython' &&
-                    candidate.variant === 'default' &&
-                    candidate.version_parts.major === 3 &&
-                    this.matchesInstallConstraint(requiresPython, candidate.version)
-                    ? [{ parsed, raw: candidate.version }]
-                    : [];
-            })
-            .sort((left, right) => right.parsed.compareTo(left.parsed))[0]?.raw;
-        return version ? { version } : { errorCategory: 'no-compatible-python' };
-    }
-
     private matchesInstallConstraint(requiresPython: string, version: string): boolean {
         const candidate = PythonVersion.tryParse(version);
         const specifier = PythonVersionSpecifier.tryParse(requiresPython);
@@ -3472,42 +3542,34 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         return specifier.matches(candidate);
     }
 
-    private extractPrereleaseLowerBound(requiresPython: string): string | undefined {
-        return requiresPython
-            .split(',')
-            .map((clause) => splitClause(clause))
-            .filter(
-                (clause) =>
-                    clause && (clause.operator === '>=' || clause.operator === '==' || clause.operator === '~='),
-            )
-            .map((clause) => PythonVersion.tryParse(clause?.literal))
-            .find((version): version is PythonVersion => !!version && version.releaseLevel !== 'final')
-            ?.toString();
-    }
-
     private async installPythonAndRefresh(
         requiresPython: string | undefined,
-        version: string | undefined,
     ): Promise<InstallPythonAndRefreshResult> {
-        let promptResult: uvPythonInstaller.PromptInstallPythonViaUvResult;
+        let installedPath: string;
         try {
-            promptResult = await uvPythonInstaller.promptInstallPythonViaUvDetailed('inlineScript', this.log, {
-                requiresPython,
-                version,
-            });
+            const promptResult = await promptInstallPythonDetailed('inlineScript', this.log, { requiresPython });
             if (promptResult.kind === 'declined') {
                 this.log.warn(
                     'Python installation for inline-script environment creation was declined or did not complete.',
                 );
                 return { kind: 'declined' };
             }
+            if (promptResult.kind === 'cancelled') {
+                return { kind: 'cancelled', message: promptResult.message };
+            }
             if (promptResult.kind === 'failed') {
                 this.log.error('Failed to install Python for an inline script.');
-                return { kind: 'failed' };
+                return {
+                    kind: 'failed',
+                    category: promptResult.reason === 'no-compatible-python' ? 'no-compatible-python' : 'install-failure',
+                    message: promptResult.message,
+                    alreadyReported: promptResult.alreadyReported,
+                };
             }
+            installedPath = promptResult.pythonPath;
         } catch (error) {
             this.log.error(`Failed to install Python for an inline script: ${getErrorMessage(error)}`);
-            return { kind: 'failed' };
+            return { kind: 'failed', category: 'install-failure' };
         }
 
         try {
@@ -3517,7 +3579,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 `Python was installed for an inline script, but environment discovery could not be refreshed: ${getErrorMessage(error)}`,
             );
         }
-        return { kind: 'installed', installedPath: promptResult.pythonPath };
+        return { kind: 'installed', installedPath };
     }
 
     /**
@@ -3530,10 +3592,17 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         envDir: Uri,
         action: (lock: AcquiredFileLock) => Promise<T>,
         timeoutMs = CACHE_LOCK_TIMEOUT_MS,
+        token?: CancellationToken,
     ): Promise<T> {
-        const lock = await this.acquireCacheEntryLock(envDir.fsPath, timeoutMs);
+        const lock = await this.acquireCacheEntryLock(envDir.fsPath, timeoutMs, token);
         try {
+            throwIfCancelled(token);
             return await action(lock);
+        } catch (error) {
+            if (error instanceof PythonToolError && error.code === 'PROCESS_TERMINATION_FAILED') {
+                await lock.retain();
+            }
+            throw error;
         } finally {
             try {
                 await lock.release();
@@ -3547,7 +3616,12 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
      * Reclaims a lock whose owning process is gone. Doing this *before* waiting is the point:
      * otherwise every later setup for the same cache key blocks for the whole timeout, then fails.
      */
-    private async acquireCacheEntryLock(envDirPath: string, timeoutMs: number): Promise<AcquiredFileLock> {
+    private async acquireCacheEntryLock(
+        envDirPath: string,
+        timeoutMs: number,
+        token?: CancellationToken,
+    ): Promise<AcquiredFileLock> {
+        throwIfCancelled(token);
         try {
             if ((await inspectFileLock(envDirPath)) === 'stale' && (await reclaimFileLock(envDirPath))) {
                 this.log.info(
@@ -3564,7 +3638,11 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 code: 'ELOCKED',
             });
         }
-        return acquireFileLock(envDirPath, { timeoutMs, retryIntervalMs: CACHE_LOCK_RETRY_MS });
+        return acquireFileLock(envDirPath, {
+            timeoutMs,
+            retryIntervalMs: CACHE_LOCK_RETRY_MS,
+            ...(token ? { checkCancellation: () => throwIfCancelled(token) } : {}),
+        });
     }
 
     private mergePendingCreationSourceMetadataIdentityHashes(
@@ -3627,58 +3705,77 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         const envDir = getScriptEnvDir(this.globalStorageUri, cacheKey);
 
         try {
+            throwIfCancelled(pendingCreation.operation?.token);
             await fs.ensureDir(cacheRoot.fsPath);
-            return await this.withCacheEntryLock(envDir, async () => {
-                const cached = await this.inspectCacheEntry(cacheRoot, envDir, metadata, selectedBase, pendingCreation);
-                if (cached.kind === 'reusable') {
-                    this.sendInlineScriptEnvReuseHitTelemetry(dependencyCount);
-                    return cached.environment;
-                }
-                if (cached.kind === 'uncertain') {
-                    this.log.warn(
-                        `Preserving an inline-script cache entry that could not be safely inspected: ${envDir.fsPath}`,
+            return await this.withCacheEntryLock(
+                envDir,
+                async () => {
+                    const cached = await this.inspectCacheEntry(
+                        cacheRoot,
+                        envDir,
+                        metadata,
+                        selectedBase,
+                        pendingCreation,
                     );
-                    pendingCreation.failure = { category: 'setup-failure' };
-                    this.sendInlineScriptEnvErrorTelemetry('setup-failure');
-                    return undefined;
-                }
-                if (cached.kind === 'stale') {
-                    if (!(await this.discardCacheEntry(envDir))) {
-                        // The sidecar is gone, so the entry is inert; a later attempt retries the
-                        // deletion once the files are released.
+                    throwIfCancelled(pendingCreation.operation?.token);
+                    if (cached.kind === 'reusable') {
+                        this.sendInlineScriptEnvReuseHitTelemetry(dependencyCount);
+                        return cached.environment;
+                    }
+                    if (cached.kind === 'uncertain') {
+                        this.log.warn(
+                            `Preserving an inline-script cache entry that could not be safely inspected: ${envDir.fsPath}`,
+                        );
                         pendingCreation.failure = { category: 'setup-failure' };
                         this.sendInlineScriptEnvErrorTelemetry('setup-failure');
                         return undefined;
                     }
-                }
+                    if (cached.kind === 'stale') {
+                        if (!(await this.discardCacheEntry(envDir))) {
+                            // The sidecar is gone, so the entry is inert; a later attempt retries the
+                            // deletion once the files are released.
+                            pendingCreation.failure = { category: 'setup-failure' };
+                            this.sendInlineScriptEnvErrorTelemetry('setup-failure');
+                            return undefined;
+                        }
+                    }
 
-                const buildStartAtMs = Date.now();
-                const build = await this.buildCacheEntry(
-                    envDir,
-                    cacheRoot,
-                    packages,
-                    selectedBase,
-                    pendingCreation,
-                    scriptUri,
-                );
-                if (build.environment) {
-                    this.sendInlineScriptEnvCreatedTelemetry(buildStartAtMs, dependencyCount);
-                    return build.environment;
-                }
-                if (build.errorCategory) {
-                    pendingCreation.failure = {
-                        category: build.errorCategory,
-                        ...(build.errorCategory === 'package-install-cancelled' ? { cancelled: true } : {}),
-                    };
-                    this.sendInlineScriptEnvErrorTelemetry(build.errorCategory);
-                }
-                return undefined;
-            });
+                    const buildStartAtMs = Date.now();
+                    const build = await this.buildCacheEntry(
+                        envDir,
+                        cacheRoot,
+                        packages,
+                        selectedBase,
+                        pendingCreation,
+                        scriptUri,
+                    );
+                    if (build.environment) {
+                        this.sendInlineScriptEnvCreatedTelemetry(buildStartAtMs, dependencyCount);
+                        return build.environment;
+                    }
+                    if (build.errorCategory) {
+                        pendingCreation.failure = {
+                            category: build.errorCategory,
+                            ...(build.errorCategory === 'package-install-cancelled' ? { cancelled: true } : {}),
+                        };
+                        this.sendInlineScriptEnvErrorTelemetry(build.errorCategory);
+                    }
+                    return undefined;
+                },
+                CACHE_LOCK_TIMEOUT_MS,
+                pendingCreation.operation?.token,
+            );
         } catch (error) {
+            if (pendingCreation.operation && (error instanceof CancellationError || error instanceof PythonToolError)) {
+                throw error;
+            }
             const category = this.getCreateOrReuseErrorCategory(error);
             pendingCreation.failure = { category };
             this.sendInlineScriptEnvErrorTelemetry(category);
             this.log.error(`Failed to create or reuse inline-script cache entry: ${getErrorMessage(error)}`);
+            if (pendingCreation.operation) {
+                throw new PythonToolError('CREATION_FAILED', getErrorMessage(error));
+            }
             return undefined;
         }
     }
@@ -3780,6 +3877,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         }
         const stampedAt = Date.now();
         try {
+            throwIfCancelled(pendingCreation.operation?.token);
             pendingCreation.hasStartedRecordingSourceMetadataIdentityHashes = true;
             const sourceMetadataIdentityHashes = this.mergePendingCreationSourceMetadataIdentityHashes(
                 sidecar.sourceMetadataIdentityHashes,
@@ -3848,11 +3946,27 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
                 {
                     progressTitle: l10n.t('Setting up environment for {0}', path.basename(scriptUri.fsPath)),
                     nameStyle: 'inlineScript',
+                    operation: pendingCreation.operation,
                 },
             );
         } catch (error) {
             this.log.error(`Failed to build inline-script environment: ${getErrorMessage(error)}`);
+            if (error instanceof PythonToolError && error.code === 'PROCESS_TERMINATION_FAILED') {
+                throw error;
+            }
             await this.removeCacheEntry(envDir);
+            if (pendingCreation.operation) {
+                if (error instanceof CancellationError) {
+                    throw error;
+                }
+                throw new PythonToolError(
+                    error instanceof PythonToolError ? error.code : 'CREATION_FAILED',
+                    l10n.t(
+                        'Inline-script setup failed and the incomplete cache entry was discarded: {0}',
+                        getErrorMessage(error),
+                    ),
+                );
+            }
             return { errorCategory: 'install-failure' };
         }
 
@@ -3879,6 +3993,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return { errorCategory: 'setup-failure' };
         }
         try {
+            throwIfCancelled(pendingCreation.operation?.token);
             pendingCreation.hasStartedRecordingSourceMetadataIdentityHashes = true;
             const sourceMetadataIdentityHashes = this.mergePendingCreationSourceMetadataIdentityHashes(
                 undefined,

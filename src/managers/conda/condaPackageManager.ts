@@ -7,6 +7,7 @@ import {
     Disposable,
     Event,
     EventEmitter,
+    l10n,
     LogOutputChannel,
     MarkdownString,
     ProgressLocation,
@@ -22,10 +23,12 @@ import {
     PythonEnvironment,
     PythonEnvironmentApi,
 } from '../../api';
+import { Capabilities, PackageCapability, PackageManagerCapability, supportedCapability } from '../../capabilities';
 import { showErrorMessageWithLogs } from '../../common/errors/utils';
 import { CondaStrings } from '../../common/localize';
 import { withProgress } from '../../common/window.apis';
 
+import { PackageToolSupport, pythonToolSupport, throwIfCancelled } from '../../internal/pythonToolSupport';
 import { updatePackagesAndNotify } from '../common/packageChanges';
 import { parsePackageSpecs } from '../common/packageUtils';
 import {
@@ -39,6 +42,18 @@ import {
 import { getCommonCondaPackagesToInstall } from './condaUtils';
 
 export class CondaPackageManager implements PackageManager, Disposable {
+    readonly capabilities: Capabilities<PackageManagerCapability> = {
+        [PackageCapability.List]: supportedCapability,
+        [PackageCapability.Install]: supportedCapability,
+        [PackageCapability.Uninstall]: supportedCapability,
+        [PackageCapability.Upgrade]: supportedCapability,
+        [PackageCapability.FetchAvailableVersions]: supportedCapability,
+        [PackageCapability.ListDirect]: async () => ({
+            supported: false,
+            reason: l10n.t('Conda does not classify direct and transitive packages.'),
+        }),
+    };
+
     private readonly _onDidChangePackages = new EventEmitter<DidChangePackagesEventArgs>();
     onDidChangePackages: Event<DidChangePackagesEventArgs> = this._onDidChangePackages.event;
 
@@ -59,7 +74,23 @@ export class CondaPackageManager implements PackageManager, Disposable {
     tooltip?: string | MarkdownString;
     iconPath?: IconPath;
 
-    async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+    readonly [pythonToolSupport]: PackageToolSupport = {
+        manage: (environment, options, token) => this.manage(environment, { ...options, runHeadless: true }, token),
+        getPackages: async (environment, token) => {
+            const packages = await this.fetchPackages(environment, token);
+            if (!packages) {
+                throw new Error('Conda package listing returned no result.');
+            }
+            return packages;
+        },
+    };
+
+    async manage(
+        environment: PythonEnvironment,
+        options: PackageManagementOptions,
+        toolToken?: CancellationToken,
+    ): Promise<void> {
+        throwIfCancelled(toolToken);
         let toInstall: string[] = [...(options.install ?? [])];
         let toUninstall: string[] = [...(options.uninstall ?? [])];
 
@@ -89,6 +120,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     await command.execute({
                         packages: parsePackageSpecs(toUninstall),
                         cancellationToken: token,
+                        toolExecution: !!toolToken,
                     });
                 }
 
@@ -98,6 +130,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
                         packages: parsePackageSpecs(toInstall),
                         upgrade: options.upgrade,
                         cancellationToken: token,
+                        toolExecution: !!toolToken,
                     });
                 }
 
@@ -108,7 +141,8 @@ export class CondaPackageManager implements PackageManager, Disposable {
                     (changes) => {
                         this._onDidChangePackages.fire({ environment, manager: this, changes });
                     },
-                    () => this.fetchPackages(environment),
+                    () => this.fetchPackages(environment, toolToken),
+                    !!toolToken,
                 );
             } catch (e) {
                 if (e instanceof CancellationError) {
@@ -125,7 +159,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
         };
 
         if (options.runHeadless) {
-            await execute();
+            await execute(toolToken);
             return;
         }
 
@@ -169,18 +203,28 @@ export class CondaPackageManager implements PackageManager, Disposable {
         return this.packages.get(environment.envId.id);
     }
 
-    private async fetchPackages(environment: PythonEnvironment): Promise<Package[] | undefined> {
+    private async fetchPackages(
+        environment: PythonEnvironment,
+        token?: CancellationToken,
+    ): Promise<Package[] | undefined> {
+        throwIfCancelled(token);
         const listCmd = new CondaListCommand({
             pythonExecutable: 'conda',
             condaEnvironmentPath: environment.environmentPath.fsPath,
             log: this.log,
         });
         try {
-            const data = await listCmd.execute();
+            const data = await listCmd.execute(
+                token ? { cancellationToken: token, strict: true, toolExecution: true } : undefined,
+            );
+            throwIfCancelled(token);
             const packages = data.map((pkg) => this.api.createPackageItem(pkg, environment, this));
             this.packages.set(environment.envId.id, packages);
             return packages;
         } catch (error) {
+            if (token) {
+                throw error;
+            }
             if (error instanceof CondaListOutputError) {
                 this.log.error('Error parsing installed Conda packages', error);
                 return undefined;
@@ -206,10 +250,7 @@ export class CondaPackageManager implements PackageManager, Disposable {
         }
     }
 
-    async getPackageAvailableVersions(
-        _environment: PythonEnvironment,
-        packageName: string,
-    ): Promise<Pep440Version[]> {
+    async getPackageAvailableVersions(_environment: PythonEnvironment, packageName: string): Promise<Pep440Version[]> {
         const availableVersionsCmd = new CondaAvailableVersionsCommand({
             pythonExecutable: 'conda',
             log: this.log,

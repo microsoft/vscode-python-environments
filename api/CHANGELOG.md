@@ -5,6 +5,50 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0]
+
+### Added
+
+- `minimumExtensionVersion` metadata recording the independently versioned extension baseline required by this npm release.
+- An npm-only compatibility guard that rejects older or invalid extension versions before activation or access to the API, with localized update guidance.
+- PR validation against the latest stable extension release, packed-metadata checks, and publish-time verification that shared API sources have shipped in that stable release.
+
+### Changed
+
+- New npm releases require the latest stable extension baseline. Existing npm releases keep their original minimum; consumers targeting older extensions may need to pin an older npm package.
+
+## [1.7.0]
+
+### Added
+
+- Optional `capabilities` maps for environment and package managers, with typed keys and contextual checks. Omitted maps use legacy method inference; when present, the map must advertise every catalog key explicitly, and missing keys resolve unsupported.
+- Raw-provider capability resolvers and routed extension API queries that report support without invoking manager operations or prompting.
+- Capability catalogs for six environment and six package features, with flat operation names. Listing includes refresh, and package installation, uninstallation, and upgrades are advertised individually rather than through a management umbrella.
+- Exported `EnvironmentCapability` and `PackageCapability` constant objects for named access to capability keys, with derived string-literal unions.
+- `getLegacyPackageManagerCapability` and `getLegacyEnvironmentManagerCapability` helpers that infer support from method presence without invoking operations. Resolvers use them automatically when a provider omits its capability map.
+- Optional `Support.isLegacy` metadata, set to true by legacy inference helpers and included in public capability-query telemetry.
+
+### Notes
+
+- Capability prerequisite checks have no cycle protection; providers must keep delegation chains acyclic.
+
+## [1.6.0]
+
+### Added
+
+- Added optional `EnvironmentManager.getVersion?(): Promise<Pep440Version | undefined>` support for retrieving the version of the underlying environment management tool. Built-in implementations are provided for Conda, Poetry, Pipenv, and Pyenv.
+
+## [1.5.0]
+
+### Added
+
+- Added the optional `PackageManager.createForProject` factory for package managers whose operations depend on the calling Python project. Explicit project contexts are used directly; environment-only operations use a scoped manager only when exactly one tracked project matches.
+- Added optional `PackageManager.dispose` support for releasing resources owned by project-scoped package managers.
+
+### Changed
+
+- Environment-only package operations no longer fall back to an unbound project-aware package manager. When no unique project can be inferred, package reads return `undefined` and mutations and refreshes reject with `No package manager found`.
+
 ## [1.4.0]
 
 ### Changed

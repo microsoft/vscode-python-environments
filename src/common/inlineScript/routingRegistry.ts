@@ -31,8 +31,11 @@ export type InlineScriptSetupOutcome =
           readonly kind: 'failed';
           readonly category: InlineScriptEnvErrorCategory;
           readonly requiresPython?: string;
+          /** Optional installer-specific explanation, already localized for the setup UI. */
+          readonly message?: string;
+          readonly alreadyReported?: boolean;
       }
-    | { readonly kind: 'cancelled' }
+    | { readonly kind: 'cancelled'; readonly message?: string }
     | { readonly kind: 'skipped' };
 
 interface ScriptRoutingState {
@@ -41,6 +44,8 @@ interface ScriptRoutingState {
     readonly metadataIdentity?: string;
     readonly metadataRevision: number;
     readonly validatedAssociation: boolean;
+    readonly liveMetadataMatchesSaved?: boolean;
+    readonly environmentVersion?: string;
     readonly environmentUnavailable?: boolean;
 }
 
@@ -51,8 +56,10 @@ export class InlineScriptRoutingRegistry implements Disposable {
     private readonly _onDidChangeRouteability = new EventEmitter<InlineScriptRouteabilityChangeEvent>();
     private readonly _onDidChangeMetadata = new EventEmitter<InlineScriptMetadataChangeEvent>();
     private readonly _onDidChangeAvailability = new EventEmitter<Uri>();
+    private readonly _onDidChangeEnvironmentVersion = new EventEmitter<Uri>();
 
     public readonly onDidChangeAvailability: Event<Uri> = this._onDidChangeAvailability.event;
+    public readonly onDidChangeEnvironmentVersion: Event<Uri> = this._onDidChangeEnvironmentVersion.event;
 
     public readonly onDidChangeRouteability: Event<InlineScriptRouteabilityChangeEvent> =
         this._onDidChangeRouteability.event;
@@ -75,6 +82,7 @@ export class InlineScriptRoutingRegistry implements Disposable {
                     metadata,
                     metadataIdentity,
                     metadataRevision,
+                    liveMetadataMatchesSaved: metadata ? true : undefined,
                     validatedAssociation:
                         state.metadataIdentity === metadataIdentity ? state.validatedAssociation : false,
                     environmentUnavailable:
@@ -100,6 +108,7 @@ export class InlineScriptRoutingRegistry implements Disposable {
                     metadata: undefined,
                     metadataIdentity: undefined,
                     metadataRevision,
+                    liveMetadataMatchesSaved: undefined,
                 };
             },
             true,
@@ -126,7 +135,18 @@ export class InlineScriptRoutingRegistry implements Disposable {
         return scriptPath ? this.states.get(scriptPath)?.uri : undefined;
     }
 
-    public setValidatedAssociation(script: Uri | string, validatedAssociation: boolean): void {
+    /** The Python version of the validated script environment, when one is known. */
+    public getEnvironmentVersion(script: Uri | string): string | undefined {
+        const scriptPath = getInlineScriptRoutingKey(script);
+        const state = scriptPath ? this.states.get(scriptPath) : undefined;
+        return this.isRouteable(state) ? state?.environmentVersion : undefined;
+    }
+
+    public setValidatedAssociation(
+        script: Uri | string,
+        validatedAssociation: boolean,
+        environmentVersion?: string,
+    ): void {
         const scriptPath = getInlineScriptRoutingKey(script);
         if (!scriptPath) {
             return;
@@ -135,6 +155,7 @@ export class InlineScriptRoutingRegistry implements Disposable {
             ...state,
             uri: script instanceof Uri ? script : state.uri,
             validatedAssociation,
+            environmentVersion: validatedAssociation ? environmentVersion ?? state.environmentVersion : undefined,
             environmentUnavailable: validatedAssociation ? state.environmentUnavailable : false,
         }));
     }
@@ -157,6 +178,18 @@ export class InlineScriptRoutingRegistry implements Disposable {
     public hasValidatedAssociation(script: Uri | string): boolean {
         const scriptPath = getInlineScriptRoutingKey(script);
         return scriptPath ? this.states.get(scriptPath)?.validatedAssociation === true : false;
+    }
+
+    /**
+     * Temporarily suppress routing while an open document's live metadata block differs from the
+     * saved block. The validated association is retained so Undo can restore routing immediately.
+     */
+    public setLiveMetadataMatchesSaved(uri: Uri, matches: boolean): void {
+        const scriptPath = getInlineScriptRoutingKey(uri);
+        if (!scriptPath || !this.states.get(scriptPath)?.metadata) {
+            return;
+        }
+        this.update(scriptPath, (state) => ({ ...state, uri, liveMetadataMatchesSaved: matches }));
     }
 
     public noteSetupOutcome(script: Uri | string, outcome: InlineScriptSetupOutcome): void {
@@ -200,6 +233,7 @@ export class InlineScriptRoutingRegistry implements Disposable {
         this._onDidChangeMetadata.dispose();
         this._onDidChangeRouteability.dispose();
         this._onDidChangeAvailability.dispose();
+        this._onDidChangeEnvironmentVersion.dispose();
     }
 
     private update(
@@ -241,10 +275,17 @@ export class InlineScriptRoutingRegistry implements Disposable {
         if (previouslyUnavailable !== (routeable && next.environmentUnavailable === true) && next.uri) {
             this._onDidChangeAvailability.fire(next.uri);
         }
+        if (
+            (previousRouteable ? previous.environmentVersion : undefined) !==
+                (routeable ? next.environmentVersion : undefined) &&
+            next.uri
+        ) {
+            this._onDidChangeEnvironmentVersion.fire(next.uri);
+        }
     }
 
     private isRouteable(state: ScriptRoutingState | undefined): boolean {
-        return !!state?.metadata && state.validatedAssociation;
+        return !!state?.metadata && state.validatedAssociation && state.liveMetadataMatchesSaved !== false;
     }
 
     private nextMetadataRevision(scriptPath: string): number {

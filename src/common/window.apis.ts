@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
     CancellationToken,
     Disposable,
@@ -43,17 +42,19 @@ export function createTerminal(options: ExtensionTerminalOptions | TerminalOptio
     return window.createTerminal(options);
 }
 
-export function onDidChangeTerminalShellIntegration(
-    listener: (e: TerminalShellIntegrationChangeEvent) => any,
-    thisArgs?: any,
+/** Subscribes to shell integration changes, binding the listener to the optional receiver. */
+export function onDidChangeTerminalShellIntegration<TThis = void>(
+    listener: (this: TThis, e: TerminalShellIntegrationChangeEvent) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidChangeTerminalShellIntegration(listener, thisArgs, disposables);
 }
 
-export function onDidWriteTerminalData(
-    listener: (e: { readonly terminal: Terminal; readonly data: string }) => any,
-    thisArgs?: any,
+/** Subscribes to terminal data, binding the listener to the optional receiver. */
+export function onDidWriteTerminalData<TThis = void>(
+    listener: (this: TThis, e: { readonly terminal: Terminal; readonly data: string }) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidWriteTerminalData(listener, thisArgs, disposables);
@@ -79,57 +80,64 @@ export function activeTextEditor(): TextEditor | undefined {
     return window.activeTextEditor;
 }
 
-export function onDidChangeActiveTerminal(
-    listener: (e: Terminal | undefined) => any,
-    thisArgs?: any,
+/** Subscribes to active terminal changes, binding the listener to the optional receiver. */
+export function onDidChangeActiveTerminal<TThis = void>(
+    listener: (this: TThis, e: Terminal | undefined) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidChangeActiveTerminal(listener, thisArgs, disposables);
 }
 
-export function onDidChangeActiveTextEditor(
-    listener: (e: TextEditor | undefined) => any,
-    thisArgs?: any,
+/** Subscribes to active editor changes, binding the listener to the optional receiver. */
+export function onDidChangeActiveTextEditor<TThis = void>(
+    listener: (this: TThis, e: TextEditor | undefined) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidChangeActiveTextEditor(listener, thisArgs, disposables);
 }
 
-export function onDidStartTerminalShellExecution(
-    listener: (e: TerminalShellExecutionStartEvent) => any,
-    thisArgs?: any,
+/** Subscribes to shell execution starts, binding the listener to the optional receiver. */
+export function onDidStartTerminalShellExecution<TThis = void>(
+    listener: (this: TThis, e: TerminalShellExecutionStartEvent) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidStartTerminalShellExecution(listener, thisArgs, disposables);
 }
 
-export function onDidEndTerminalShellExecution(
-    listener: (e: TerminalShellExecutionEndEvent) => any,
-    thisArgs?: any,
+/** Subscribes to shell execution completion, binding the listener to the optional receiver. */
+export function onDidEndTerminalShellExecution<TThis = void>(
+    listener: (this: TThis, e: TerminalShellExecutionEndEvent) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidEndTerminalShellExecution(listener, thisArgs, disposables);
 }
 
-export function onDidOpenTerminal(
-    listener: (terminal: Terminal) => any,
-    thisArgs?: any,
+/** Subscribes to opened terminals, binding the listener to the optional receiver. */
+export function onDidOpenTerminal<TThis = void>(
+    listener: (this: TThis, terminal: Terminal) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidOpenTerminal(listener, thisArgs, disposables);
 }
 
-export function onDidCloseTerminal(
-    listener: (terminal: Terminal) => any,
-    thisArgs?: any,
+/** Subscribes to closed terminals, binding the listener to the optional receiver. */
+export function onDidCloseTerminal<TThis = void>(
+    listener: (this: TThis, terminal: Terminal) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidCloseTerminal(listener, thisArgs, disposables);
 }
 
-export function onDidChangeTerminalState(
-    listener: (e: Terminal) => any,
-    thisArgs?: any,
+/** Subscribes to terminal state changes, binding the listener to the optional receiver. */
+export function onDidChangeTerminalState<TThis = void>(
+    listener: (this: TThis, e: Terminal) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidChangeTerminalState(listener, thisArgs, disposables);
@@ -340,6 +348,7 @@ export function showErrorMessage<T extends MessageItem>(
     return window.showErrorMessage(message, options, ...items);
 }
 
+/** Shows a warning with optional options and actions, returning the selected action unchanged. */
 export function showWarningMessage<T extends string>(message: string, ...items: T[]): Thenable<T | undefined>;
 export function showWarningMessage<T extends string>(
     message: string,
@@ -352,8 +361,9 @@ export function showWarningMessage<T extends MessageItem>(
     options: MessageOptions,
     ...items: T[]
 ): Thenable<T | undefined>;
-export function showWarningMessage(message: string, ...items: any[]): Thenable<string | undefined> {
-    return window.showWarningMessage(message, ...items);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Forward all VS Code overloads unchanged; the public overloads above check callers.
+export function showWarningMessage(message: string, ...args: any[]): Thenable<string | MessageItem | undefined> {
+    return window.showWarningMessage(message, ...args);
 }
 
 export function showInputBox(options?: InputBoxOptions, token?: CancellationToken): Thenable<string | undefined> {
@@ -372,9 +382,10 @@ export function registerFileDecorationProvider(provider: FileDecorationProvider)
     return window.registerFileDecorationProvider(provider);
 }
 
-export function onDidChangeWindowState(
-    listener: (e: WindowState) => any,
-    thisArgs?: any,
+/** Subscribes to window state changes, binding the listener to the optional receiver. */
+export function onDidChangeWindowState<TThis = void>(
+    listener: (this: TThis, e: WindowState) => void,
+    thisArgs?: TThis,
     disposables?: Disposable[],
 ): Disposable {
     return window.onDidChangeWindowState(listener, thisArgs, disposables);

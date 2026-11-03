@@ -8,6 +8,23 @@ import { createFileSystemWatcher, getConfiguration } from '../../common/workspac
 import type { PythonProjectManager } from '../projectManager';
 import { mergeEnvVariables, parseEnvFile } from './envVarUtils';
 
+/**
+ * Returns true if the path resolves (following symlinks) to a regular file.
+ * Missing paths and paths with a non-directory parent are treated as absent;
+ * other errors (for example, permission errors) are propagated.
+ */
+async function isEnvFile(filePath: string): Promise<boolean> {
+    try {
+        return (await fsapi.stat(filePath)).isFile();
+    } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ENOTDIR') {
+            return false;
+        }
+        throw error;
+    }
+}
+
 export interface EnvVarManager extends PythonEnvironmentVariablesApi, Disposable {}
 
 export class PythonEnvVariableManager implements EnvVarManager {
@@ -50,7 +67,7 @@ export class PythonEnvVariableManager implements EnvVarManager {
         let envFilePath = config.get<string>('envFile');
         envFilePath = envFilePath ? path.normalize(resolveVariables(envFilePath, uri)) : undefined;
 
-        if (envFilePath && (await fsapi.pathExists(envFilePath))) {
+        if (envFilePath && (await isEnvFile(envFilePath))) {
             const other = await parseEnvFile(Uri.file(envFilePath));
             env = mergeEnvVariables(env, other);
         }
@@ -59,7 +76,7 @@ export class PythonEnvVariableManager implements EnvVarManager {
         if (
             projectEnvFilePath &&
             projectEnvFilePath?.toLowerCase() !== envFilePath?.toLowerCase() &&
-            (await fsapi.pathExists(projectEnvFilePath))
+            (await isEnvFile(projectEnvFilePath))
         ) {
             const other = await parseEnvFile(Uri.file(projectEnvFilePath));
             env = mergeEnvVariables(env, other);

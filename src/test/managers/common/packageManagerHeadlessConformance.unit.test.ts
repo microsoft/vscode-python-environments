@@ -3,7 +3,7 @@
 
 import * as assert from 'assert';
 import * as sinon from 'sinon';
-import { LogOutputChannel, Uri } from 'vscode';
+import { FileType, LogOutputChannel, Uri } from 'vscode';
 import {
     PackageManager,
     PythonEnvironment,
@@ -13,6 +13,7 @@ import {
 import * as childProcessApis from '../../../common/childProcess.apis';
 import * as errorUtils from '../../../common/errors/utils';
 import * as windowApis from '../../../common/window.apis';
+import * as workspaceFs from '../../../common/workspace.fs.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 import { PipInstallCommand } from '../../../managers/builtin/commands/install';
@@ -21,7 +22,7 @@ import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
 import * as pipUtils from '../../../managers/builtin/pipUtils';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
 import { CondaInstallCommand } from '../../../managers/conda/commands/install';
 import { CondaListCommand } from '../../../managers/conda/commands/list';
 import { CondaPackageManager } from '../../../managers/conda/condaPackageManager';
@@ -39,6 +40,15 @@ suite('Package manager headless conformance', () => {
         execInfo: { run: { executable: 'python', args: [] } },
         version: '3.12.0',
     } as unknown as PythonEnvironment;
+
+    setup(() => {
+        sinon.stub(workspaceFs, 'stat').resolves({
+            type: FileType.Directory,
+            ctime: 0,
+            mtime: 0,
+            size: 0,
+        });
+    });
 
     teardown(() => {
         sinon.restore();
@@ -200,9 +210,12 @@ suite('Package manager headless conformance', () => {
         } as unknown as LogOutputChannel;
         const pip = new PipPackageManager(api, log, {
             getProjectsByEnvironment: sinon.stub().returns([]),
-        } as unknown as VenvManager);
+        } as unknown as BuiltInEnvironmentManager);
         const conda = new CondaPackageManager(api, log);
-        const poetry = new PoetryPackageManager(api, log, {} as PoetryManager);
+        const poetry = new PoetryPackageManager(api, log, {} as PoetryManager).createForProject({
+            name: 'project',
+            uri: Uri.file(process.cwd()),
+        });
         return { pip, conda, poetry, all: [pip, conda, poetry] };
     }
 

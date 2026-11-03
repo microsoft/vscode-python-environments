@@ -1,6 +1,16 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { EventEmitter, l10n, LogOutputChannel, MarkdownString, ProgressLocation, ThemeIcon, Uri } from 'vscode';
+import {
+    CancellationError,
+    CancellationToken,
+    EventEmitter,
+    l10n,
+    LogOutputChannel,
+    MarkdownString,
+    ProgressLocation,
+    ThemeIcon,
+    Uri,
+} from 'vscode';
 import {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -20,23 +30,37 @@ import {
     ResolveEnvironmentContext,
     SetEnvironmentScope,
 } from '../../api';
+import { Capabilities, EnvironmentManagerCapability, supportedCapability, EnvironmentCapability } from '../../capabilities';
 import { executeCommand } from '../../common/command.api';
-import { PYTHON_EXTENSION_ID } from '../../common/constants';
-import { VenvManagerStrings } from '../../common/localize';
+import { DEFAULT_PACKAGE_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
+import { PythonInstallStrings, VenvManagerStrings } from '../../common/localize';
 import { traceError, traceWarn } from '../../common/logging';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { PythonVersion } from '../../common/pythonVersion';
+import {
+    EnvironmentToolSupport,
+    PythonToolError,
+    PythonToolOperation,
+    pythonToolSupport,
+    supportsEnvironmentTools,
+    throwIfCancelled,
+} from '../../internal/pythonToolSupport';
 import { showErrorMessage, showInformationMessage, withProgress } from '../../common/window.apis';
 import { findParentIfFile } from '../../features/envCommands';
 import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
-import { promptInstallPythonViaUv } from './uvPythonInstaller';
+import { promptInstallPython } from './pythonInstaller';
+import { getDefaultGlobalPython, resolveSystemPythonEnvironmentPath } from './utils';
+import { UvEnvironmentManager } from './uvEnvironmentManager';
+import { VenvEnvironmentManager } from './venvEnvironmentManager';
 import {
     clearVenvCache,
     CreateEnvironmentResult,
     createPythonVenv,
+    EnvironmentBackendSelector,
+    EnvironmentLifecycleBackends,
     findVirtualEnvironments,
     getDefaultGlobalVenvLocation,
     getGlobalVenvLocation,
@@ -45,14 +69,26 @@ import {
     quickCreateVenv,
     removeVenv,
     resolveVenvPythonEnvironmentPath,
+    selectEnvironmentBackend,
     setVenvForGlobal,
     setVenvForWorkspace,
     setVenvForWorkspaces,
 } from './venvUtils';
 
-export class VenvManager implements EnvironmentManager {
+export class BuiltInEnvironmentManager implements EnvironmentManager {
+    readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
+        [EnvironmentCapability.List]: supportedCapability,
+        [EnvironmentCapability.Resolve]: supportedCapability,
+        [EnvironmentCapability.GetSelected]: supportedCapability,
+        [EnvironmentCapability.SetSelected]: supportedCapability,
+        [EnvironmentCapability.Create]: supportedCapability,
+        [EnvironmentCapability.Remove]: supportedCapability,
+    };
+
     private collection: PythonEnvironment[] = [];
+    private environmentFolders: { collection: PythonEnvironment[]; length: number; folders: Set<string> } | undefined;
     private readonly fsPathToEnv: Map<string, PythonEnvironment> = new Map();
+    private readonly projectSelectionRevisions = new Map<string, number>();
     private globalEnv: PythonEnvironment | undefined;
     private skipWatcherRefresh = false;
 
@@ -74,6 +110,8 @@ export class VenvManager implements EnvironmentManager {
         private readonly api: PythonEnvironmentApi,
         private readonly baseManager: EnvironmentManager,
         public readonly log: LogOutputChannel,
+        private readonly venv: VenvEnvironmentManager,
+        private readonly uv: UvEnvironmentManager,
     ) {
         this.name = 'venv';
         this.displayName = 'venv';
@@ -81,22 +119,149 @@ export class VenvManager implements EnvironmentManager {
         // https://github.com/microsoft/vscode-python-environments/issues/167
         this.description = undefined;
         this.tooltip = new MarkdownString(VenvManagerStrings.venvManagerDescription, true);
-        this.preferredPackageManagerId = 'ms-python.python:pip';
+        this.preferredPackageManagerId = DEFAULT_PACKAGE_MANAGER_ID;
         this.iconPath = new ThemeIcon('python');
     }
 
+    private get backends(): EnvironmentLifecycleBackends {
+        return { venv: this.venv, uv: this.uv };
+    }
+
+    private readonly selectCreationBackend: EnvironmentBackendSelector = (base, root, token) =>
+        selectEnvironmentBackend(this.log, base, root, token, this.venv, this.uv);
+
     private _initialized: Deferred<void> | undefined;
+    private discovery: Deferred<void> | undefined;
+    private initializationError: unknown;
+    readonly [pythonToolSupport]: EnvironmentToolSupport = {
+        initialize: async () => {
+            if (!supportsEnvironmentTools(this.baseManager)) {
+                throw new PythonToolError(
+                    'UNSUPPORTED_MANAGER',
+                    l10n.t('The base Python manager does not support non-interactive discovery.'),
+                );
+            }
+            await this.baseManager[pythonToolSupport].initialize();
+            await this.initializeDiscovery();
+            if (this.initializationError) {
+                throw this.initializationError;
+            }
+        },
+        get: (scope) => this.get(scope, true),
+        getEnvironments: (scope) => this.getEnvironments(scope, true),
+        resolve: (scope) => this.resolve(scope),
+        create: (scope, operation) => this.createForTools(scope, operation),
+        set: (scope, environment, token) => this.set(scope, environment, token),
+    };
+
     async initialize(): Promise<void> {
         if (this._initialized) {
             return this._initialized.promise;
         }
-
-        this._initialized = createDeferred();
-
+        const initialized = (this._initialized = createDeferred<void>());
         try {
-            await this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize);
+            await this.initializeWithBase();
+        } catch (error) {
+            if (this._initialized === initialized) {
+                this._initialized = undefined;
+            }
+            throw error;
         } finally {
-            this._initialized.resolve();
+            initialized.resolve();
+        }
+    }
+
+    private async initializeWithBase(): Promise<void> {
+        await this.initializeDiscovery();
+        const discovery = this.discovery;
+        try {
+            await this.loadGlobalEnv(await this.baseManager.getEnvironments('global'));
+        } catch (error) {
+            // Discovery alone is not a complete human initialization when the base step fails.
+            if (this.discovery === discovery) {
+                this.discovery = undefined;
+            }
+            throw error;
+        }
+    }
+
+    private async initializeDiscovery(): Promise<void> {
+        if (this.discovery) {
+            return this.discovery.promise;
+        }
+        const discovery = (this.discovery = createDeferred());
+        try {
+            await this.internalRefresh(
+                undefined,
+                false,
+                VenvManagerStrings.venvInitialize,
+                ProgressLocation.Window,
+                true,
+            );
+        } catch (error) {
+            this.initializationError = error;
+            this.discovery = undefined;
+            throw error;
+        } finally {
+            discovery.resolve();
+        }
+    }
+
+    private async createForTools(scope: Uri, operation: PythonToolOperation): Promise<PythonEnvironment> {
+        const base =
+            operation.baseEnvironment ??
+            getLatest(
+                (await operation.getGlobalEnvironments()).filter(
+                    (environment) => PythonVersion.tryParse(environment.version)?.major === 3,
+                ),
+            );
+        if (!base || PythonVersion.tryParse(base.version)?.major !== 3) {
+            throw new PythonToolError(
+                'MISSING_PYTHON',
+                l10n.t('Install or select Python 3 before creating a virtual environment.'),
+            );
+        }
+        throwIfCancelled(operation.token);
+        this.skipWatcherRefresh = true;
+        try {
+            const result = await quickCreateVenv(
+                this.nativeFinder,
+                this.api,
+                this.log,
+                this,
+                base,
+                scope,
+                undefined,
+                operation,
+                this.selectCreationBackend,
+            );
+            if (!result?.environment) {
+                throw new PythonToolError(
+                    'CREATION_FAILED',
+                    result?.envCreationErr ?? l10n.t('Virtual environment creation returned no environment.'),
+                );
+            }
+            this.addEnvironment(result.environment, true);
+            try {
+                await fs.writeFile(path.join(result.environment.sysPrefix, '.gitignore'), '*\n', { flag: 'w' });
+            } catch (error) {
+                throw new PythonToolError(
+                    'CREATION_FAILED',
+                    l10n.t(
+                        'The environment was created, but writing its .gitignore failed: {0}',
+                        error instanceof Error ? error.message : String(error),
+                    ),
+                    result.environment,
+                );
+            }
+            return result.environment;
+        } catch (error) {
+            if (error instanceof PythonToolError && error.environment) {
+                this.addEnvironment(error.environment, true);
+            }
+            throw error;
+        } finally {
+            this.skipWatcherRefresh = false;
         }
     }
 
@@ -141,22 +306,33 @@ export class VenvManager implements EnvironmentManager {
 
             let globals = await this.api.getEnvironments('global');
 
-            // If no Python environments found, offer to install Python via uv
+            // Runtime acquisition is separate from the venv/package backend selection.
             if (globals.length === 0) {
-                const installedPath = await promptInstallPythonViaUv('createEnvironment', this.log);
-                if (installedPath) {
-                    // Refresh environments to detect the newly installed Python
-                    await this.api.refreshEnvironments(undefined);
-                    // Re-fetch environments after refresh
-                    globals = await this.api.getEnvironments('global');
-                    // Update globalEnv reference if we found any Python 3.x environments
-                    const python3Envs = globals.filter((e) => PythonVersion.tryParse(e.version)?.major === 3);
-                    if (python3Envs.length === 0) {
-                        this.log.warn('Python installed via uv but no Python 3.x global environments were detected.');
-                    } else {
-                        this.globalEnv = getLatest(python3Envs);
-                    }
+                const installedPath = await promptInstallPython('createEnvironment', this.log);
+                if (!installedPath) {
+                    return undefined;
                 }
+                try {
+                    await this.api.refreshEnvironments(undefined);
+                    globals = await this.api.getEnvironments('global');
+                } catch (error) {
+                    this.log.warn(`Python was installed, but discovery could not be refreshed: ${error}`);
+                }
+                const installed = globals.find((environment) =>
+                    normalizePath(environment.execInfo.run.executable) === normalizePath(installedPath)) ??
+                    await resolveSystemPythonEnvironmentPath(
+                        installedPath, this.nativeFinder, this.api, this.baseManager,
+                    );
+                if (!installed || PythonVersion.tryParse(installed.version)?.major !== 3) {
+                    this.log.error(`The installed Python could not be resolved at ${installedPath}.`);
+                    showErrorMessage(PythonInstallStrings.discoveryFailed);
+                    return undefined;
+                }
+                if (!globals.some((environment) =>
+                    normalizePath(environment.execInfo.run.executable) === normalizePath(installed.execInfo.run.executable))) {
+                    globals = [...globals, installed];
+                }
+                this.globalEnv = installed;
             }
 
             let result: CreateEnvironmentResult | undefined = undefined;
@@ -185,14 +361,23 @@ export class VenvManager implements EnvironmentManager {
                         this.globalEnv,
                         venvRoot,
                         options?.additionalPackages,
+                        undefined,
+                        this.selectCreationBackend,
                     );
                 }
             } else {
                 // If quickCreate is not set that means the user triggered this method from
                 // environment manager View, by selecting the venv manager.
-                result = await createPythonVenv(this.nativeFinder, this.api, this.log, this, globals, venvRoot, {
-                    showQuickAndCustomOptions: options?.quickCreate === undefined,
-                });
+                result = await createPythonVenv(
+                    this.nativeFinder,
+                    this.api,
+                    this.log,
+                    this,
+                    globals,
+                    venvRoot,
+                    { showQuickAndCustomOptions: options?.quickCreate === undefined },
+                    this.selectCreationBackend,
+                );
             }
 
             if (result?.environment) {
@@ -251,6 +436,11 @@ export class VenvManager implements EnvironmentManager {
                 showErrorMessage(l10n.t('Failed to create virtual environment: {0}', result.envCreationErr));
             }
             return result?.environment ?? undefined;
+        } catch (error) {
+            if (error instanceof CancellationError) {
+                return undefined;
+            }
+            throw error;
         } finally {
             this.skipWatcherRefresh = false;
         }
@@ -263,7 +453,7 @@ export class VenvManager implements EnvironmentManager {
         try {
             this.skipWatcherRefresh = true;
 
-            const isRemoved = await removeVenv(environment, this.log, options);
+            const isRemoved = await removeVenv(environment, this.log, options, this.backends);
             if (!isRemoved) {
                 return;
             }
@@ -295,7 +485,7 @@ export class VenvManager implements EnvironmentManager {
         const changed: Uri[] = [];
         this.fsPathToEnv.forEach((env, uri) => {
             if (normalizePath(env.environmentPath.fsPath) === envPath) {
-                this.fsPathToEnv.delete(uri);
+                this.setProjectSelection(uri, undefined);
                 changed.push(Uri.file(uri));
             }
         });
@@ -313,12 +503,39 @@ export class VenvManager implements EnvironmentManager {
         return this.internalRefresh(undefined, true, VenvManagerStrings.venvRefreshing);
     }
 
+    /**
+     * Returns true when a known virtual environment is at, or inside, the given path.
+     *
+     * Called for every deletion in the workspace, so it is a single set lookup: the set holds every
+     * environment prefix and its parent folders, and is rebuilt when the collection changes.
+     *
+     * @param fsPath A file system path, for example of a deleted folder.
+     */
+    hasEnvironmentAt(fsPath: string): boolean {
+        const cache = this.environmentFolders;
+        if (cache?.collection !== this.collection || cache.length !== this.collection.length) {
+            const folders = new Set<string>();
+            for (const env of this.collection) {
+                let folder = env.sysPrefix ? path.resolve(env.sysPrefix) : undefined;
+                while (folder && !folders.has(normalizePath(folder))) {
+                    folders.add(normalizePath(folder));
+                    const parent = path.dirname(folder);
+                    folder = parent !== folder ? parent : undefined;
+                }
+            }
+            this.environmentFolders = { collection: this.collection, length: this.collection.length, folders };
+        }
+        return this.environmentFolders!.folders.has(normalizePath(path.resolve(fsPath)));
+    }
+
     private async internalRefresh(
         scope: RefreshEnvironmentsScope,
         hardRefresh: boolean,
         title: string,
         location: ProgressLocation = ProgressLocation.Window,
+        toolExecution = false,
     ): Promise<void> {
+        const selectionRevisions = new Map(this.projectSelectionRevisions);
         await withProgress(
             {
                 location,
@@ -338,17 +555,19 @@ export class VenvManager implements EnvironmentManager {
                         this.log,
                         this,
                         scope ? [scope] : undefined,
+                        this.backends,
                     )) ?? [];
-                await this.loadEnvMap();
+                await this.loadEnvMap(selectionRevisions, toolExecution);
 
                 const added = this.collection.map((env) => ({ environment: env, kind: EnvironmentChangeKind.add }));
                 this._onDidChangeEnvironments.fire([...discard, ...added]);
+                this.initializationError = undefined;
             },
         );
     }
 
-    async getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]> {
-        await this.initialize();
+    async getEnvironments(scope: GetEnvironmentsScope, toolExecution = false): Promise<PythonEnvironment[]> {
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (scope === 'all') {
             return Array.from(this.collection);
@@ -361,8 +580,8 @@ export class VenvManager implements EnvironmentManager {
         return env ? [env] : [];
     }
 
-    async get(scope: GetEnvironmentScope): Promise<PythonEnvironment | undefined> {
-        const fastResult = await tryFastPathGet({
+    async get(scope: GetEnvironmentScope, toolExecution = false): Promise<PythonEnvironment | undefined> {
+        const fastResult = toolExecution ? undefined : await tryFastPathGet({
             initialized: this._initialized,
             setInitialized: (deferred) => {
                 this._initialized = deferred;
@@ -371,14 +590,23 @@ export class VenvManager implements EnvironmentManager {
             label: 'venv',
             getProjectFsPath: (s) => getProjectFsPathForScope(this.api, s),
             getPersistedPath: (fsPath) => getVenvForWorkspace(fsPath),
-            resolve: (p) => resolveVenvPythonEnvironmentPath(p, this.nativeFinder, this.api, this, this.baseManager),
-            startBackgroundInit: () => this.internalRefresh(undefined, false, VenvManagerStrings.venvInitialize),
+            resolve: (p) =>
+                resolveVenvPythonEnvironmentPath(
+                    p,
+                    this.nativeFinder,
+                    this.api,
+                    this,
+                    this.baseManager,
+                    'default',
+                    this.backends,
+                ),
+            startBackgroundInit: () => this.initializeWithBase(),
         });
         if (fastResult) {
             return fastResult.env;
         }
 
-        await this.initialize();
+        await (toolExecution ? this.initializeDiscovery() : this.initialize());
 
         if (!scope) {
             // `undefined` for venv scenario return the global environment.
@@ -398,7 +626,8 @@ export class VenvManager implements EnvironmentManager {
         return env ?? this.globalEnv;
     }
 
-    async set(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
+    async set(scope: SetEnvironmentScope, environment?: PythonEnvironment, token?: CancellationToken): Promise<void> {
+        throwIfCancelled(token);
         if (scope === undefined) {
             const before = this.globalEnv;
             this.globalEnv = environment;
@@ -417,7 +646,7 @@ export class VenvManager implements EnvironmentManager {
             }
 
             // Notify user if VIRTUAL_ENV is set and they're trying to select a different environment
-            if (process.env.VIRTUAL_ENV && environment) {
+            if (!token && process.env.VIRTUAL_ENV && environment) {
                 const virtualEnvPath = process.env.VIRTUAL_ENV;
                 const selectedPath = environment.sysPrefix;
                 // Only show notification if they selected a different environment
@@ -426,13 +655,7 @@ export class VenvManager implements EnvironmentManager {
                 }
             }
 
-            const normalizedPwPath = normalizePath(pw.uri.fsPath);
-            const before = this.fsPathToEnv.get(normalizedPwPath);
-            if (environment) {
-                this.fsPathToEnv.set(normalizedPwPath, environment);
-            } else {
-                this.fsPathToEnv.delete(normalizedPwPath);
-            }
+            const before = this.setProjectSelection(pw.uri.fsPath, environment);
             await setVenvForWorkspace(pw.uri.fsPath, environment?.environmentPath.fsPath);
 
             if (before?.envId.id !== environment?.envId.id) {
@@ -452,13 +675,7 @@ export class VenvManager implements EnvironmentManager {
 
             const before: Map<string, PythonEnvironment | undefined> = new Map();
             projects.forEach((p) => {
-                const normalizedPath = normalizePath(p.uri.fsPath);
-                before.set(p.uri.fsPath, this.fsPathToEnv.get(normalizedPath));
-                if (environment) {
-                    this.fsPathToEnv.set(normalizedPath, environment);
-                } else {
-                    this.fsPathToEnv.delete(normalizedPath);
-                }
+                before.set(p.uri.fsPath, this.setProjectSelection(p.uri.fsPath, environment));
             });
 
             await setVenvForWorkspaces(
@@ -473,6 +690,21 @@ export class VenvManager implements EnvironmentManager {
                 }
             });
         }
+    }
+
+    private setProjectSelection(
+        fsPath: string,
+        environment: PythonEnvironment | undefined,
+    ): PythonEnvironment | undefined {
+        const key = normalizePath(fsPath);
+        const before = this.fsPathToEnv.get(key);
+        this.projectSelectionRevisions.set(key, (this.projectSelectionRevisions.get(key) ?? 0) + 1);
+        if (environment) {
+            this.fsPathToEnv.set(key, environment);
+        } else {
+            this.fsPathToEnv.delete(key);
+        }
+        return before;
     }
 
     async resolve(context: ResolveEnvironmentContext): Promise<PythonEnvironment | undefined> {
@@ -492,11 +724,14 @@ export class VenvManager implements EnvironmentManager {
             this.api,
             this,
             this.baseManager,
+            'default',
+            this.backends,
         );
         if (resolved) {
-            if (resolved.envId.managerId === `${PYTHON_EXTENSION_ID}:venv`) {
+            if (resolved.envId.managerId === VENV_MANAGER_ID) {
                 // We should only return the resolved env if it is a venv.
                 // Fall through an return undefined if it is not a venv
+                this.addEnvironment(resolved, true);
                 return resolved;
             }
         }
@@ -505,7 +740,7 @@ export class VenvManager implements EnvironmentManager {
     }
 
     async clearCache(): Promise<void> {
-        await clearVenvCache();
+        await clearVenvCache(this.backends);
     }
 
     private addEnvironment(environment: PythonEnvironment, raiseEvent?: boolean): void {
@@ -557,6 +792,8 @@ export class VenvManager implements EnvironmentManager {
                     this.api,
                     this,
                     this.baseManager,
+                    'default',
+                    this.backends,
                 );
 
                 // If the environment is resolved, add it to the collection
@@ -568,18 +805,28 @@ export class VenvManager implements EnvironmentManager {
 
         // If a global environment is still not set, use latest from globals
         if (!this.globalEnv) {
-            this.globalEnv = getLatest(globals);
+            this.globalEnv = getDefaultGlobalPython(globals);
         }
     }
 
     /**
      * Loads and maps Python environments to their corresponding project paths in the workspace. about  O(p × e) where p = projects.len and e = environments.len
+     * Preserves project selections changed after this refresh began, including queued change notifications.
+     * Skips unresolvable selections without preventing other projects from restoring their environments.
      */
-    private async loadEnvMap() {
-        const globals = await this.baseManager.getEnvironments('global');
+    private async loadEnvMap(selectionRevisions: ReadonlyMap<string, number>, toolExecution = false) {
+        const isCurrent = (key: string) => this.projectSelectionRevisions.get(key) === selectionRevisions.get(key);
+        const tools = supportsEnvironmentTools(this.baseManager) ? this.baseManager[pythonToolSupport] : undefined;
+        const globals = await (toolExecution && tools?.getEnvironments
+            ? tools.getEnvironments('global')
+            : this.baseManager.getEnvironments('global'));
         await this.loadGlobalEnv(globals);
 
-        this.fsPathToEnv.clear();
+        this.fsPathToEnv.forEach((_env, key) => {
+            if (isCurrent(key)) {
+                this.fsPathToEnv.delete(key);
+            }
+        });
 
         const sorted = sortEnvironments(this.collection);
         const projects = this.api.getPythonProjects();
@@ -589,6 +836,9 @@ export class VenvManager implements EnvironmentManager {
             const originalPath = project.uri.fsPath;
             const normalizedPath = normalizePath(originalPath);
             const env = await getVenvForWorkspace(originalPath);
+            if (!isCurrent(normalizedPath)) {
+                continue;
+            }
             if (env) {
                 // from env path find PythonEnvironment object in the collection.
                 let foundEnv = this.findEnvironmentByPath(env, sorted) ?? this.findEnvironmentByPath(env, globals);
@@ -601,29 +851,43 @@ export class VenvManager implements EnvironmentManager {
                         this.api,
                         this,
                         this.baseManager,
+                        'default',
+                        this.backends,
                     );
+                    if (!isCurrent(normalizedPath)) {
+                        continue;
+                    }
                     if (resolved) {
                         // If resolved; add it to the venvManager collection
                         this.addEnvironment(resolved, false);
                         foundEnv = resolved;
                     } else {
                         this.log.error(`Failed to resolve python environment: ${env}`);
-                        return;
+                        continue;
                     }
                 }
                 // Given found env, add it to the map and fire the event if needed.
                 this.fsPathToEnv.set(normalizedPath, foundEnv);
                 if (previousEnv?.envId.id !== foundEnv.envId.id) {
-                    events.push(() =>
-                        this._onDidChangeEnvironment.fire({ uri: project.uri, old: undefined, new: foundEnv }),
-                    );
+                    events.push(() => {
+                        if (isCurrent(normalizedPath)) {
+                            this._onDidChangeEnvironment.fire({ uri: project.uri, old: undefined, new: foundEnv });
+                        }
+                    });
                 }
             } else {
                 // Search through all known environments (e) and check if any are associated with the current project path. If so, add that environment and path in the map.
-                const found = sorted.find((e) => {
+                const projectEnvs = sorted.filter((e) => {
                     const t = this.api.getPythonProject(e.environmentPath)?.uri.fsPath;
                     return t && normalizePath(t) === normalizedPath;
                 });
+                // Prefer the project's own environment (e.g. `<project>/.venv`) over one nested in a
+                // subfolder (e.g. `<project>/tools/.venv`), even when the nested one has a newer Python.
+                // Broken environments are not preferred, matching their last place in the sort order.
+                const found =
+                    projectEnvs.find(
+                        (e) => !e.error && normalizePath(path.dirname(e.sysPrefix)) === normalizedPath,
+                    ) ?? projectEnvs[0];
                 if (found) {
                     this.fsPathToEnv.set(normalizedPath, found);
                 }

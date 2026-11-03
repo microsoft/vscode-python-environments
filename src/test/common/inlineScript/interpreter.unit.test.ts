@@ -7,10 +7,11 @@ import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import { extractLowerBoundVersion, pickCompatibleInterpreter } from '../../../common/inlineScript/interpreter';
 import * as logging from '../../../common/logging';
+import { SYSTEM_MANAGER_ID } from '../../../common/constants';
 
 function makeEnv(version: string, name = `Python ${version}`, error?: string): PythonEnvironment {
     return {
-        envId: { id: name, managerId: 'ms-python.python:system' },
+        envId: { id: name, managerId: SYSTEM_MANAGER_ID },
         name,
         displayName: name,
         displayPath: `/usr/bin/${name}`,

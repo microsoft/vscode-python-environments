@@ -57,7 +57,7 @@ export function getShellIntegrationTimeout(): number {
  *    b. Shell integration becoming available (`window.onDidChangeTerminalShellIntegration`).
  *    c. Detection of common prompt patterns in terminal output.
  */
-export async function waitForShellIntegration(terminal?: Terminal): Promise<boolean> {
+export async function waitForShellIntegration(terminal?: Terminal, timeoutMs?: number): Promise<boolean> {
     if (!terminal) {
         return false;
     }
@@ -76,14 +76,13 @@ export async function waitForShellIntegration(terminal?: Terminal): Promise<bool
         // Detection failed — preserve original behavior by falling through to the race.
     }
 
-    const timeoutMs = getShellIntegrationTimeout();
-
+    const effectiveTimeoutMs = timeoutMs ?? getShellIntegrationTimeout();
     const disposables: Disposable[] = [];
 
     try {
-        const result = await Promise.race([
+        const resultPromise = Promise.race([
             // Condition 1: Shell integration timeout setting
-            timeout(timeoutMs).then(() => false),
+            timeout(effectiveTimeoutMs).then(() => false),
 
             // Condition 2: Shell integration becomes available
             new Promise<boolean>((resolve) => {
@@ -116,7 +115,8 @@ export async function waitForShellIntegration(terminal?: Terminal): Promise<bool
             }),
         ]);
 
-        return result;
+        // Close the gap between the initial check and listener registration.
+        return terminal.shellIntegration ? true : await resultPromise;
     } finally {
         disposables.forEach((d) => d.dispose());
     }
@@ -392,7 +392,7 @@ export type AutoActivationType = 'off' | 'command' | 'shellStartup';
  *    a. globalRemoteValue
  *    b. globalLocalValue
  *    c. globalValue
- * 2. python.terminal.activateEnvironment setting (if false, returns 'off' & sets autoActivationType to 'off')
+ * 2. python.terminal.activateEnvironment setting (if false, returns 'off')
  * 3. Default to 'command' if no setting is found
  *
  * @returns {AutoActivationType} The determined auto-activation type
@@ -420,8 +420,6 @@ export function getAutoActivationType(): AutoActivationType {
     const pythonConfig = getConfiguration('python');
     const pythonActivateSetting = pythonConfig.get<boolean | undefined>('terminal.activateEnvironment', undefined);
     if (pythonActivateSetting === false) {
-        // Set autoActivationType to 'off' if python.terminal.activateEnvironment is false
-        pyEnvsConfig.update('terminal.autoActivationType', ACT_TYPE_OFF);
         return ACT_TYPE_OFF;
     }
 

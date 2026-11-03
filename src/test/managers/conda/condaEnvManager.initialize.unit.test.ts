@@ -14,6 +14,7 @@ import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import * as condaSourcingUtils from '../../../managers/conda/condaSourcingUtils';
 import * as condaUtils from '../../../managers/conda/condaUtils';
 import { makeMockCondaEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
+import { CONDA_MANAGER_ID } from '../../../common/constants';
 
 /**
  * Tests for the lazy-registration flow on CondaEnvManager.initialize().
@@ -188,7 +189,7 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
         assert.strictEqual(mgr.sourcingInformation, undefined);
         // missing-default notification was shown
         assert.strictEqual(notifyMissingStub.callCount, 1);
-        assert.strictEqual(notifyMissingStub.firstCall.args[0], 'ms-python.python:conda');
+        assert.strictEqual(notifyMissingStub.firstCall.args[0], CONDA_MANAGER_ID);
         assert.strictEqual(notifyMissingStub.firstCall.args[1], projectManager);
 
         const props = getLazyInitTelemetry();

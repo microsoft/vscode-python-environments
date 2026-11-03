@@ -13,9 +13,13 @@ Use this manual to:
 - resolve environment variables; or
 - contribute an environment manager, package manager, or project creator.
 
-The runtime facade is [`src/api.ts`](../src/api.ts). The authoritative public
+The shared runtime facade is [`src/api.ts`](../src/api.ts); the npm entry point
+[`api/runtime/main.ts`](../api/runtime/main.ts) adds the extension-version check.
+The authoritative public
 contracts are in [`src/types.ts`](../src/types.ts), with public errors and type
 guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
+Capability types, catalog key sets, and raw-provider resolvers are in
+[`src/capabilities.ts`](../src/capabilities.ts).
 
 > [!IMPORTANT]
 > The API is flat. Call `api.getEnvironments()`, not
@@ -46,6 +50,7 @@ guards in [`src/publicErrors.ts`](../src/publicErrors.ts).
     - [Extensibility data types](#extensibility-data-types)
     - [Extensibility methods](#extensibility-methods)
 - [API interface groups](#api-interface-groups)
+- [Manager capabilities](#manager-capabilities)
 - [Compatibility guidance](#compatibility-guidance)
 - [Related documentation](#related-documentation)
 
@@ -96,11 +101,14 @@ export async function activate(
 
 1. Finds the extension with ID `ms-python.vscode-python-envs`
    (exported as `EXTENSION_ID`).
-2. Activates it when necessary.
-3. Returns its `PythonEnvironmentApi`.
+2. Verifies that its version meets the npm package's `minimumExtensionVersion`.
+3. Activates it when necessary.
+4. Returns its `PythonEnvironmentApi`.
 
-It rejects when the extension is missing or disabled, activation fails, or the
-extension does not expose its API. Acquire the object once and reuse it.
+It rejects when the extension is missing or disabled, its version is too old or
+invalid, activation fails, or the extension does not expose its API. Version checks
+apply to already-active extensions too and reject before activation or access to
+exports. Acquire the object once and reuse it.
 
 ### How to read this manual
 
@@ -734,9 +742,9 @@ const c: PackageManagementOptions = {
 #### `Pep440Version`
 
 Re-exported from `@renovatebot/pep440`. Represents a parsed PEP 440 version,
-returned by `getPackageAvailableVersions` and by a package manager's
-`getVersion`. Import it from `@vscode/python-environments` so your types match
-the API exactly.
+returned by `getPackageAvailableVersions` and by environment and package
+managers' `getVersion` methods. Import it from
+`@vscode/python-environments` so your types match the API exactly.
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -793,7 +801,8 @@ getPackages(
 
 **Returns** `Promise<Package[] | undefined>`. `undefined` means the manager
 could not produce a list - for example no package manager is associated with
-the environment - which is different from an empty array meaning "nothing
+the environment, or a project-aware manager cannot identify one unique project
+for the environment - which is different from an empty array meaning "nothing
 installed".
 
 ```typescript
@@ -818,7 +827,10 @@ refreshPackages(environment: PythonEnvironment): Promise<void>;
 | `environment` | [`PythonEnvironment`](#pythonenvironment) | Yes | The environment whose package list should be refreshed. |
 
 **Returns** `Promise<void>`. Changes surface through
-[`onDidChangePackages`](#ondidchangepackages).
+[`onDidChangePackages`](#ondidchangepackages). Rejects with
+`No package manager found` when no package manager can be resolved for the
+environment - including when a project-aware manager cannot identify one unique
+project.
 
 ```typescript
 // Packages were installed outside the extension - re-read the list.
@@ -842,8 +854,10 @@ managePackages(
 | `environment` | [`PythonEnvironment`](#pythonenvironment) | Yes | The environment to modify. |
 | `options` | [`PackageManagementOptions`](#packagemanagementoptions) | Yes | Must specify `install`, `uninstall`, or both. Also carries `upgrade`, `showSkipOption`, and `runHeadless`. |
 
-**Returns** `Promise<void>`, resolving when the operation finishes. Rejects if
-the underlying tool fails.
+**Returns** `Promise<void>`, resolving when the operation finishes. Rejects with
+`No package manager found` when no package manager can be resolved for the
+environment - including when a project-aware manager cannot identify one unique
+project - or if the underlying tool fails.
 
 ```typescript
 await api.managePackages(env, {
@@ -1348,6 +1362,11 @@ Terminal reuse has limits imposed by VS Code: reloading the window or closing
 the terminal creates a new one, and multi-root or multi-project scenarios get
 one terminal per project.
 
+In PowerShell, Bash, Git Bash, and Zsh, pass unquoted argument values. The
+extension quotes them for the shell so characters such as `$`, apostrophes
+(including PowerShell's typographic single quotes), and `$(...)` are passed
+literally, with or without shell integration.
+
 #### `runInDedicatedTerminal`
 
 Like `runInTerminal`, but keeps a terminal per key so repeated runs reuse the
@@ -1546,10 +1565,12 @@ trigger, as the specification.
 | `name` | `string` | Yes | Manager name. Allowed characters: `a-z`, `A-Z`, `0-9`, `-`, `_`. |
 | `displayName` | `string` | No | Name shown in the UI. |
 | `preferredPackageManagerId` | `string` | Yes | Package manager to pair with, formatted `<publisher>.<extension>:<manager-name>`, for example `ms-python.python:pip`. |
+| `capabilities` | `Capabilities<EnvironmentManagerCapability>` | No | Optional advertisements for legacy compatibility; when supplied, includes every environment capability key. See [manager capabilities](#manager-capabilities). |
 | `description` | `string` | No | Secondary text shown in the UI. |
 | `tooltip` | `string \| MarkdownString` | No | Hover text for the manager. |
 | `iconPath` | [`IconPath`](#iconpath) | No | Icon shown for the manager. |
 | `log` | `LogOutputChannel` | No | Output channel used for the manager's logs. |
+| `getVersion()` | `() => Promise<Pep440Version \| undefined>` | No | Returns the parsed PEP 440 version of the underlying environment management tool. Return `undefined` when the manager has no versioned tool or its version is unavailable. |
 | `getEnvironments(scope)` | `(scope: GetEnvironmentsScope) => Promise<PythonEnvironment[]>` | Yes | Returns the environments known for the scope. Called frequently by UI surfaces. |
 | `refresh(scope)` | `(scope: RefreshEnvironmentsScope) => Promise<void>` | Yes | Re-discovers environments for the scope. |
 | `set(scope, environment?)` | `(scope: SetEnvironmentScope, environment?: PythonEnvironment) => Promise<void>` | Yes | Sets or clears the active environment for the scope. Also called at startup to rehydrate persisted state. |
@@ -1569,6 +1590,10 @@ class MyEnvManager implements EnvironmentManager {
     readonly preferredPackageManagerId = 'ms-python.python:pip';
 
     constructor(private readonly api: PythonEnvironmentApi) {}
+
+    async getVersion(): Promise<Pep440Version | undefined> {
+        return getMyManagerVersion();
+    }
 
     async getEnvironments(
         scope: GetEnvironmentsScope,
@@ -1613,12 +1638,61 @@ Reports and changes the packages of an environment.
 | `refresh(environment)` | `(environment: PythonEnvironment) => Promise<void>` | Yes | Re-reads the installed package list. |
 | `getPackages(environment, options?)` | `(environment: PythonEnvironment, options?: GetPackagesOptions) => Promise<Package[] \| undefined>` | Yes | Returns installed packages, or `undefined` if they cannot be retrieved. |
 | `getPackageWatchTargets(environment)` | `(environment: PythonEnvironment) => RelativePattern[]` | No | Extra filesystem patterns to watch for install and uninstall changes, appended to the default site-packages locations. Implement for manager-specific locations such as `conda-meta`. |
+| `createForProject(project)` | `(project: PythonProject) => PackageManager` | No | Creates a manager bound to a project for project-sensitive operations. |
+| `capabilities` | `Capabilities<PackageManagerCapability>` | No | Optional advertisements for legacy compatibility; when supplied, includes every package capability key, evaluated on the correct project-bound instance. See [manager capabilities](#manager-capabilities). |
+| `dispose()` | `() => void` | No | Releases resources owned by the manager. The extension disposes project-scoped managers when their project is removed or replaced, their provider is unregistered, or the extension shuts down. |
 | `getDirectPackageNames(environment)` | `(environment: PythonEnvironment) => Promise<Set<string> \| undefined>` | No | Best-effort set of non-transitive package names. Most tools cannot record user intent - pip uses `pip list --not-required`, which reports leaf packages rather than explicitly installed ones. |
 | `clearCache()` | `() => Promise<void>` | No | Drops cached package data. |
 | `getVersion(environment)` | `(environment: PythonEnvironment) => Promise<Pep440Version \| undefined>` | No | Version of the underlying tool, such as pip, uv, or conda. |
 | `getPackageAvailableVersions(environment, packageName)` | `(environment: PythonEnvironment, packageName: string) => Promise<Pep440Version[] \| undefined>` | No | Available versions, newest first. Throw `PackageVersionLookupNotSupportedError` when unsupported and let operational failures propagate. Resolving to `undefined` is treated as unsupported. |
 | `formatInstallSpec(packageName, version)` | `(packageName: string, version: string) => string` | No | Formats a pinned specifier for this tool, for example `requests==2.31.0` for pip or `requests=2.31.0` for conda. Callers default to `name==version` when absent. |
 | `onDidChangePackages` | `Event<DidChangePackagesEventArgs>` | No | Fire when packages change. |
+
+##### Project-scoped package managers
+
+Implement `createForProject` when package operations depend on project files or
+the process working directory, as they do for tools such as Poetry. Callers that
+already have a `PythonProject` use that project directly. For environment-only
+operations, the extension selects a project-scoped manager only when exactly one
+tracked project uses the environment; it does not choose arbitrarily when no
+project or multiple projects match.
+
+Environment-only paths never use a project-aware provider as an unbound
+fallback. When no unique project can be inferred, `getPackageManager` returns no
+manager, so package reads return `undefined`, package views suppress those
+operations, and package mutations or refreshes reject with `No package manager
+found`. Keep project-specific caches and mutable state on the manager returned by
+`createForProject`, and implement `dispose` when that manager owns resources.
+
+When a scoped manager fires `onDidChangePackages`, the event's `manager` must be
+the exact scoped instance returned by `createForProject`. This requirement also
+applies when root and scoped managers share an event emitter.
+
+```typescript
+class ProjectPackageManager implements PackageManager {
+    readonly name = 'project-pm';
+
+    constructor(private readonly project?: PythonProject) {}
+
+    createForProject(project: PythonProject): PackageManager {
+        return new ProjectPackageManager(project);
+    }
+
+    dispose(): void {
+        // Release project-specific watchers or processes.
+    }
+
+    async manage(
+        environment: PythonEnvironment,
+        options: PackageManagementOptions,
+    ): Promise<void> {
+        if (!this.project) {
+            throw new Error('Package management requires a Python project.');
+        }
+        await runPackageCommand(options, { cwd: this.project.uri.fsPath });
+    }
+}
+```
 
 ```typescript
 class MyPackageManager implements PackageManager {
@@ -1764,13 +1838,13 @@ directly on the single flat API object.
 
 | Interface | Members grouped by the interface | Description |
 | --- | --- | --- |
-| `PythonEnvironmentsApi` | Environment discovery and resolution | Lists and refreshes discovered environments, resolves environment URIs, and reports discovery changes. |
+| `PythonEnvironmentsApi` | Environment discovery, resolution, and capabilities | Lists and refreshes discovered environments, resolves environment URIs, queries manager support, and reports discovery changes. |
 | `PythonProjectEnvironmentApi` | Selected environment get/set | Reads, updates, and observes the selected environment for URI or global scopes. |
 | `PythonEnvironmentManagementApi` | Environment creation/removal | Creates and removes environments through their associated environment managers. |
 | `PythonEnvironmentItemApi` | Environment item creation | Converts provider-supplied environment information into an identified `PythonEnvironment`. |
 | `PythonEnvironmentManagerRegistrationApi` | Environment manager registration | Registers an `EnvironmentManager` implementation with the extension. |
 | `PythonEnvironmentManagerApi` | Combined environment API | Combines environment registration, item creation, lifecycle, discovery, and selection interfaces. |
-| `PythonPackageGetterApi` | Package retrieval and version lookup | Retrieves and refreshes packages, looks up available versions, and reports package changes. |
+| `PythonPackageGetterApi` | Package retrieval, version lookup, and capabilities | Retrieves and refreshes packages, looks up available versions, queries routed manager support, and reports package changes. |
 | `PythonPackageManagementApi` | Package installation/removal | Installs, upgrades, or uninstalls packages in an environment. |
 | `PythonPackageItemApi` | Package item creation | Converts provider-supplied package information into an identified `Package`. |
 | `PythonPackageManagerRegistrationApi` | Package manager registration | Registers a `PackageManager` implementation with the extension. |
@@ -1786,6 +1860,115 @@ directly on the single flat API object.
 | `PythonExecutionApi` | Combined execution API | Combines terminal creation, terminal execution, task execution, and background execution. |
 | `PythonEnvironmentVariablesApi` | Environment variable lookup/events | Resolves effective environment variables and reports source changes. |
 | `PythonEnvironmentApi` | Complete flat public API | Combines all environment, package, project, execution, and environment-variable APIs exposed at runtime. |
+
+## Manager capabilities
+
+Capabilities are advisory, read-only checks of manager support. They do not
+invoke operations, validate requests, or guarantee success.
+
+| Environment capabilities | Package capabilities |
+| --- | --- |
+| `environments.list` | `packages.list` |
+| `environments.resolve` | `packages.install` |
+| `environments.getSelected` | `packages.uninstall` |
+| `environments.setSelected` | `packages.upgrade` |
+| `environments.create` | `packages.list.direct` |
+| `environments.remove` | `packages.fetchversions` |
+
+Listing includes refresh. Package installation, uninstallation, and upgrades
+use the existing `manage()` method. `packages.list.direct` is best-effort
+classification, not exact installation intent. Selection is scoped environment
+selection, not shell activation.
+Pip reports installation, uninstallation, and upgrades as unsupported for Python 2 environments.
+
+Public environment and package operations initiate the corresponding capability
+queries before delegating to managers. These queries are observational: operations
+do not wait for them or use their results to gate execution, and probe failures
+are logged without changing operation results. They use the existing
+`getEnvironmentManagerCapability` and `getPackageManagerCapability` methods,
+including their legacy fallback and query telemetry. Package queries include the
+routed manager's project when applicable. Registration, item factories, project
+APIs, and execution APIs have no corresponding capability checks.
+
+Use the exported `EnvironmentCapability` and `PackageCapability` constants or
+their literal string values.
+`PackageCapability.ListDirect` is `packages.list.direct`;
+`PackageCapability.FetchAvailableVersions` is `packages.fetchversions`.
+
+### Querying support
+
+Environment queries target an explicit manager ID; package queries follow
+environment/project routing. They use registered managers without activation,
+waiting, or prompting. Unavailable managers return `{ supported: false, reason }`.
+An explicit package-query project must be registered; an unregistered nested
+project cannot use its containing project's provider.
+File-project paths are compared using platform-aware normalization and routed through the registered URI.
+Feature-detect query methods when supporting older extension runtimes:
+
+```typescript
+import { PackageCapability } from '@vscode/python-environments';
+
+if (typeof api.getPackageManagerCapability === 'function') {
+    const support = await api.getPackageManagerCapability(environment, PackageCapability.ListDirect);
+    if (!support.supported) {
+        // support.reason explains why this feature is unavailable.
+    }
+}
+```
+
+### Advertising manager support
+
+Managers may omit `capabilities` for legacy compatibility. When supplied, the
+map must advertise every capability key. An omitted map uses legacy method
+inference; a missing key in a supplied map resolves `{ supported: false,
+reason: 'Capability not implemented' }`. Checks receive `CapabilityContext`
+and return `Promise<Support>`.
+
+Legacy inference uses `getLegacyPackageManagerCapability(manager, capability)`
+or `getLegacyEnvironmentManagerCapability(manager, capability)`. They inspect method
+presence without executing methods or reading advertisements. Listing requires both
+listing and refresh methods; package install, uninstall, and upgrade require `manage`.
+Other capabilities require their corresponding methods. This does not verify tool
+versions or option behavior. Regular queries use this fallback only when the map is omitted.
+Legacy helper results include `isLegacy: true`; other `Support` results may omit
+the field, which means false.
+
+```typescript
+import {
+    Capabilities,
+    PackageCapability,
+    PackageManagerCapability,
+    supportedCapability,
+    unsupportedCapability,
+} from '@vscode/python-environments';
+import { l10n } from 'vscode';
+
+// Members of a PackageManager implementation:
+readonly capabilities: Capabilities<PackageManagerCapability> = {
+    [PackageCapability.List]: supportedCapability,
+    [PackageCapability.ListDirect]: supportedCapability,
+    [PackageCapability.FetchAvailableVersions]: unsupportedCapability,
+    [PackageCapability.Install]: supportedCapability,
+    [PackageCapability.Uninstall]: supportedCapability,
+    [PackageCapability.Upgrade]: async (_context) => ({
+        supported: false,
+        reason: l10n.t('This manager does not support upgrading packages.'),
+    }),
+};
+```
+
+Checks must not prompt, mutate state, or invoke operations to test support.
+Return `{ supported: false, reason }` for unsupported features; let unexpected
+probe failures reject.
+
+Public routed queries emit `MANAGER.CAPABILITY_QUERY` with the manager ID, kind,
+tool version, capability, outcome, and `isLegacy` (false when omitted from support).
+Unavailable managers use ID `none`;
+unknown or failed version lookups use `unknown`. Version collection runs in the
+background with a one-second timeout and cannot delay query results or errors.
+Context, paths, reasons, and error messages are not sent. Unresolved routing
+emits an `unavailable` event. Ownership errors and routing exceptions thrown
+before capture, as well as internal checks, do not emit this event.
 
 ## Compatibility guidance
 
@@ -1805,9 +1988,24 @@ directly on the single flat API object.
 The public API is intended to avoid breaking changes. Check
 [`api/CHANGELOG.md`](../api/CHANGELOG.md) when updating the package.
 
+The npm package and VS Code extension are independently versioned. Each npm
+release's `package.json` declares an exact stable `minimumExtensionVersion`.
+The npm helper accepts installed versions greater than or equal to that floor
+using SemVer precedence. A `1.40.0` floor rejects `1.40.0-rc.1`, but accepts
+`1.41.0-rc.1`, odd-minor preview builds such as `1.41.0`, and build metadata.
+Incompatible versions produce an error asking the consumer to update the
+extension and reload VS Code; invalid or missing version metadata also rejects.
+
+New npm releases use the latest stable extension as their baseline. Already
+published packages keep their original floor, so supporting an older extension
+may require pinning an older npm package. This is a minimum-version guarantee,
+not protection against future breaking extension changes. Type-only imports or
+direct access to the extension's exports bypass the helper's runtime check.
+
 ## Related documentation
 
 - [`src/api.ts`](../src/api.ts) - runtime API facade
+- [`api/runtime/main.ts`](../api/runtime/main.ts) - npm compatibility guard
 - [`src/types.ts`](../src/types.ts) - authoritative public type contracts
 - [`src/publicErrors.ts`](../src/publicErrors.ts) - public errors and type guards
 - [`api/README.md`](../api/README.md) - npm package quick start

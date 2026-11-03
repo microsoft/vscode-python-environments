@@ -4,7 +4,13 @@
 import { commands, Disposable, l10n, QuickPickItem, TextDocument, Uri, window } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
-import { readInlineScriptMetadataFromFile } from '../../common/inlineScript/metadata';
+import {
+    getInlineScriptSetupProblem,
+    parseInlineScriptMetadata,
+    readInlineScriptHeaderFromFile,
+    readInlineScriptMetadataFromFile,
+    sliceHeaderBytes,
+} from '../../common/inlineScript/metadata';
 import { InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { InlineScriptStrings } from '../../common/localize';
 import { traceError, traceInfo, traceVerbose } from '../../common/logging';
@@ -17,25 +23,24 @@ import {
 } from '../../common/window.apis';
 import { asRelativePath, findFiles, getOpenTextDocuments } from '../../common/workspace.apis';
 import type { EnvironmentManagers } from '../envManagers';
-import { shortenVersionString } from '../../managers/common/utils';
 import { registerInlineScriptCodeLens } from './codeLens';
 import { promptUpdateExtensionsForInlineScripts } from './extensionVersionCheck';
 import { registerInlineScriptSetupCodeAction } from './setupCodeAction';
 
 /**
  * Hidden command invoked by the inline-script CodeLens to set up the environment for one script.
- * Intentionally not contributed in `package.json` while the feature is behind the internal flag.
+ * Intentionally not contributed in `package.json` because only the CodeLens and quick fix invoke it.
  */
 export const SETUP_INLINE_SCRIPT_ENV_COMMAND = 'python-envs.setupInlineScriptEnv';
 
 /**
  * Command that scans the workspace and sets up environments for the selected inline-script files.
  * Contributed in `package.json` but only shown in the Command Palette while the inline-scripts
- * feature flag is enabled (gated by the `pythonEnvsInlineScriptsEnabled` context key).
+ * preview is active (gated by the activation-latched `pythonEnvsInlineScriptsEnabled` context key).
  */
 export const SETUP_INLINE_SCRIPT_ENVS_COMMAND = 'python-envs.setupInlineScriptEnvs';
 
-/** Upper bound on the number of `.py` files the bulk command scans. */
+/** Upper bound on the number of Python files the bulk command scans. */
 const MAX_INLINE_SCRIPT_FILES = 1000;
 
 /** How many candidate files' PEP 723 headers are read concurrently during the bulk scan. */
@@ -107,26 +112,55 @@ function findOpenDocument(scriptUri: Uri): TextDocument | undefined {
 }
 
 /**
- * Save `scriptUri` if it is open with unsaved changes, so setup reads what the user actually sees.
+ * Save dirty scripts and seed saved metadata for open scripts, including clean Undo/Revert results.
  *
  * Returns `false` when the document could not be saved; setup must not run in that case.
  */
 async function saveScriptBeforeSetup(scriptUri: Uri, routing: InlineScriptRoutingRegistry): Promise<boolean> {
     const document = findOpenDocument(scriptUri);
-    if (!document?.isDirty) {
+    if (!document) {
         return true;
     }
-    if (!(await document.save())) {
-        traceError(`Could not save ${scriptUri.fsPath} before setting up its inline-script environment.`);
-        return false;
+    if (document.isDirty) {
+        if (!(await document.save())) {
+            traceError(`Could not save ${scriptUri.fsPath} before setting up its inline-script environment.`);
+            return false;
+        }
+        traceVerbose(`Saved ${scriptUri.fsPath} before setting up its inline-script environment.`);
     }
-    traceVerbose(`Saved ${scriptUri.fsPath} before setting up its inline-script environment.`);
     // Seeding here is load-bearing: without it a just-typed block goes from no metadata to an
     // identity while `create` runs, which `setUpInlineScriptEnvironment` reads as a concurrent edit
     // and silently skips the association.
+    const savedVersion = document.version;
+    const metadataRevision = routing.getMetadataRevision(scriptUri);
     const metadata = await readInlineScriptMetadataFromFile(scriptUri);
-    if (metadata) {
+    if (
+        metadata &&
+        !document.isDirty &&
+        document.version === savedVersion &&
+        routing.getMetadataRevision(scriptUri) === metadataRevision
+    ) {
         routing.setMetadata(scriptUri, metadata);
+    }
+    return true;
+}
+
+async function validateScriptBeforeSetup(uri: Uri): Promise<boolean> {
+    const document = findOpenDocument(uri);
+    const text = document ? sliceHeaderBytes(document.getText()) : await readInlineScriptHeaderFromFile(uri);
+    if (text === undefined) {
+        showErrorMessage(InlineScriptStrings.scriptReadFailedBeforeSetup);
+        return false;
+    }
+    const result = parseInlineScriptMetadata(text, uri.fsPath);
+    const problem = getInlineScriptSetupProblem(result);
+    if (problem === 'metadata') {
+        showWarningMessage(InlineScriptStrings.invalidMetadataBeforeSetup);
+        return false;
+    }
+    if (problem === 'requires-python') {
+        showWarningMessage(InlineScriptStrings.invalidPythonRequirement);
+        return false;
     }
     return true;
 }
@@ -135,7 +169,6 @@ async function saveScriptBeforeSetup(scriptUri: Uri, routing: InlineScriptRoutin
 export function setupInlineScriptEnvironmentHandler(
     em: EnvironmentManagers,
     routing: InlineScriptRoutingRegistry,
-    onEnvironmentReady?: (scriptUri: Uri, version: string | undefined) => void,
 ): (scriptUri?: Uri) => Promise<void> {
     return async (scriptUri?: Uri): Promise<void> => {
         const uri = scriptUri ?? window.activeTextEditor?.document.uri;
@@ -146,12 +179,18 @@ export function setupInlineScriptEnvironmentHandler(
             showErrorMessage(l10n.t('The inline script environment manager is not available yet. Try again shortly.'));
             return;
         }
-        if (!(await saveScriptBeforeSetup(uri, routing))) {
-            showErrorMessage(InlineScriptStrings.saveFailedBeforeSetup);
-            return;
-        }
         let environment: PythonEnvironment | undefined;
         try {
+            if (!(await validateScriptBeforeSetup(uri))) {
+                return;
+            }
+            if (!(await saveScriptBeforeSetup(uri, routing))) {
+                showErrorMessage(InlineScriptStrings.saveFailedBeforeSetup);
+                return;
+            }
+            if (!(await validateScriptBeforeSetup(uri))) {
+                return;
+            }
             environment = await setUpInlineScriptEnvironment(uri, em, routing);
         } catch (error) {
             traceError(`Failed to set up the inline-script environment for ${uri.fsPath}:`, error);
@@ -166,7 +205,6 @@ export function setupInlineScriptEnvironmentHandler(
             notifyInlineScriptSetupOutcome(uri, routing);
             return;
         }
-        onEnvironmentReady?.(uri, shortenVersionString(environment.version));
         // Kept out of the try: the environment is already set up, so a failure in this follow-up
         // must not be reported to the user as a setup failure.
         await promptUpdateExtensionsForInlineScripts().catch((error) =>
@@ -182,16 +220,23 @@ export function notifyInlineScriptSetupOutcome(uri: Uri, routing: InlineScriptRo
         return;
     }
     if (outcome?.kind === 'cancelled') {
-        showInformationMessage(l10n.t('Environment setup was canceled.'));
+        showInformationMessage(outcome.message ?? l10n.t('Environment setup was canceled.'));
         return;
     }
     if (outcome?.kind === 'failed') {
+        if (outcome.alreadyReported) {
+            return;
+        }
         if (outcome.category === 'compatible-python-declined') {
             // User declined the install prompt; don't nag.
             return;
         }
         if (outcome.category === 'no-compatible-python') {
             showWarningMessage(buildNoCompatiblePythonMessage(outcome.requiresPython));
+            return;
+        }
+        if (outcome.message) {
+            showErrorMessage(outcome.message);
             return;
         }
     }
@@ -239,7 +284,11 @@ export async function setUpInlineScriptEnvironmentsInWorkspace(
         showErrorMessage(l10n.t('The inline script environment manager is not available yet. Try again shortly.'));
         return;
     }
-    const files = await findFiles('**/*.py', '{**/.venv/**,**/node_modules/**}', MAX_INLINE_SCRIPT_FILES);
+    const files = await findFiles(
+        '**/*.{py,Py,pY,PY}',
+        '{**/.venv/**,**/node_modules/**}',
+        MAX_INLINE_SCRIPT_FILES,
+    );
     if (!files || files.length === 0) {
         showInformationMessage(l10n.t('No Python files were found in the workspace.'));
         return;
@@ -360,9 +409,9 @@ async function filterInlineScriptFiles(files: readonly Uri[]): Promise<Uri[]> {
 
 /**
  * Register the inline-script user-facing surfaces (the CodeLens, the quick fix, and their setup
- * commands). Only called when the PEP 723 inline-script feature flag is enabled. The single-file
+ * commands). Only called when the PEP 723 inline-script preview is active. The single-file
  * setup command is invoked by both surfaces and stays out of `package.json`; the bulk command is
- * palette-gated behind the flag.
+ * palette-gated behind the activation-latched context key.
  */
 export function registerInlineScriptUx(em: EnvironmentManagers, routing: InlineScriptRoutingRegistry): Disposable[] {
     const codeLens = registerInlineScriptCodeLens(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND);
@@ -371,9 +420,7 @@ export function registerInlineScriptUx(em: EnvironmentManagers, routing: InlineS
         registerInlineScriptSetupCodeAction(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND),
         commands.registerCommand(
             SETUP_INLINE_SCRIPT_ENV_COMMAND,
-            setupInlineScriptEnvironmentHandler(em, routing, (uri, version) =>
-                codeLens.provider.noteEnvironmentReady(uri, version),
-            ),
+            setupInlineScriptEnvironmentHandler(em, routing),
         ),
         commands.registerCommand(SETUP_INLINE_SCRIPT_ENVS_COMMAND, () =>
             setUpInlineScriptEnvironmentsInWorkspace(em, routing),

@@ -1,19 +1,29 @@
 import { CancellationToken, Progress, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
-import { PYTHON_EXTENSION_ID } from '../constants';
+import {
+    CONDA_MANAGER_ID,
+    HATCH_MANAGER_ID,
+    PIPENV_MANAGER_ID,
+    PIXI_MANAGER_ID,
+    POETRY_MANAGER_ID,
+    PYENV_MANAGER_ID,
+    PYTHON_EXTENSION_ID,
+    SYSTEM_MANAGER_ID,
+    VENV_MANAGER_ID,
+} from '../constants';
 import { traceVerbose, traceWarn } from '../logging';
 
 const priorityOrder = [
-    `${PYTHON_EXTENSION_ID}:pyenv`,
-    `${PYTHON_EXTENSION_ID}:pixi`,
-    `${PYTHON_EXTENSION_ID}:conda`,
-    `${PYTHON_EXTENSION_ID}:pipenv`,
-    `${PYTHON_EXTENSION_ID}:poetry`,
+    PYENV_MANAGER_ID,
+    PIXI_MANAGER_ID,
+    CONDA_MANAGER_ID,
+    PIPENV_MANAGER_ID,
+    POETRY_MANAGER_ID,
     `${PYTHON_EXTENSION_ID}:activestate`,
-    `${PYTHON_EXTENSION_ID}:hatch`,
-    `${PYTHON_EXTENSION_ID}:venv`,
-    `${PYTHON_EXTENSION_ID}:system`,
+    HATCH_MANAGER_ID,
+    VENV_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
 ];
 function sortManagersByPriority(managers: InternalEnvironmentManager[]): InternalEnvironmentManager[] {
     const systemId = priorityOrder[priorityOrder.length - 1];
@@ -40,7 +50,19 @@ export async function handlePythonPath(
     projectEnvManagers: InternalEnvironmentManager[],
     reporter?: Progress<{ message?: string; increment?: number }>,
     token?: CancellationToken,
+    toolExecution = false,
 ): Promise<PythonEnvironment | undefined> {
+    const resolve = (manager: InternalEnvironmentManager) => {
+        if (!toolExecution) {
+            return manager.resolve(interpreterUri);
+        }
+        const tools = manager.tools;
+        if (!tools) {
+            traceVerbose(`Skipping ${manager.id}: no non-interactive interpreter resolver.`);
+            return undefined;
+        }
+        return tools.resolve(interpreterUri);
+    };
     // Use the managers user has set for the project first. Likely, these
     // managers are the ones that should be used.
     for (const manager of sortManagersByPriority(projectEnvManagers)) {
@@ -49,7 +71,7 @@ export async function handlePythonPath(
         }
         reporter?.report({ message: `Checking ${manager.displayName}` });
         traceVerbose(`Checking ${manager.displayName} (${manager.id}) for ${interpreterUri.fsPath}`);
-        const env = await manager.resolve(interpreterUri);
+        const env = await resolve(manager);
         if (env) {
             traceVerbose(`Using ${manager.displayName} (${manager.id}) to handle ${interpreterUri.fsPath}`);
             return env;
@@ -68,7 +90,7 @@ export async function handlePythonPath(
         }
         reporter?.report({ message: `Checking ${manager.displayName}` });
         traceVerbose(`Checking ${manager.displayName} (${manager.id}) for ${interpreterUri.fsPath}`);
-        const env = await manager.resolve(interpreterUri);
+        const env = await resolve(manager);
         if (env) {
             traceVerbose(`Using ${manager.displayName} (${manager.id}) to handle ${interpreterUri.fsPath}`);
             return env;

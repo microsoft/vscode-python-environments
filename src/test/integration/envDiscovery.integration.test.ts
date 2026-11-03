@@ -112,12 +112,17 @@ suite('Integration: Environment Discovery', function () {
             // Trigger refresh - this should fire events for discovered environments
             await api.refreshEnvironments(undefined);
 
-            // Wait for events to propagate (discovery is async)
-            await handler.assertFiredAtLeast(1, 10_000);
+            // Managers refresh concurrently, and one without environments fires an empty change,
+            // so wait for the first event that reports environments (discovery is async).
+            await waitForCondition(
+                () => handler.all.some((e) => e.length > 0),
+                10_000,
+                'onDidChangeEnvironments did not report any environments during refresh',
+            );
 
             // Verify event has valid structure
             // DidChangeEnvironmentsEventArgs is an array of {kind, environment}
-            const events = handler.first;
+            const events = handler.all.find((e) => e.length > 0);
             assert.ok(events, 'Event should have a value');
             assert.ok(Array.isArray(events), 'Event should be an array');
             assert.ok(events.length > 0, 'Should have received environment change events');

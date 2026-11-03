@@ -2,8 +2,13 @@
 // Licensed under the MIT License.
 
 import type { Pep440Version } from '@renovatebot/pep440';
-import { CancellationError, Disposable, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
+import { CancellationError, Disposable, Event, LogOutputChannel, MarkdownString, RelativePattern } from 'vscode';
 import { PackageVersionLookupNotSupportedError } from '../../publicErrors';
+import {
+    resolveEnvironmentManagerCapability,
+    resolvePackageManagerCapability,
+} from '../../capabilities';
+import type { CapabilityContext, EnvironmentManagerCapability, PackageManagerCapability, Support } from '../../capabilities';
 import { ISSUES_URL } from '../../common/constants';
 import { CreateEnvironmentNotSupported, RemoveEnvironmentNotSupported } from '../../common/errors/NotSupportedError';
 import { traceWarn } from '../../common/logging';
@@ -11,6 +16,13 @@ import { StopWatch } from '../../common/stopWatch';
 import { EventNames } from '../../common/telemetry/constants';
 import { classifyError, isTimeoutErrorType } from '../../common/telemetry/errorClassifier';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
+import {
+    EnvironmentToolSupport,
+    PackageToolSupport,
+    pythonToolSupport,
+    supportsEnvironmentTools,
+    supportsPackageTools,
+} from '../../internal/pythonToolSupport';
 import type {
     CreateEnvironmentOptions,
     CreateEnvironmentScope,
@@ -27,6 +39,7 @@ import type {
     PackageManagementOptions,
     PackageManager,
     PythonEnvironment,
+    PythonProject,
     QuickCreateConfig,
     RefreshEnvironmentsScope,
     RemoveEnvironmentOptions,
@@ -46,6 +59,10 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         public readonly id: string,
         private readonly manager: EnvironmentManager,
     ) {}
+
+    public get tools(): EnvironmentToolSupport | undefined {
+        return supportsEnvironmentTools(this.manager) ? this.manager[pythonToolSupport] : undefined;
+    }
 
     public get name(): string {
         return this.manager.name;
@@ -69,8 +86,21 @@ export class InternalEnvironmentManager implements EnvironmentManager {
         return this.manager.log;
     }
 
+    public getVersion(): Promise<Pep440Version | undefined> {
+        return this.manager.getVersion ? this.manager.getVersion() : Promise.resolve(undefined);
+    }
+
+    public get capabilities(): EnvironmentManager['capabilities'] {
+        return this.manager.capabilities;
+    }
+
     public get supportsCreate(): boolean {
         return this.manager.create !== undefined;
+    }
+
+    /** Resolves raw-provider advertisements or legacy method support, independently of operational fallbacks. */
+    public getCapability(capability: EnvironmentManagerCapability, context?: CapabilityContext): Promise<Support> {
+        return resolveEnvironmentManagerCapability(this.manager, capability, context);
     }
 
     create(
@@ -210,10 +240,58 @@ function inferPackageManagementTrigger(
 }
 
 export class InternalPackageManager implements PackageManager {
+    private readonly relatedManagers: WeakSet<PackageManager>;
+    private readonly packageChangeEventValue: Event<DidChangePackagesEventArgs> | undefined;
+    private isDisposed = false;
+    public readonly createForProject?: (project: PythonProject) => InternalPackageManager;
+
+    /** Resolves support on this live raw instance, retaining any project-bound state. */
+    public getCapability(capability: PackageManagerCapability, context: CapabilityContext = {}): Promise<Support> {
+        this.throwIfDisposed();
+        return resolvePackageManagerCapability(this.manager, capability, {
+            ...context,
+            project: this.project ?? context.project,
+        });
+    }
+
     public constructor(
         public readonly id: string,
         private readonly manager: PackageManager,
-    ) {}
+        public readonly project?: PythonProject,
+        relatedManagers?: WeakSet<PackageManager>,
+    ) {
+        this.relatedManagers = relatedManagers ?? new WeakSet<PackageManager>();
+        this.relatedManagers.add(manager);
+        const packageChangeEvent = manager.onDidChangePackages;
+        if (packageChangeEvent) {
+            this.packageChangeEventValue = (listener) =>
+                packageChangeEvent((event) => {
+                    if (event.manager === manager) {
+                        listener(event);
+                    }
+                });
+        }
+        const createForProject = manager.createForProject?.bind(manager);
+        if (createForProject) {
+            this.createForProject = (scopedProject) => {
+                this.throwIfDisposed();
+                const scopedManager = createForProject(scopedProject);
+                if (!scopedManager) {
+                    throw new Error(`Package manager ${this.id} did not create a manager for the requested project`);
+                }
+                return new InternalPackageManager(
+                    this.id,
+                    scopedManager,
+                    scopedProject,
+                    this.relatedManagers,
+                );
+            };
+        }
+    }
+
+    public get tools(): PackageToolSupport | undefined {
+        return supportsPackageTools(this.manager) ? this.manager[pythonToolSupport] : undefined;
+    }
 
     public get name(): string {
         return this.manager.name;
@@ -234,7 +312,12 @@ export class InternalPackageManager implements PackageManager {
         return this.manager.log;
     }
 
+    public get capabilities(): PackageManager['capabilities'] {
+        return this.manager.capabilities;
+    }
+
     async manage(environment: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
+        this.throwIfDisposed();
         const stopWatch = new StopWatch();
         const triggerSource = inferPackageManagementTrigger(options);
         try {
@@ -264,26 +347,45 @@ export class InternalPackageManager implements PackageManager {
     }
 
     refresh(environment: PythonEnvironment): Promise<void> {
+        this.throwIfDisposed();
         return this.manager.refresh(environment);
     }
 
     getPackages(environment: PythonEnvironment, options?: GetPackagesOptions): Promise<Package[] | undefined> {
+        this.throwIfDisposed();
         return this.manager.getPackages(environment, options);
     }
 
     getPackageWatchTargets(environment: PythonEnvironment): RelativePattern[] {
+        this.throwIfDisposed();
         return this.manager.getPackageWatchTargets?.(environment) ?? [];
     }
 
     onDidChangePackages(handler: (e: DidChangePackagesEventArgs) => void): Disposable {
-        return this.manager.onDidChangePackages ? this.manager.onDidChangePackages(handler) : new Disposable(() => {});
+        return this.packageChangeEventValue ? this.packageChangeEventValue(handler) : new Disposable(() => {});
     }
 
-    equals(other: PackageManager): boolean {
+    get packageChangeEvent(): Event<DidChangePackagesEventArgs> | undefined {
+        return this.packageChangeEventValue;
+    }
+
+    wraps(other: PackageManager): boolean {
         return this.manager === other;
     }
 
+    equals(other: PackageManager): boolean {
+        return this.relatedManagers.has(other);
+    }
+
+    dispose(): void {
+        if (!this.isDisposed) {
+            this.isDisposed = true;
+            this.manager.dispose?.();
+        }
+    }
+
     getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
+        this.throwIfDisposed();
         return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
     }
 
@@ -306,6 +408,7 @@ export class InternalPackageManager implements PackageManager {
         packageName: string,
         options?: GetPackageAvailableVersionsOptions,
     ): Promise<Pep440Version[] | undefined> {
+        this.throwIfDisposed();
         const shouldThrow = options?.errorMode === 'throw';
         try {
             if (!this.manager.getPackageAvailableVersions) {
@@ -329,14 +432,22 @@ export class InternalPackageManager implements PackageManager {
     }
 
     getDirectPackageNames(environment: PythonEnvironment): Promise<Set<string> | undefined> {
+        this.throwIfDisposed();
         return this.manager.getDirectPackageNames
             ? this.manager.getDirectPackageNames(environment)
             : Promise.resolve(undefined);
     }
 
     formatInstallSpec(packageName: string, version: string): string {
+        this.throwIfDisposed();
         return this.manager.formatInstallSpec
             ? this.manager.formatInstallSpec(packageName, version)
             : `${packageName}==${version}`;
+    }
+
+    private throwIfDisposed(): void {
+        if (this.isDisposed) {
+            throw new Error(`Package manager ${this.id} has been disposed`);
+        }
     }
 }

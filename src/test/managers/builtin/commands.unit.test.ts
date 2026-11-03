@@ -43,6 +43,7 @@ suite('Pip and UV command parsing', () => {
         runPythonStub = sinon.stub(helpers, 'runPython').resolves('');
         runUvStub = sinon.stub(helpers, 'runUV').resolves('');
         shouldUseUvStub = sinon.stub(helpers, 'shouldUseUv').resolves(false);
+        sinon.stub(helpers, 'getUvExecutable').resolves('uv');
     });
 
     teardown(() => {
@@ -414,6 +415,24 @@ suite('Pip and UV command parsing', () => {
             assert.strictEqual(args[pythonIndex + 1], environmentPath);
             assert.ok(!args.includes(baseInterpreter));
         }
+    });
+
+    test('UV package commands use the resolved workspace executable', async () => {
+        const uvExecutable = path.join(process.cwd(), '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        shouldUseUvStub.resolves(true);
+        (helpers.getUvExecutable as sinon.SinonStub).resolves(uvExecutable);
+        const environmentPath = path.join(process.cwd(), '.venv');
+        const command: PipInstallCommand | UvInstallCommand = await createPipOrUvCommand(
+            { pythonExecutable: path.join(environmentPath, 'bin', 'python'), log: mockLog },
+            environmentPath,
+            PipInstallCommand,
+            UvInstallCommand,
+        );
+
+        await command.execute({ packages: [{ packageName: 'requests' }] });
+
+        assert.strictEqual(runUvStub.firstCall.args[5], uvExecutable);
+        assert.deepStrictEqual(runUvStub.firstCall.args[0].slice(0, 4), ['pip', 'install', '--python', environmentPath]);
     });
 
     test('Pip package commands continue using the environment interpreter', async () => {

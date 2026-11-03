@@ -54,6 +54,7 @@ export class UvListDirectNamesCommand extends ListDirectNamesCommand {
             this.log,
             executeArgs?.cancellationToken,
             this.timeout,
+            this.uvExecutable,
         );
         const packageNames = new Set<string>();
         const lines = output.split('\n');

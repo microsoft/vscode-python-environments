@@ -6,7 +6,9 @@ import * as sinon from 'sinon';
 import { CancellationTokenSource, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import { handlePythonPath } from '../../common/utils/pythonPath';
+import * as logging from '../../common/logging';
 import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
+import { VENV_MANAGER_ID, CONDA_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../common/constants';
 
 function createMockManager(
     id: string,
@@ -40,9 +42,24 @@ suite('handlePythonPath', () => {
         sinon.restore();
     });
 
+    test('tool resolution explicitly skips unsupported managers without invoking their public resolver', async () => {
+        const unsupported = createMockManager('other.extension:manager', 'Unsupported');
+        const expected = createMockEnv(VENV_MANAGER_ID);
+        const supported = createMockManager(VENV_MANAGER_ID, 'Venv');
+        const resolve = sinon.stub().resolves(expected);
+        Object.defineProperty(supported, 'tools', { value: { resolve } });
+        const logged = sinon.stub(logging, 'traceVerbose');
+        const result = await handlePythonPath(testUri, [supported], [unsupported], undefined, undefined, true);
+        assert.strictEqual(result, expected);
+        assert.ok(resolve.calledOnceWithExactly(testUri));
+        assert.ok((unsupported.resolve as sinon.SinonStub).notCalled);
+        assert.ok((supported.resolve as sinon.SinonStub).notCalled);
+        assert.ok(logged.calledWithMatch(/Skipping other.extension:manager.*non-interactive/));
+    });
+
     test('returns undefined when no managers can resolve the path', async () => {
-        const manager1 = createMockManager('ms-python.python:venv', 'Venv');
-        const manager2 = createMockManager('ms-python.python:conda', 'Conda');
+        const manager1 = createMockManager(VENV_MANAGER_ID, 'Venv');
+        const manager2 = createMockManager(CONDA_MANAGER_ID, 'Conda');
 
         const result = await handlePythonPath(testUri, [manager1, manager2], []);
 
@@ -50,9 +67,9 @@ suite('handlePythonPath', () => {
     });
 
     test('returns environment from project manager that resolves first', async () => {
-        const mockEnv = createMockEnv('ms-python.python:venv');
-        const projectManager = createMockManager('ms-python.python:venv', 'Venv', mockEnv);
-        const globalManager = createMockManager('ms-python.python:conda', 'Conda');
+        const mockEnv = createMockEnv(VENV_MANAGER_ID);
+        const projectManager = createMockManager(VENV_MANAGER_ID, 'Venv', mockEnv);
+        const globalManager = createMockManager(CONDA_MANAGER_ID, 'Conda');
 
         const result = await handlePythonPath(testUri, [globalManager], [projectManager]);
 
@@ -62,9 +79,9 @@ suite('handlePythonPath', () => {
     });
 
     test('falls back to global managers when project managers cannot resolve', async () => {
-        const mockEnv = createMockEnv('ms-python.python:conda');
-        const projectManager = createMockManager('ms-python.python:venv', 'Venv');
-        const globalManager = createMockManager('ms-python.python:conda', 'Conda', mockEnv);
+        const mockEnv = createMockEnv(CONDA_MANAGER_ID);
+        const projectManager = createMockManager(VENV_MANAGER_ID, 'Venv');
+        const globalManager = createMockManager(CONDA_MANAGER_ID, 'Conda', mockEnv);
 
         const result = await handlePythonPath(testUri, [globalManager], [projectManager]);
 
@@ -72,8 +89,8 @@ suite('handlePythonPath', () => {
     });
 
     test('does not re-check managers already checked as project managers', async () => {
-        const projectManager = createMockManager('ms-python.python:venv', 'Venv');
-        const globalManager = createMockManager('ms-python.python:venv', 'Venv');
+        const projectManager = createMockManager(VENV_MANAGER_ID, 'Venv');
+        const globalManager = createMockManager(VENV_MANAGER_ID, 'Venv');
 
         const result = await handlePythonPath(testUri, [globalManager], [projectManager]);
 
@@ -84,7 +101,7 @@ suite('handlePythonPath', () => {
     });
 
     test('returns undefined and does not throw for unresolvable paths', async () => {
-        const manager = createMockManager('ms-python.python:system', 'System');
+        const manager = createMockManager(SYSTEM_MANAGER_ID, 'System');
 
         const result = await handlePythonPath(Uri.file('/usr/bin/node'), [manager], []);
 
@@ -95,7 +112,7 @@ suite('handlePythonPath', () => {
         const cts = new CancellationTokenSource();
         cts.cancel();
 
-        const manager = createMockManager('ms-python.python:venv', 'Venv');
+        const manager = createMockManager(VENV_MANAGER_ID, 'Venv');
 
         const result = await handlePythonPath(testUri, [], [manager], undefined, cts.token);
 
@@ -107,7 +124,7 @@ suite('handlePythonPath', () => {
         const cts = new CancellationTokenSource();
         cts.cancel();
 
-        const manager = createMockManager('ms-python.python:venv', 'Venv');
+        const manager = createMockManager(VENV_MANAGER_ID, 'Venv');
 
         const result = await handlePythonPath(testUri, [manager], [], undefined, cts.token);
 
@@ -117,7 +134,7 @@ suite('handlePythonPath', () => {
 
     test('reports progress for project managers', async () => {
         const reporter = { report: sinon.stub() };
-        const projectManager = createMockManager('ms-python.python:venv', 'Venv');
+        const projectManager = createMockManager(VENV_MANAGER_ID, 'Venv');
 
         await handlePythonPath(testUri, [], [projectManager], reporter);
 
@@ -127,8 +144,8 @@ suite('handlePythonPath', () => {
 
     test('reports progress for global managers', async () => {
         const reporter = { report: sinon.stub() };
-        const manager1 = createMockManager('ms-python.python:venv', 'Venv');
-        const manager2 = createMockManager('ms-python.python:conda', 'Conda');
+        const manager1 = createMockManager(VENV_MANAGER_ID, 'Venv');
+        const manager2 = createMockManager(CONDA_MANAGER_ID, 'Conda');
 
         await handlePythonPath(testUri, [manager1, manager2], [], reporter);
 
@@ -140,8 +157,8 @@ suite('handlePythonPath', () => {
 
     test('sorts managers by priority order', async () => {
         // Neither resolves, so both get called — lets us verify call order
-        const systemManager = createMockManager('ms-python.python:system', 'System');
-        const condaManager = createMockManager('ms-python.python:conda', 'Conda');
+        const systemManager = createMockManager(SYSTEM_MANAGER_ID, 'System');
+        const condaManager = createMockManager(CONDA_MANAGER_ID, 'Conda');
 
         // Pass system first in array, but conda should be tried first (higher priority)
         await handlePythonPath(testUri, [systemManager, condaManager], []);
@@ -150,10 +167,10 @@ suite('handlePythonPath', () => {
     });
 
     test('returns first resolving manager and stops checking', async () => {
-        const venvEnv = createMockEnv('ms-python.python:venv');
-        const condaEnv = createMockEnv('ms-python.python:conda');
-        const venvManager = createMockManager('ms-python.python:venv', 'Venv', venvEnv);
-        const condaManager = createMockManager('ms-python.python:conda', 'Conda', condaEnv);
+        const venvEnv = createMockEnv(VENV_MANAGER_ID);
+        const condaEnv = createMockEnv(CONDA_MANAGER_ID);
+        const venvManager = createMockManager(VENV_MANAGER_ID, 'Venv', venvEnv);
+        const condaManager = createMockManager(CONDA_MANAGER_ID, 'Conda', condaEnv);
 
         // Conda is higher priority, so it resolves first
         const result = await handlePythonPath(testUri, [venvManager, condaManager], []);

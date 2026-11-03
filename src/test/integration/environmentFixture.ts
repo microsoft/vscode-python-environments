@@ -18,6 +18,7 @@ const OWNERSHIP_FILE_NAME = '.python-envs-test-owner.json';
 const COMMAND_TIMEOUT_MS = 180_000;
 const DISCOVERY_TIMEOUT_MS = 60_000;
 const API_REMOVAL_SETTLE_TIMEOUT_MS = 10_000;
+const CONDA_FIXTURE_PYTHON_VERSION = '3.12';
 
 export interface EnvironmentFixtureProvider {
     readonly environmentDirectory: string;
@@ -39,6 +40,8 @@ export interface EnvironmentFixtureRequest {
     readonly name: string;
     readonly packageManagerId: string;
     readonly provider: EnvironmentFixtureProvider;
+    /** Parent for the owned project directory; defaults to the system temporary directory. */
+    readonly parentDirectory?: vscode.Uri;
 }
 
 export interface EnvironmentFixture {
@@ -67,7 +70,7 @@ export async function createEnvironmentFixture(
 ): Promise<EnvironmentFixture> {
     const token = randomUUID();
     const fixtureName = `pyenvs-${sanitizeName(request.name).slice(0, 8)}-${process.pid}-${token.slice(0, 8)}`;
-    const projectUri = vscode.Uri.file(path.join(os.tmpdir(), fixtureName));
+    const projectUri = vscode.Uri.file(path.join(request.parentDirectory?.fsPath ?? os.tmpdir(), fixtureName));
     const prefix = vscode.Uri.joinPath(projectUri, request.provider.environmentDirectory);
     const markerUri = vscode.Uri.joinPath(projectUri, OWNERSHIP_FILE_NAME);
     const config = vscode.workspace.getConfiguration('python-envs', workspaceFolder.uri);
@@ -312,16 +315,12 @@ export function createCondaFixtureProvider(): EnvironmentFixtureProvider {
         environmentDirectory: '.conda',
         managerId: CONDA_MANAGER_ID,
         create: async (_api, prefix) => {
-            const version = await runFixtureCommand('python', [
-                '-c',
-                'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")',
-            ]);
             await runFixtureCommand(await getCondaExecutable(), [
                 'create',
                 '--yes',
                 '--prefix',
                 prefix.fsPath,
-                `python=${version.stdout.trim()}`,
+                `python=${CONDA_FIXTURE_PYTHON_VERSION}`,
             ]);
             return undefined;
         },

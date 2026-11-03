@@ -34,7 +34,13 @@ export class CondaListCommand extends ListCommand {
     }
 
     async execute(executeArgs?: BaseExecuteArgs): Promise<PackageInfo[]> {
-        const output = await runCondaExecutable(this.buildCommand(), this.log, executeArgs?.cancellationToken);
+        const output = await runCondaExecutable(
+            this.buildCommand(),
+            this.log,
+            executeArgs?.cancellationToken,
+            executeArgs?.toolExecution ? this.timeout : undefined,
+            executeArgs?.toolExecution,
+        );
         let parsed: unknown;
         try {
             parsed = JSON.parse(output);
@@ -59,6 +65,8 @@ export class CondaListCommand extends ListCommand {
                     version: condaPkg.version,
                     description: condaPkg.version,
                 });
+            } else if (executeArgs?.strict) {
+                throw new CondaListOutputError('Invalid package in conda list output');
             }
         }
 

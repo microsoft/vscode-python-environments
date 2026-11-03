@@ -1,7 +1,59 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
+import { CancellationError, CancellationTokenSource } from 'vscode';
 import * as logging from '../../common/logging';
-import { safeRegister } from '../../common/utils/asyncUtils';
+import { safeRegister, timeout } from '../../common/utils/asyncUtils';
+
+suite('timeout', () => {
+    let clock: sinon.SinonFakeTimers;
+
+    setup(() => {
+        clock = sinon.useFakeTimers();
+    });
+
+    teardown(() => {
+        clock.restore();
+    });
+
+    test('resolves after the requested delay', async () => {
+        let resolved = false;
+        const promise = timeout(100).then(() => {
+            resolved = true;
+        });
+
+        await clock.tickAsync(99);
+        assert.strictEqual(resolved, false);
+        await clock.tickAsync(1);
+        await promise;
+        assert.strictEqual(resolved, true);
+    });
+
+    test('can be cancelled', async () => {
+        const promise = timeout(100);
+        promise.cancel();
+
+        await assert.rejects(promise, (error: unknown) => error instanceof CancellationError);
+        await clock.tickAsync(100);
+    });
+
+    test('rejects when the cancellation token is cancelled', async () => {
+        const source = new CancellationTokenSource();
+        const promise = timeout(100, source.token);
+        source.cancel();
+
+        await assert.rejects(promise, (error: unknown) => error instanceof CancellationError);
+        await clock.tickAsync(100);
+        source.dispose();
+    });
+
+    test('rejects when given an already cancelled token', async () => {
+        const source = new CancellationTokenSource();
+        source.cancel();
+
+        await assert.rejects(timeout(100, source.token), (error: unknown) => error instanceof CancellationError);
+        source.dispose();
+    });
+});
 
 suite('safeRegister', () => {
     let traceErrorStub: sinon.SinonStub;
