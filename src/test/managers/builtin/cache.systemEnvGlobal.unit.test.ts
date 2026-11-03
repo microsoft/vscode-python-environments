@@ -40,26 +40,26 @@ suite('builtin cache - system global env two-tier lookup', () => {
     });
 
     suite('getSystemEnvForGlobal', () => {
-        test('returns workspaceState value when present (primary layer)', async () => {
+        test('returns globalState value when present (canonical layer)', async () => {
             workspaceMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves('/ws/python');
             globalMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves('/global/python');
 
             const result = await getSystemEnvForGlobal();
 
-            assert.strictEqual(result, '/ws/python', 'workspaceState should take priority');
-            assert.ok(workspaceMock.get.calledWith(SYSTEM_GLOBAL_KEY), 'should query workspaceState');
-            assert.ok(globalMock.get.notCalled, 'should not query globalState when workspace has a value');
+            assert.strictEqual(result, '/global/python', 'globalState should take priority');
+            assert.ok(globalMock.get.calledWith(SYSTEM_GLOBAL_KEY), 'should query globalState');
+            assert.ok(workspaceMock.get.notCalled, 'should not query workspaceState when global has a value');
         });
 
-        test('falls back to globalState when workspaceState is empty (cold workspace mirror)', async () => {
-            workspaceMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves(undefined);
-            globalMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves('/global/python');
+        test('falls back to workspaceState when globalState is empty (cold global cache)', async () => {
+            workspaceMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves('/ws/python');
+            globalMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves(undefined);
 
             const result = await getSystemEnvForGlobal();
 
-            assert.strictEqual(result, '/global/python', 'should fall back to globalState');
-            assert.ok(workspaceMock.get.calledWith(SYSTEM_GLOBAL_KEY), 'should query workspaceState first');
-            assert.ok(globalMock.get.calledWith(SYSTEM_GLOBAL_KEY), 'should then query globalState');
+            assert.strictEqual(result, '/ws/python', 'should fall back to workspaceState');
+            assert.ok(globalMock.get.calledWith(SYSTEM_GLOBAL_KEY), 'should query globalState first');
+            assert.ok(workspaceMock.get.calledWith(SYSTEM_GLOBAL_KEY), 'should then query workspaceState');
         });
 
         test('returns undefined when both layers are empty (true cold cache)', async () => {
@@ -71,19 +71,18 @@ suite('builtin cache - system global env two-tier lookup', () => {
             assert.strictEqual(result, undefined, 'should return undefined when nothing cached');
         });
 
-        test('falls back to globalState when workspaceState value is empty string', async () => {
-            // An empty string is falsy and should not count as a cached selection.
-            workspaceMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves('');
-            globalMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves('/global/python');
+        test('falls back to workspaceState when globalState value is empty string', async () => {
+            workspaceMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves('/ws/python');
+            globalMock.get.withArgs(SYSTEM_GLOBAL_KEY).resolves('');
 
             const result = await getSystemEnvForGlobal();
 
-            assert.strictEqual(result, '/global/python');
+            assert.strictEqual(result, '/ws/python');
         });
 
-        test('does not interact with persistent state when called (sanity: lazy/awaited only)', async () => {
-            // Smoke check that the deferred-resolved helpers are awaited.
+        test('invokes workspace persistent state accessor when global cache is empty', async () => {
             workspaceMock.get.resolves('/ws/python');
+            globalMock.get.resolves(undefined);
             await getSystemEnvForGlobal();
             assert.ok(getWorkspaceStub.called, 'workspace persistent state accessor invoked');
         });
@@ -162,7 +161,7 @@ suite('builtin cache - system global env two-tier lookup', () => {
             assert.ok(logError.calledOnceWithExactly('Failed to update workspace system Python cache:', error));
         });
 
-        test('round-trip: after set, get returns the value from workspaceState (primary)', async () => {
+        test('round-trip: after set, get returns the value written to both layers', async () => {
             // Simulate persistent state by wiring set to update get's resolved value.
             let workspaceStored: string | undefined;
             let globalStored: string | undefined;
@@ -226,8 +225,8 @@ suite('builtin cache - system global env two-tier lookup', () => {
                 }
             });
 
-            // Pre-condition: get sees the workspace-mirrored value.
-            assert.strictEqual(await getSystemEnvForGlobal(), '/cached/ws/python');
+            // Pre-condition: get sees the canonical global value.
+            assert.strictEqual(await getSystemEnvForGlobal(), '/cached/global/python');
 
             await clearSystemEnvCache();
 
@@ -236,6 +235,14 @@ suite('builtin cache - system global env two-tier lookup', () => {
                 undefined,
                 'both layers should be cleared, so global lookup is empty',
             );
+        });
+
+        test('clears globalState even when workspaceState clear fails', async () => {
+            workspaceMock.clear.rejects(new Error('workspace clear failed'));
+
+            await assert.rejects(clearSystemEnvCache(), /workspace clear failed/);
+
+            assert.ok(globalMock.clear.calledOnce, 'globalState.clear should still be called');
         });
     });
 });

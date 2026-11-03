@@ -6,14 +6,16 @@ export const SYSTEM_WORKSPACE_KEY = `${ENVS_EXTENSION_ID}:system:WORKSPACE_SELEC
 export const SYSTEM_GLOBAL_KEY = `${ENVS_EXTENSION_ID}:system:GLOBAL_SELECTED`;
 
 export async function clearSystemEnvCache(): Promise<void> {
-    const workspaceState = await getWorkspacePersistentState();
-    // The global system-Python selection is mirrored into workspaceState (see
-    // getSystemEnvForGlobal/setSystemEnvForGlobal) so that the cross-session
-    // cache survives on fresh remotes where globalState is cold. Clear both
-    // the workspace-scoped map and the mirrored global key here.
-    await workspaceState.clear([SYSTEM_WORKSPACE_KEY, SYSTEM_GLOBAL_KEY]);
-    const globalState = await getGlobalPersistentState();
-    await globalState.clear([SYSTEM_GLOBAL_KEY]);
+    const [workspaceClear, globalClear] = await Promise.allSettled([
+        getWorkspacePersistentState().then((state) => state.clear([SYSTEM_WORKSPACE_KEY, SYSTEM_GLOBAL_KEY])),
+        getGlobalPersistentState().then((state) => state.clear([SYSTEM_GLOBAL_KEY])),
+    ]);
+    if (workspaceClear.status === 'rejected') {
+        throw workspaceClear.reason;
+    }
+    if (globalClear.status === 'rejected') {
+        throw globalClear.reason;
+    }
 }
 
 export async function getSystemEnvForWorkspace(fsPath: string): Promise<string | undefined> {
@@ -56,23 +58,24 @@ export async function setSystemEnvForWorkspaces(fsPath: string[], envPath: strin
 /**
  * Returns the cached path of the discovered global system Python.
  *
- * Reads from `workspaceState` first and falls back to `globalState`. The
- * workspace layer is the primary cache because, in remote scenarios
- * (SSH / WSL / dev containers / codespaces), `context.globalState` is scoped
- * to the remote machine and starts empty on every fresh remote. The
- * workspaceState mirror survives across sessions of the same workspace
- * folder on the same remote, so the foreground env-selection fast path can
- * hit the cache without waiting on a full PET refresh. See PR #1455 and
- * the cross-session cache acceptance criteria.
+ * Reads from `globalState` first and falls back to the `workspaceState`
+ * mirror when the global value is absent. In remote scenarios (SSH / WSL /
+ * dev containers / codespaces), `context.globalState` is scoped to the remote
+ * machine and starts empty on every fresh remote. The workspaceState mirror
+ * survives across sessions of the same workspace folder on the same remote,
+ * so the foreground env-selection fast path can hit the cache without waiting
+ * on a full PET refresh. See PR #1455 and the cross-session cache acceptance
+ * criteria.
  */
 export async function getSystemEnvForGlobal(): Promise<string | undefined> {
+    const globalState = await getGlobalPersistentState();
+    const globalValue = await globalState.get<string>(SYSTEM_GLOBAL_KEY);
+    if (globalValue) {
+        return globalValue;
+    }
     const workspaceState = await getWorkspacePersistentState();
     const workspaceValue = await workspaceState.get<string>(SYSTEM_GLOBAL_KEY);
-    if (workspaceValue) {
-        return workspaceValue;
-    }
-    const globalState = await getGlobalPersistentState();
-    return await globalState.get<string>(SYSTEM_GLOBAL_KEY);
+    return workspaceValue || undefined;
 }
 
 /**
