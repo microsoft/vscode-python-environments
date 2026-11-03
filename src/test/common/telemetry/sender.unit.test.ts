@@ -1,6 +1,7 @@
 import assert from 'node:assert';
 import * as sinon from 'sinon';
 import { EventNames } from '../../../common/telemetry/constants';
+import { getTelemetryReporter } from '../../../common/telemetry/reporter';
 import { sendTelemetryEvent } from '../../../common/telemetry/sender';
 import { vscMockTelemetryReporter } from '../../mocks/vsc/telemetryReporter';
 
@@ -21,6 +22,10 @@ suite('Telemetry sender', () => {
         } else {
             process.env.VSC_PYTHON_CI_TEST = originalTestExecution;
         }
+    });
+
+    test('constructs the telemetry reporter from the named package export', () => {
+        assert.ok(getTelemetryReporter() instanceof vscMockTelemetryReporter);
     });
 
     test('sends total and stage setup durations as measurements', () => {
