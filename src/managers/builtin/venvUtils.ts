@@ -825,7 +825,7 @@ export async function removeVenv(
             },
             async () => {
                 try {
-                    await fsapi.remove(envPath);
+                    await fsapi.rm(envPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
                     await backends.uv.untrackEnvironment(environment.environmentPath.fsPath);
                     await backends.venv.untrackEnvironment(environment.environmentPath.fsPath);
                     return true;

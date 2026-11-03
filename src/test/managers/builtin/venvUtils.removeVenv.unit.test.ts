@@ -1,4 +1,6 @@
 import * as assert from 'assert';
+import { spawn } from 'child_process';
+import { once } from 'events';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
@@ -198,6 +200,47 @@ suite('venvUtils removeVenv validation integration', () => {
         } finally {
             sinon.restore();
             await fse.remove(root);
+        }
+    });
+
+    test('removal waits for a briefly running Windows interpreter to release its executable', async function () {
+        if (os.platform() !== 'win32') {
+            this.skip();
+            return;
+        }
+
+        const tempRoot = await fse.mkdtemp(path.join(os.tmpdir(), 'remove-venv-locked-'));
+        const envPath = path.join(tempRoot, '.venv');
+        const executable = path.join(envPath, 'python.exe');
+        await fse.outputFile(path.join(envPath, 'pyvenv.cfg'), 'home = base');
+        await fse.copyFile(process.execPath, executable);
+        const child = spawn(executable, ['-e', 'process.stdout.write("ready"); setTimeout(() => {}, 3000)']);
+        const exited = once(child, 'close');
+        sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => task({} as never, {} as never));
+        sinon.stub(uvEnvironments, 'removeUvEnvironment').resolves();
+
+        try {
+            await Promise.race([
+                once(child.stdout, 'data'),
+                exited.then(() => {
+                    throw new Error('Interpreter exited before removal began');
+                }),
+            ]);
+            const removed = await removeVenv(
+                createMockPythonEnvironment({ name: '.venv', envPath }),
+                createMockLogOutputChannel(),
+                { runHeadless: true },
+            );
+
+            assert.strictEqual(removed, true);
+            assert.strictEqual(await fse.pathExists(envPath), false);
+        } finally {
+            try {
+                await exited;
+            } finally {
+                sinon.restore();
+                await fse.rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+            }
         }
     });
 });
