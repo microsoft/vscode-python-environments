@@ -190,6 +190,10 @@ suite('Smoke: Registration Checks', function () {
                       default?: unknown;
                       scope?: string;
                       requiresReload?: boolean;
+                      experiment?: {
+                          mode?: string;
+                          name?: string;
+                      };
                       tags?: string[];
                   }
               >
@@ -201,7 +205,11 @@ suite('Smoke: Registration Checks', function () {
         assert.strictEqual(setting.default, false);
         assert.strictEqual(setting.scope, 'window');
         assert.strictEqual(setting.requiresReload, true);
-        assert.ok(setting.tags?.includes('onExP'), 'the setting should participate in settings experiments');
+        assert.deepStrictEqual(setting.experiment, {
+            mode: 'startup',
+            name: '/pythonenvs/config.python-envs.inlineScripts.enabled',
+        });
+        assert.ok(!setting.tags?.includes('onExP'), 'onExP would discard the custom scoped experiment name');
         assert.ok(setting.tags?.includes('preview'), 'the setting should be marked as preview');
     });
 

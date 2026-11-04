@@ -93,8 +93,11 @@
                     "default": false,
                     "scope": "window",
                     "requiresReload": true,
+                    "experiment": {
+                        "mode": "startup",
+                        "name": "/pythonenvs/config.python-envs.inlineScripts.enabled"
+                    },
                     "tags": [
-                        "onExP",
                         "preview"
                     ]
                 },
@@ -769,7 +772,7 @@
         "pretest": "npm run compile-tests && npm run compile",
         "lint": "eslint --config=eslint.config.mjs src",
         "unittest": "mocha --config=./build/.mocha.unittests.json",
-        "smoke-test": "vscode-test --label smokeTests",
+        "smoke-test": "vscode-test --label smokeTests --label smokeTestsInlineScriptsEnabled",
         "e2e-test": "vscode-test --label e2eTests --install-extensions ms-python.python",
         "integration-test": "vscode-test --label integrationTests --install-extensions ms-python.python",
         "integration-test-multiroot": "vscode-test --label integrationTestsMultiRoot --install-extensions ms-python.python",
