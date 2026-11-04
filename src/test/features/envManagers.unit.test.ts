@@ -659,6 +659,7 @@ suite('PythonEnvironmentManagers - selection stored by a non-default manager', (
         // interpreter, and global auto-discovery reads it back from there.
         await envManagers.setEnvironments('global', configured, false, { explicit: true });
         await envManagers.setEnvironments('global', configured, false);
+        await envManagers.setEnvironments('global', configured, false);
 
         assert.strictEqual((await envManagers.getEnvironment(outsideUri))?.envId.id, newestGlobal.envId.id);
         assert.strictEqual(envManagers.getEnvironmentManager(undefined)?.id, VENV_MANAGER);
@@ -702,6 +703,7 @@ suite('PythonEnvironmentManagers - selection stored by a non-default manager', (
         await envManagers.setEnvironments('global', undefined);
 
         assert.strictEqual((await envManagers.getEnvironment(undefined))?.envId.id, newestGlobal.envId.id);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(undefined)?.envId.id, newestGlobal.envId.id);
     });
 
     suite('a user selection from a third manager', () => {

@@ -216,6 +216,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     private readonly _explicitSelections = new Map<string, { managerId: string; userSelected: boolean }>();
     /** The manager through which the current global selection was made, which may not own its environment. */
     private _globalSelectionManagerId: string | undefined;
+    /** Keeps later automatic selections from restoring a manager override after an explicit selection is cleared. */
+    private _globalSelectionManagerCleared = false;
     private readonly _inlineRoutingOverrides = new Map<string, string>();
     private readonly _selectionRevisions = new Map<string, number>();
     private readonly _selectionOperationCounters = new Map<string, number>();
@@ -824,7 +826,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
             const settings: EditAllManagerSettings[] = [];
             const events: DidChangeEnvironmentEventArgs[] = [];
-            const clearedExplicitScopes: GetEnvironmentScope[] = [];
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
                 const inlineRegistrations =
                     manager.id === INLINE_SCRIPT_MANAGER_ID && shouldPersistSettings
@@ -854,7 +855,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 if (shouldPersistSettings && settings.length > 0) {
                     await setAllManagerSettings(settings);
                 }
-                selections.forEach((selection) => {
+                for (const selection of selections) {
                     // Only a current (non-superseded) PEP 723 routing operation may mutate the
                     // per-script override; the ordinary project/global selection lane below is
                     // committed independently so a stale inline op cannot suppress it.
@@ -867,13 +868,17 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         )
                     ) {
                         this.updateInlineRoutingOverride(selection.scope, manager, environment);
-                        this.clearInlineActiveSelection(selection.scope, manager, selection.inlineClearOperation);
+                        this.clearInlineActiveSelection(
+                            selection.scope,
+                            manager,
+                            selection.inlineClearOperation,
+                        );
                     }
                     if (!selection.publishInlineSelection) {
-                        return;
+                        continue;
                     }
                     if (!this.commitSelectionOperation(selection.key, selection.operation)) {
-                        return;
+                        continue;
                     }
                     const explicitSelection = this.updateExplicitSelection(
                         selection.key,
@@ -883,21 +888,22 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         shouldPersistSettings,
                     );
                     if (explicitSelection === 'kept') {
-                        return;
+                        continue;
                     }
-                    if (explicitSelection === 'cleared') {
-                        clearedExplicitScopes.push(selection.scope);
-                    }
+                    const newEnvironment =
+                        explicitSelection === 'cleared'
+                            ? await this.getEnvironment(selection.scope)
+                            : environment;
                     const oldEnv = this._activeSelection.get(selection.key);
-                    if (!this.isSameEnvironment(oldEnv, environment)) {
-                        this._activeSelection.set(selection.key, environment);
+                    if (!this.isSameEnvironment(oldEnv, newEnvironment)) {
+                        this._activeSelection.set(selection.key, newEnvironment);
                         events.push({
                             uri: this.getActiveSelectionUri(selection.scope, manager, selection.project),
-                            new: environment,
+                            new: newEnvironment,
                             old: oldEnv,
                         });
                     }
-                });
+                }
             } else if (typeof scope === 'string' && scope === 'global') {
                 const m = this.getEnvironmentManager(undefined);
                 const operation = this.beginSelectionOperation('global');
@@ -922,13 +928,12 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         explicit,
                         shouldPersistSettings,
                     );
-                    if (explicitSelection === 'cleared') {
-                        clearedExplicitScopes.push(undefined);
-                    }
+                    const newEnvironment =
+                        explicitSelection === 'cleared' ? await this.getEnvironment(undefined) : environment;
                     const oldEnv = this._activeSelection.get('global');
-                    if (explicitSelection !== 'kept' && !this.isSameEnvironment(oldEnv, environment)) {
-                        this._activeSelection.set('global', environment);
-                        events.push({ uri: undefined, new: environment, old: oldEnv });
+                    if (explicitSelection !== 'kept' && !this.isSameEnvironment(oldEnv, newEnvironment)) {
+                        this._activeSelection.set('global', newEnvironment);
+                        events.push({ uri: undefined, new: newEnvironment, old: oldEnv });
                     }
                 }
             }
@@ -943,10 +948,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                         }
                     });
                 });
-            }
-            // These scopes read from their routed manager again; follow its environment.
-            for (const clearedScope of clearedExplicitScopes) {
-                await this.refreshEnvironment(clearedScope);
             }
         } else {
             if (Array.isArray(scope) && scope.every((s) => s instanceof Uri)) {
@@ -976,7 +977,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                     }
                     await Promise.all(
                         selections.map(async (selection) => {
-                            const newEnv = await manager.get(selection.scope);
                             if (!this.commitSelectionOperation(selection.key, selection.operation)) {
                                 return;
                             }
@@ -990,6 +990,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                             if (explicitSelection === 'kept') {
                                 return;
                             }
+                            const newEnv =
+                                explicitSelection === 'cleared'
+                                    ? await this.getEnvironment(selection.scope)
+                                    : await manager.get(selection.scope);
                             const oldEnv = this._activeSelection.get(selection.key);
                             if (!this.isSameEnvironment(oldEnv, newEnv)) {
                                 this._activeSelection.set(selection.key, newEnv);
@@ -1009,7 +1013,6 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 if (manager) {
                     const operation = this.beginSelectionOperation('global');
                     await manager.set(undefined);
-                    const newEnv = await manager.get(undefined);
                     if (this.commitSelectionOperation('global', operation)) {
                         const explicitSelection = this.updateExplicitSelection(
                             'global',
@@ -1018,6 +1021,10 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                             explicit,
                             shouldPersistSettings,
                         );
+                        const newEnv =
+                            explicitSelection === 'cleared'
+                                ? await this.getEnvironment(undefined)
+                                : await manager.get(undefined);
                         const oldEnv = this._activeSelection.get('global');
                         if (explicitSelection !== 'kept' && !this.isSameEnvironment(oldEnv, newEnv)) {
                             this._activeSelection.set('global', newEnv);
@@ -1133,11 +1140,16 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         if (environment && explicit && manager.id !== INLINE_SCRIPT_MANAGER_ID) {
             this._explicitSelections.set(key, { managerId: manager.id, userSelected });
             this.updateGlobalSelectionManager(key, manager.id);
+            if (key === 'global') {
+                this._globalSelectionManagerCleared = false;
+            }
             return 'recorded';
         }
         const current = this._explicitSelections.get(key);
         if (!current) {
-            this.updateGlobalSelectionManager(key, environment ? manager.id : undefined);
+            if (!this._globalSelectionManagerCleared) {
+                this.updateGlobalSelectionManager(key, environment ? manager.id : undefined);
+            }
             return 'unchanged';
         }
         if (!userSelected && current.userSelected) {
@@ -1145,6 +1157,9 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
         }
         this._explicitSelections.delete(key);
         this.updateGlobalSelectionManager(key, undefined);
+        if (key === 'global') {
+            this._globalSelectionManagerCleared = true;
+        }
         return 'cleared';
     }
 
