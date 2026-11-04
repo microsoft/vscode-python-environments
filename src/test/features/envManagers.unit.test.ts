@@ -661,6 +661,7 @@ suite('PythonEnvironmentManagers - selection stored by a non-default manager', (
         await envManagers.setEnvironments('global', configured, false);
 
         assert.strictEqual((await envManagers.getEnvironment(outsideUri))?.envId.id, newestGlobal.envId.id);
+        assert.strictEqual(envManagers.getEnvironmentManager(undefined)?.id, VENV_MANAGER);
         assert.strictEqual((await envManagers.getEnvironment(undefined))?.envId.id, newestGlobal.envId.id);
     });
 

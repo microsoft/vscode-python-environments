@@ -214,6 +214,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
      * its own (see getEnvironmentFromManager).
      */
     private readonly _explicitSelections = new Map<string, { managerId: string; userSelected: boolean }>();
+    /** The manager through which the current global selection was made, which may not own its environment. */
+    private _globalSelectionManagerId: string | undefined;
     private readonly _inlineRoutingOverrides = new Map<string, string>();
     private readonly _selectionRevisions = new Map<string, number>();
     private readonly _selectionOperationCounters = new Map<string, number>();
@@ -1130,17 +1132,26 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     ): 'recorded' | 'cleared' | 'kept' | 'unchanged' {
         if (environment && explicit && manager.id !== INLINE_SCRIPT_MANAGER_ID) {
             this._explicitSelections.set(key, { managerId: manager.id, userSelected });
+            this.updateGlobalSelectionManager(key, manager.id);
             return 'recorded';
         }
         const current = this._explicitSelections.get(key);
         if (!current) {
+            this.updateGlobalSelectionManager(key, environment ? manager.id : undefined);
             return 'unchanged';
         }
         if (!userSelected && current.userSelected) {
             return 'kept';
         }
         this._explicitSelections.delete(key);
+        this.updateGlobalSelectionManager(key, undefined);
         return 'cleared';
+    }
+
+    private updateGlobalSelectionManager(key: string, managerId: string | undefined): void {
+        if (key === 'global') {
+            this._globalSelectionManagerId = managerId;
+        }
     }
 
     /**
@@ -1239,8 +1250,11 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             ? this._environmentManagers.get(cachedEnv.envId.managerId)
             : undefined;
 
-        if (context === undefined && cachedManager) {
-            return cachedManager;
+        if (context === undefined && this._globalSelectionManagerId) {
+            const selectionManager = this._environmentManagers.get(this._globalSelectionManagerId);
+            if (selectionManager) {
+                return selectionManager;
+            }
         }
 
         const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);
