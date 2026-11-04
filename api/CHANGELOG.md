@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New npm releases require the latest stable extension baseline. Existing npm releases keep their original minimum; consumers targeting older extensions may need to pin an older npm package.
 
+### Notes
+
+- Requires Python Environments extension version `1.42.0` or newer.
+
 ## [1.7.0]
 
 ### Added
