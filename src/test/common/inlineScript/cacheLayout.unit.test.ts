@@ -36,6 +36,7 @@ import * as logging from '../../../common/logging';
 import { createDeferred } from '../../../common/utils/deferred';
 import * as platformUtils from '../../../common/utils/platformUtils';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
+import { INLINE_SCRIPT_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../../common/constants';
 
 // `import * as` would copy the module, leaving the spy unable to observe the real rename that
 // cacheLayout calls.
@@ -857,7 +858,7 @@ suite('inlineScriptCacheLayout', () => {
             const pythonPath = getVenvPythonPath(envDir.fsPath);
             await fs.outputFile(pythonPath, '');
             environment = {
-                envId: { id: 'inline-env', managerId: 'ms-python.python:inline-script' },
+                envId: { id: 'inline-env', managerId: INLINE_SCRIPT_MANAGER_ID },
                 name: 'Python 3.12.4',
                 displayName: 'Python 3.12.4',
                 displayPath: pythonPath,
@@ -879,7 +880,7 @@ suite('inlineScriptCacheLayout', () => {
         test('does not claim environments owned by another manager', async () => {
             const otherManager = {
                 ...environment,
-                envId: { ...environment.envId, managerId: 'ms-python.python:system' },
+                envId: { ...environment.envId, managerId: SYSTEM_MANAGER_ID },
             };
             assert.strictEqual(await inspectOwnedCacheEntry(otherManager, cacheRoot, envDir), 'uncertain');
         });

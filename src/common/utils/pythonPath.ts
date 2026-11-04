@@ -1,19 +1,29 @@
 import { CancellationToken, Progress, Uri } from 'vscode';
 import { PythonEnvironment } from '../../api';
 import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
-import { PYTHON_EXTENSION_ID } from '../constants';
+import {
+    CONDA_MANAGER_ID,
+    HATCH_MANAGER_ID,
+    PIPENV_MANAGER_ID,
+    PIXI_MANAGER_ID,
+    POETRY_MANAGER_ID,
+    PYENV_MANAGER_ID,
+    PYTHON_EXTENSION_ID,
+    SYSTEM_MANAGER_ID,
+    VENV_MANAGER_ID,
+} from '../constants';
 import { traceVerbose, traceWarn } from '../logging';
 
 const priorityOrder = [
-    `${PYTHON_EXTENSION_ID}:pyenv`,
-    `${PYTHON_EXTENSION_ID}:pixi`,
-    `${PYTHON_EXTENSION_ID}:conda`,
-    `${PYTHON_EXTENSION_ID}:pipenv`,
-    `${PYTHON_EXTENSION_ID}:poetry`,
+    PYENV_MANAGER_ID,
+    PIXI_MANAGER_ID,
+    CONDA_MANAGER_ID,
+    PIPENV_MANAGER_ID,
+    POETRY_MANAGER_ID,
     `${PYTHON_EXTENSION_ID}:activestate`,
-    `${PYTHON_EXTENSION_ID}:hatch`,
-    `${PYTHON_EXTENSION_ID}:venv`,
-    `${PYTHON_EXTENSION_ID}:system`,
+    HATCH_MANAGER_ID,
+    VENV_MANAGER_ID,
+    SYSTEM_MANAGER_ID,
 ];
 function sortManagersByPriority(managers: InternalEnvironmentManager[]): InternalEnvironmentManager[] {
     const systemId = priorityOrder[priorityOrder.length - 1];

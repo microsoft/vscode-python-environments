@@ -4,13 +4,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import * as assert from 'assert';
+import * as path from 'path';
+import { explain as parsePep440Version } from '@renovatebot/pep440';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
-import { PythonEnvironment } from '../../api';
+import { DidChangeEnvironmentEventArgs, PythonEnvironment, PythonProject } from '../../api';
 import * as frameUtils from '../../common/utils/frameUtils';
 import * as workspaceApis from '../../common/workspace.apis';
 import { PythonEnvironmentManagers } from '../../features/envManagers';
 import type { PythonProjectManager } from '../../features/projectManager';
+import { SYSTEM_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID, CONDA_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
 
 suite('PythonEnvironmentManagers - getEnvironment', () => {
     let sandbox: sinon.SinonSandbox;
@@ -18,7 +21,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
 
     const env311: PythonEnvironment = {
-        envId: { id: 'system-311', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-311', managerId: SYSTEM_MANAGER_ID },
         name: 'Python 3.11',
         displayName: 'Python 3.11.15',
         version: '3.11.15',
@@ -29,7 +32,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     };
 
     const env314: PythonEnvironment = {
-        envId: { id: 'system-314', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-314', managerId: SYSTEM_MANAGER_ID },
         name: 'Python 3.14',
         displayName: 'Python 3.14.4',
         version: '3.14.4',
@@ -49,7 +52,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
         sandbox.stub(workspaceApis, 'getConfiguration').returns({
             get: (key: string, defaultValue?: unknown) => {
                 if (key === 'defaultEnvManager') {
-                    return 'ms-python.python:system';
+                    return SYSTEM_MANAGER_ID;
                 }
                 if (key === 'pythonProjects') {
                     return [];
@@ -76,11 +79,16 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     /**
      * Registers a fake environment manager that returns predefined environments.
      */
-    function registerFakeManager(managerId: string, getStub: sinon.SinonStub): void {
+    function registerFakeManager(
+        managerId: string,
+        getStub: sinon.SinonStub,
+        getVersion?: sinon.SinonStub,
+    ): void {
         const fakeManager = {
             name: managerId.split(':')[1],
             displayName: managerId,
-            preferredPackageManagerId: 'ms-python.python:pip',
+            preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
+            getVersion,
             get: getStub,
             set: sandbox.stub().resolves(),
             resolve: sandbox.stub().resolves(undefined),
@@ -95,7 +103,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     test('should NOT update cache when manager.get() returns a different env than what was set', async () => {
         // Register a system manager whose get() returns env314 (the "latest")
         const getStub = sandbox.stub().resolves(env314);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         // Simulate that initial selection set env311 via setEnvironment
         await envManagers.setEnvironment(undefined, env311, false);
@@ -122,7 +130,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
 
     test('should NOT fire change events on read', async () => {
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         const changeEvents: any[] = [];
         envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
@@ -138,11 +146,30 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
 
     test('should still return the correct env from manager.get()', async () => {
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         const result = await envManagers.getEnvironment(undefined);
         assert.strictEqual(result?.envId.id, 'system-311');
         assert.ok(getStub.calledOnce, 'Should delegate to manager.get()');
+    });
+
+    test('should delegate getVersion to the registered manager', async () => {
+        const version = parsePep440Version('1.2.3');
+        const getVersion = sandbox.stub().resolves(version);
+        registerFakeManager(SYSTEM_MANAGER_ID, sandbox.stub().resolves(env311), getVersion);
+
+        const result = await envManagers.getEnvironmentManager(SYSTEM_MANAGER_ID)?.getVersion();
+
+        assert.deepStrictEqual(result, version);
+        assert.ok(getVersion.calledOnce, 'Should delegate to manager.getVersion()');
+    });
+
+    test('should return undefined when the registered manager does not provide getVersion', async () => {
+        registerFakeManager(SYSTEM_MANAGER_ID, sandbox.stub().resolves(env311));
+
+        const result = await envManagers.getEnvironmentManager(SYSTEM_MANAGER_ID)?.getVersion();
+
+        assert.strictEqual(result, undefined);
     });
 
     test('should return undefined when no managers are registered', async () => {
@@ -157,7 +184,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
         // in the map, find nothing, check the cache (empty), and return undefined.
         // This exercises the fallback path in getEnvironmentManager beyond the size === 0 guard.
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:conda', getStub);
+        registerFakeManager(CONDA_MANAGER_ID, getStub);
 
         const result = await envManagers.getEnvironment(Uri.file('/some/unrelated/path'));
         assert.strictEqual(
@@ -169,7 +196,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
 
     test('setEnvironment should still fire change events and update cache', async () => {
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         const changeEvents: any[] = [];
         envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
@@ -189,7 +216,7 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
         // 3. The selection should NOT flip to env314
 
         const getStub = sandbox.stub().resolves(env314);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         // Step 1: Initial selection picks env311
         await envManagers.setEnvironment(undefined, env311, false);
@@ -215,13 +242,115 @@ suite('PythonEnvironmentManagers - getEnvironment', () => {
     });
 });
 
+suite('PythonEnvironmentManagers - cross-manager global selection', () => {
+    let sandbox: sinon.SinonSandbox;
+    let envManagers: PythonEnvironmentManagers;
+    let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
+
+    const selectedSystemEnvironment: PythonEnvironment = {
+        envId: { id: 'selected-system', managerId: SYSTEM_MANAGER_ID },
+        name: 'Selected system Python',
+        displayName: 'Selected system Python',
+        version: '3.13.0',
+        displayPath: '/usr/bin/python3.13',
+        environmentPath: Uri.file('/usr/bin/python3.13'),
+        sysPrefix: '/usr',
+        execInfo: { run: { executable: '/usr/bin/python3.13' } },
+    };
+
+    const configuredVenvEnvironment: PythonEnvironment = {
+        envId: { id: 'configured-venv', managerId: VENV_MANAGER_ID },
+        name: 'Configured venv',
+        displayName: 'Configured venv',
+        version: '3.12.0',
+        displayPath: '/workspace/.venv/bin/python',
+        environmentPath: Uri.file('/workspace/.venv/bin/python'),
+        sysPrefix: '/workspace/.venv',
+        execInfo: { run: { executable: '/workspace/.venv/bin/python' } },
+    };
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+        sandbox.stub(frameUtils, 'getCallingExtension').returns('ms-python.python');
+
+        sandbox.stub(workspaceApis, 'getConfiguration').returns({
+            get: (key: string, defaultValue?: unknown) => {
+                if (key === 'defaultEnvManager') {
+                    return VENV_MANAGER_ID;
+                }
+                if (key === 'pythonProjects') {
+                    return [];
+                }
+                return defaultValue;
+            },
+            has: () => false,
+            inspect: () => undefined,
+            update: () => Promise.resolve(),
+        } as any);
+
+        mockProjectManager = {
+            getProjects: sandbox.stub().returns([]),
+            get: sandbox.stub().returns(undefined),
+        } as unknown as sinon.SinonStubbedInstance<PythonProjectManager>;
+
+        envManagers = new PythonEnvironmentManagers(mockProjectManager as unknown as PythonProjectManager);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    function registerFakeManager(
+        managerId: string,
+        getStub: sinon.SinonStub,
+        setStub: sinon.SinonStub = sandbox.stub().resolves(),
+    ): string {
+        const fakeManager = {
+            name: managerId.split(':')[1],
+            displayName: managerId,
+            preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
+            get: getStub,
+            set: setStub,
+            resolve: sandbox.stub().resolves(undefined),
+            refresh: sandbox.stub().resolves(),
+            getEnvironments: sandbox.stub().resolves([]),
+            onDidChangeEnvironments: sandbox.stub().returns({ dispose: () => {} }),
+            onDidChangeEnvironment: sandbox.stub().returns({ dispose: () => {} }),
+        };
+        envManagers.registerEnvironmentManager(fakeManager as any, { extensionId: 'ms-python.python' });
+        return managerId;
+    }
+
+    test('routes and reads a global selection through its selected manager', async () => {
+        const configuredVenvGet = sandbox.stub().resolves(configuredVenvEnvironment);
+        registerFakeManager(VENV_MANAGER_ID, configuredVenvGet);
+
+        const selectedSystemGet = sandbox.stub().resolves(selectedSystemEnvironment);
+        registerFakeManager(SYSTEM_MANAGER_ID, selectedSystemGet);
+
+        await envManagers.setEnvironments('global', selectedSystemEnvironment, false, { explicit: true });
+
+        assert.strictEqual(
+            envManagers.getEnvironmentManager(undefined)?.id,
+            SYSTEM_MANAGER_ID,
+            'A global selection must route through the selected environment manager',
+        );
+        assert.strictEqual(
+            (await envManagers.getEnvironment(undefined))?.envId.id,
+            selectedSystemEnvironment.envId.id,
+            'Global readback must return the selected non-venv environment',
+        );
+        assert.ok(configuredVenvGet.notCalled, 'The configured venv manager must not serve the selected global readback');
+    });
+});
+
 suite('PythonEnvironmentManagers - refreshEnvironment', () => {
     let sandbox: sinon.SinonSandbox;
     let envManagers: PythonEnvironmentManagers;
     let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
 
     const env311: PythonEnvironment = {
-        envId: { id: 'system-311', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-311', managerId: SYSTEM_MANAGER_ID },
         name: 'Python 3.11',
         displayName: 'Python 3.11.15',
         version: '3.11.15',
@@ -232,7 +361,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
     };
 
     const env314: PythonEnvironment = {
-        envId: { id: 'system-314', managerId: 'ms-python.python:system' },
+        envId: { id: 'system-314', managerId: SYSTEM_MANAGER_ID },
         name: 'Python 3.14',
         displayName: 'Python 3.14.4',
         version: '3.14.4',
@@ -248,7 +377,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
         sandbox.stub(workspaceApis, 'getConfiguration').returns({
             get: (key: string, defaultValue?: unknown) => {
                 if (key === 'defaultEnvManager') {
-                    return 'ms-python.python:system';
+                    return SYSTEM_MANAGER_ID;
                 }
                 if (key === 'pythonProjects') {
                     return [];
@@ -276,7 +405,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
         const fakeManager = {
             name: managerId.split(':')[1],
             displayName: managerId,
-            preferredPackageManagerId: 'ms-python.python:pip',
+            preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
             get: getStub,
             set: sandbox.stub().resolves(),
             resolve: sandbox.stub().resolves(undefined),
@@ -290,7 +419,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
 
     test('should fire change event when manager reports a new environment', async () => {
         const getStub = sandbox.stub().resolves(env314);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         // Set initial env
         await envManagers.setEnvironment(undefined, env311, false);
@@ -315,7 +444,7 @@ suite('PythonEnvironmentManagers - refreshEnvironment', () => {
 
     test('should NOT fire change event when manager reports same environment', async () => {
         const getStub = sandbox.stub().resolves(env311);
-        registerFakeManager('ms-python.python:system', getStub);
+        registerFakeManager(SYSTEM_MANAGER_ID, getStub);
 
         // Set initial env to env311
         await envManagers.setEnvironment(undefined, env311, false);
@@ -359,7 +488,7 @@ suite('PythonEnvironmentManagers - clearCache', () => {
             {
                 name,
                 displayName: name,
-                preferredPackageManagerId: 'ms-python.python:pip',
+                preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
                 get: sandbox.stub().resolves(undefined),
                 set: sandbox.stub().resolves(),
                 resolve: sandbox.stub().resolves(undefined),
@@ -392,5 +521,282 @@ suite('PythonEnvironmentManagers - clearCache', () => {
 
         sinon.assert.calledOnce(systemClearCache);
         sinon.assert.notCalled(inlineClearCache);
+    });
+});
+
+suite('PythonEnvironmentManagers - selection stored by a non-default manager', () => {
+    const VENV_MANAGER = 'ms-python.python:venv';
+    const SYSTEM_MANAGER = 'ms-python.python:system';
+    const projectUri = Uri.file(path.resolve('selection-project'));
+    const fileUri = Uri.joinPath(projectUri, 'main.py');
+    const outsideUri = Uri.file(path.resolve('outside', 'script.py'));
+    const project: PythonProject = { name: 'selection-project', uri: projectUri };
+
+    let sandbox: sinon.SinonSandbox;
+    let envManagers: PythonEnvironmentManagers;
+    let venvGet: sinon.SinonStub;
+    let systemGet: sinon.SinonStub;
+    let systemSelections: Map<string, PythonEnvironment | undefined>;
+
+    function makeEnv(id: string, managerId: string, version: string): PythonEnvironment {
+        const envPath = path.resolve(id, 'python');
+        return {
+            envId: { id, managerId },
+            name: id,
+            displayName: `Python ${version}`,
+            version,
+            displayPath: envPath,
+            environmentPath: Uri.file(envPath),
+            sysPrefix: path.resolve(id),
+            execInfo: { run: { executable: envPath } },
+        };
+    }
+
+    // The interpreter configured in python.defaultInterpreterPath (a global, so owned by the system manager).
+    const configured = makeEnv('system-312', SYSTEM_MANAGER, '3.12.14');
+    // The venv manager's fallback when a scope has no venv: the newest global Python.
+    const newestGlobal = makeEnv('system-314', SYSTEM_MANAGER, '3.14.8');
+    const localVenv = makeEnv('venv-313', VENV_MANAGER, '3.13.15');
+
+    function selectionKey(scope: Uri | undefined): string {
+        return scope && scope.fsPath.startsWith(projectUri.fsPath) ? projectUri.fsPath : 'global';
+    }
+
+    function registerManager(name: string, get: sinon.SinonStub, set: sinon.SinonStub): void {
+        envManagers.registerEnvironmentManager(
+            {
+                name,
+                displayName: name,
+                preferredPackageManagerId: 'ms-python.python:pip',
+                get,
+                set,
+                resolve: sandbox.stub().resolves(undefined),
+                refresh: sandbox.stub().resolves(),
+                getEnvironments: sandbox.stub().resolves([]),
+                onDidChangeEnvironments: sandbox.stub().returns({ dispose: () => {} }),
+                onDidChangeEnvironment: sandbox.stub().returns({ dispose: () => {} }),
+            } as any,
+            { extensionId: 'ms-python.python' },
+        );
+    }
+
+    async function flush(): Promise<void> {
+        await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+        sandbox.stub(frameUtils, 'getCallingExtension').returns('ms-python.python');
+        // No explicit python-envs settings: routing uses the package default manager (venv).
+        sandbox.stub(workspaceApis, 'getConfiguration').returns({
+            get: (key: string, defaultValue?: unknown) => {
+                if (key === 'defaultEnvManager') {
+                    return VENV_MANAGER;
+                }
+                if (key === 'pythonProjects') {
+                    return [];
+                }
+                return defaultValue;
+            },
+            has: () => false,
+            inspect: () => undefined,
+            update: () => Promise.resolve(),
+        } as any);
+
+        envManagers = new PythonEnvironmentManagers({
+            getProjects: sandbox.stub().returns([project]),
+            get: (uri: Uri) => (selectionKey(uri) === 'global' ? undefined : project),
+        } as unknown as PythonProjectManager);
+
+        venvGet = sandbox.stub().resolves(newestGlobal);
+        registerManager('venv', venvGet, sandbox.stub().resolves());
+
+        systemSelections = new Map();
+        systemGet = sandbox
+            .stub()
+            .callsFake(async (scope: Uri | undefined) => systemSelections.get(selectionKey(scope)));
+        const systemSet = sandbox.stub().callsFake(async (scope: Uri | undefined, env?: PythonEnvironment) => {
+            systemSelections.set(selectionKey(scope), env);
+        });
+        registerManager('system', systemGet, systemSet);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+        envManagers.dispose();
+    });
+
+    test('a project without a venv uses an explicit selection stored by the system manager', async () => {
+        await envManagers.setEnvironment(projectUri, configured, false, { explicit: true });
+
+        assert.strictEqual(envManagers.getEnvironmentManager(fileUri)?.id, VENV_MANAGER);
+        assert.strictEqual((await envManagers.getEnvironment(fileUri))?.envId.id, configured.envId.id);
+        assert.strictEqual((await envManagers.getEnvironment(projectUri))?.envId.id, configured.envId.id);
+    });
+
+    test('files outside a project use an explicit global selection stored by the system manager', async () => {
+        await envManagers.setEnvironments('global', configured, false, { explicit: true });
+
+        assert.strictEqual((await envManagers.getEnvironment(outsideUri))?.envId.id, configured.envId.id);
+        assert.strictEqual((await envManagers.getEnvironment(undefined))?.envId.id, configured.envId.id);
+    });
+
+    test('a user selection stored by the system manager is explicit by default', async () => {
+        await envManagers.setEnvironments('global', configured);
+
+        assert.strictEqual((await envManagers.getEnvironment(outsideUri))?.envId.id, configured.envId.id);
+    });
+
+    test('a venv owned by the default manager still wins over an explicit selection from another manager', async () => {
+        venvGet.resolves(localVenv);
+        await envManagers.setEnvironment(projectUri, configured, false, { explicit: true });
+
+        assert.strictEqual((await envManagers.getEnvironment(fileUri))?.envId.id, localVenv.envId.id);
+    });
+
+    test('a later auto-discovered selection clears an explicit one even if the system manager kept it', async () => {
+        // python.defaultInterpreterPath applied, then removed: the system manager still stores the old
+        // interpreter, and global auto-discovery reads it back from there.
+        await envManagers.setEnvironments('global', configured, false, { explicit: true });
+        await envManagers.setEnvironments('global', configured, false);
+
+        assert.strictEqual((await envManagers.getEnvironment(outsideUri))?.envId.id, newestGlobal.envId.id);
+        assert.strictEqual((await envManagers.getEnvironment(undefined))?.envId.id, newestGlobal.envId.id);
+    });
+
+    test('clearing an explicit selection publishes the environment that reads now return', async () => {
+        await envManagers.setEnvironments('global', configured, false, { explicit: true });
+        await flush();
+        const changeEvents: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
+
+        await envManagers.setEnvironments('global', configured, false);
+        await flush();
+
+        assert.deepStrictEqual(
+            changeEvents.map((e) => [e.old?.envId.id, e.new?.envId.id]),
+            [[configured.envId.id, newestGlobal.envId.id]],
+        );
+        assert.strictEqual(envManagers.getLastKnownEnvironment(undefined)?.envId.id, newestGlobal.envId.id);
+    });
+
+    test('clearing an explicit project selection publishes the environment that reads now return', async () => {
+        await envManagers.setEnvironment(projectUri, configured, false, { explicit: true });
+        await flush();
+        const changeEvents: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
+
+        await envManagers.setEnvironment(projectUri, configured, false);
+        await flush();
+
+        assert.deepStrictEqual(
+            changeEvents.map((e) => [e.old?.envId.id, e.new?.envId.id]),
+            [[configured.envId.id, newestGlobal.envId.id]],
+        );
+        assert.strictEqual(envManagers.getLastKnownEnvironment(projectUri)?.envId.id, newestGlobal.envId.id);
+    });
+
+    test('clearing the selection clears the explicit selection', async () => {
+        await envManagers.setEnvironments('global', configured, false, { explicit: true });
+        await envManagers.setEnvironments('global', undefined);
+
+        assert.strictEqual((await envManagers.getEnvironment(undefined))?.envId.id, newestGlobal.envId.id);
+    });
+
+    suite('a user selection from a third manager', () => {
+        const pyenvEnv = makeEnv('pyenv-311', 'ms-python.python:pyenv', '3.11.9');
+        let pyenvGlobal: PythonEnvironment | undefined;
+
+        setup(() => {
+            pyenvGlobal = undefined;
+            registerManager(
+                'pyenv',
+                sandbox.stub().callsFake(async () => pyenvGlobal),
+                sandbox.stub().callsFake(async (_scope: Uri | undefined, env?: PythonEnvironment) => {
+                    pyenvGlobal = env;
+                }),
+            );
+        });
+
+        test('is not replaced when an automatic selection runs again', async () => {
+            await envManagers.setEnvironments('global', pyenvEnv);
+            await flush();
+            const changeEvents: DidChangeEnvironmentEventArgs[] = [];
+            envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
+
+            // A settings change re-runs the priority chain; global auto-discovery reports the system manager's global.
+            await envManagers.setEnvironments('global', newestGlobal, false, { explicit: false });
+            await flush();
+
+            assert.strictEqual(changeEvents.length, 0);
+            assert.strictEqual((await envManagers.getEnvironment(undefined))?.envId.id, pyenvEnv.envId.id);
+            assert.strictEqual(envManagers.getLastKnownEnvironment(undefined)?.envId.id, pyenvEnv.envId.id);
+        });
+
+        test('is replaced by an environment chosen by a setting', async () => {
+            await envManagers.setEnvironments('global', pyenvEnv);
+            await envManagers.setEnvironments('global', configured, false, { explicit: true });
+
+            assert.strictEqual((await envManagers.getEnvironment(undefined))?.envId.id, configured.envId.id);
+        });
+
+        test('is replaced by another user selection', async () => {
+            await envManagers.setEnvironments('global', pyenvEnv);
+            await envManagers.setEnvironments('global', configured);
+
+            assert.strictEqual((await envManagers.getEnvironment(undefined))?.envId.id, configured.envId.id);
+        });
+    });
+
+    test('refreshEnvironment keeps an explicit selection while the default manager only has its fallback', async () => {
+        await envManagers.setEnvironment(projectUri, configured, false, { explicit: true });
+        await flush();
+        const changeEvents: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
+
+        await envManagers.refreshEnvironment(projectUri);
+        await flush();
+
+        assert.strictEqual(changeEvents.length, 0);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(projectUri)?.envId.id, configured.envId.id);
+    });
+
+    test('refreshEnvironment switches to a venv once the default manager has one', async () => {
+        await envManagers.setEnvironment(projectUri, configured, false, { explicit: true });
+        await flush();
+        const changeEvents: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
+
+        venvGet.resolves(localVenv);
+        await envManagers.refreshEnvironment(projectUri);
+        await flush();
+
+        assert.strictEqual(changeEvents.length, 1);
+        assert.strictEqual(changeEvents[0].old?.envId.id, configured.envId.id);
+        assert.strictEqual(changeEvents[0].new?.envId.id, localVenv.envId.id);
+        assert.strictEqual((await envManagers.getEnvironment(fileUri))?.envId.id, localVenv.envId.id);
+    });
+
+    test('refreshEnvironment settles on the default manager fallback after its venv goes away', async () => {
+        // The system manager kept an older per-project entry from an earlier session.
+        systemSelections.set(projectUri.fsPath, configured);
+        venvGet.resolves(localVenv);
+        await envManagers.setEnvironment(projectUri, localVenv, false);
+        await flush();
+        const changeEvents: DidChangeEnvironmentEventArgs[] = [];
+        envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
+
+        venvGet.resolves(newestGlobal);
+        await envManagers.refreshEnvironment(projectUri);
+        await flush();
+        await envManagers.refreshEnvironment(projectUri);
+        await flush();
+
+        assert.deepStrictEqual(
+            changeEvents.map((e) => [e.old?.envId.id, e.new?.envId.id]),
+            [[localVenv.envId.id, newestGlobal.envId.id]],
+        );
+        assert.strictEqual((await envManagers.getEnvironment(fileUri))?.envId.id, newestGlobal.envId.id);
+        assert.strictEqual(envManagers.getLastKnownEnvironment(projectUri)?.envId.id, newestGlobal.envId.id);
     });
 });

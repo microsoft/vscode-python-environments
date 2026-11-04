@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { CancellationToken, LogOutputChannel, ShellExecution, TaskExecution, TaskProcessEndEvent } from 'vscode';
 import * as childProcessApis from '../../../common/childProcess.apis';
+import * as envApis from '../../../common/env.apis';
 import { Common, UvInstallStrings } from '../../../common/localize';
 import * as persistentState from '../../../common/persistentState';
 import { EventNames } from '../../../common/telemetry/constants';
@@ -16,6 +17,7 @@ import {
     clearDontAskAgain,
     ensureUvForInlineScriptVersionLookupDetailed,
     ensureUvForInlineScriptVersionLookup,
+    ensureUvForPythonVersionLookup,
     getAvailablePythonVersions,
     getUvPythonPath,
     isDontAskAgainSet,
@@ -23,6 +25,7 @@ import {
     installUv,
     promptInstallPythonViaUvDetailed,
     promptInstallPythonViaUv,
+    selectPythonVersionToInstall,
     UV_INSTALL_PYTHON_DONT_ASK_KEY,
     UvPythonVersion,
 } from '../../../managers/builtin/uvPythonInstaller';
@@ -34,6 +37,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
     let isUvInstalledStub: sinon.SinonStub;
     let showErrorMessageStub: sinon.SinonStub;
     let showInformationMessageStub: sinon.SinonStub;
+    let launchBrowserStub: sinon.SinonStub;
     let sendTelemetryEventStub: sinon.SinonStub;
     let mockState: { get: sinon.SinonStub; set: sinon.SinonStub; clear: sinon.SinonStub };
 
@@ -51,6 +55,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         sinon.stub(helpers, 'getUvExecutable').resolves('uv');
         showErrorMessageStub = sinon.stub(windowApis, 'showErrorMessage');
         showInformationMessageStub = sinon.stub(windowApis, 'showInformationMessage');
+        launchBrowserStub = sinon.stub(envApis, 'launchBrowser').resolves(true);
         sendTelemetryEventStub = sinon.stub(telemetrySender, 'sendTelemetryEvent');
     });
 
@@ -277,6 +282,109 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         assert(showInformationMessageStub.calledOnce, 'Should offer the requested prerelease');
     });
 
+    test('should cancel global Python version lookup without installing uv', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(undefined);
+
+        assert.strictEqual(await ensureUvForPythonVersionLookup(mockLog), false);
+        sinon.assert.calledOnceWithExactly(
+            showInformationMessageStub,
+            UvInstallStrings.installUvForVersionLookupPrompt,
+            { modal: true },
+            UvInstallStrings.installUv,
+            UvInstallStrings.otherPythonInstallationOptions,
+        );
+        sinon.assert.notCalled(launchBrowserStub);
+        assert.strictEqual(showErrorMessageStub.callCount, 0);
+    });
+
+    test('should open alternate Python installation guidance', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(UvInstallStrings.otherPythonInstallationOptions);
+
+        assert.strictEqual(await ensureUvForPythonVersionLookup(mockLog), false);
+        sinon.assert.calledOnceWithExactly(
+            launchBrowserStub,
+            'https://code.visualstudio.com/docs/python/python-tutorial#_install-a-python-interpreter',
+        );
+    });
+
+    test('should install uv for global Python version lookup after consent', async () => {
+        isUvInstalledStub.onFirstCall().resolves(false);
+        isUvInstalledStub.onSecondCall().resolves(true);
+        showInformationMessageStub.resolves(UvInstallStrings.installUv);
+        const executeTaskStub = stubUvInstallTask(0);
+
+        assert.strictEqual(await ensureUvForPythonVersionLookup(mockLog), true);
+        assert.strictEqual(isUvInstalledStub.callCount, 2);
+        assert.strictEqual(executeTaskStub.callCount, 1);
+    });
+
+    test('should report a failed uv installation for global Python version lookup', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(UvInstallStrings.installUv);
+        showErrorMessageStub.resolves(Common.viewLogs);
+        stubUvInstallTask(1);
+
+        assert.strictEqual(await ensureUvForPythonVersionLookup(mockLog), false);
+        sinon.assert.calledOnceWithExactly(showErrorMessageStub, UvInstallStrings.uvInstallFailed, Common.viewLogs);
+        sinon.assert.calledOnce(mockLog.show as sinon.SinonStub);
+    });
+
+    test('should install uv before fetching versions and selecting Python', async () => {
+        const order: string[] = [];
+        isUvInstalledStub.onFirstCall().resolves(false);
+        isUvInstalledStub.onSecondCall().resolves(true);
+        showInformationMessageStub.resolves(UvInstallStrings.installUv);
+        sinon
+            .stub(windowApis, 'withProgress')
+            .callsFake(async (_options, task) => task({ report: () => undefined }, {} as CancellationToken));
+        sinon.stub(windowApis, 'showQuickPick').callsFake(async (items) => {
+            order.push('quickPick');
+            return Array.isArray(items) ? items[0] : undefined;
+        });
+
+        let taskEndListener: ((event: TaskProcessEndEvent) => unknown) | undefined;
+        sinon.stub(taskApis, 'onDidEndTaskProcess').callsFake((listener) => {
+            taskEndListener = listener;
+            return { dispose: () => undefined };
+        });
+        sinon.stub(taskApis, 'executeTask').callsFake(async (task) => {
+            const execution = { task, terminate: () => undefined } as TaskExecution;
+            setImmediate(() => {
+                order.push('install');
+                taskEndListener?.({ execution, exitCode: 0 } as TaskProcessEndEvent);
+            });
+            return execution;
+        });
+        sinon.stub(childProcessApis, 'spawnProcess').callsFake((command, args) => {
+            const process = new MockChildProcess(command, args);
+            if (command === 'uv') {
+                order.push('list');
+                setImmediate(() => {
+                    process.stdout?.emit('data', JSON.stringify([makeUvPythonVersion({ version: '3.13.1' })]));
+                    process.emit('exit', 0, null);
+                });
+            } else {
+                setImmediate(() => process.emit('exit', 0, null));
+            }
+            return process as unknown as ReturnType<typeof childProcessApis.spawnProcess>;
+        });
+
+        assert.strictEqual(await selectPythonVersionToInstall(mockLog), '3.13.1');
+        assert.deepStrictEqual(order, ['install', 'list', 'quickPick']);
+    });
+
+    test('should not fetch versions when uv installation is declined', async () => {
+        isUvInstalledStub.resolves(false);
+        showInformationMessageStub.resolves(undefined);
+        const spawnStub = sinon.stub(childProcessApis, 'spawnProcess');
+
+        assert.strictEqual(await selectPythonVersionToInstall(mockLog), undefined);
+        assert.strictEqual(spawnStub.callCount, 0);
+        assert.strictEqual(showErrorMessageStub.callCount, 0);
+    });
+
     test('should request consent before installing uv for version lookup', async () => {
         isUvInstalledStub.resolves(false);
         showInformationMessageStub.resolves(undefined);
@@ -427,13 +535,10 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
         const installAction = UvInstallStrings.installPythonVersion('3.13');
         showInformationMessageStub.onFirstCall().resolves(installAction);
         sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) =>
-            task(
-                { report: () => undefined },
-                {
-                    isCancellationRequested: false,
-                    onCancellationRequested: () => ({ dispose: () => undefined }),
-                } as CancellationToken,
-            ),
+            task({ report: () => undefined }, {
+                isCancellationRequested: false,
+                onCancellationRequested: () => ({ dispose: () => undefined }),
+            } as CancellationToken),
         );
 
         let taskEndListener: ((event: TaskProcessEndEvent) => unknown) | undefined;
@@ -448,9 +553,7 @@ suite('uvPythonInstaller - promptInstallPythonViaUv', () => {
             return { task, terminate: () => undefined } as TaskExecution;
         });
 
-        const versions: UvPythonVersion[] = [
-            makeUvPythonVersion({ version: '3.13.1', path: '/usr/bin/python3.13' }),
-        ];
+        const versions: UvPythonVersion[] = [makeUvPythonVersion({ version: '3.13.1', path: '/usr/bin/python3.13' })];
         const mockProcess = new MockChildProcess('uv', [
             'python',
             'list',
@@ -488,6 +591,7 @@ suite('uvPythonInstaller - executable handoff', () => {
     let spawnStub: sinon.SinonStub;
     let executeTaskStub: sinon.SinonStub;
     let telemetryStub: sinon.SinonStub;
+    let showInformationMessageStub: sinon.SinonStub;
     let expectedExecutable: string;
     const pythonPath = path.join(home, 'managed-python', 'python');
 
@@ -513,7 +617,7 @@ suite('uvPythonInstaller - executable handoff', () => {
         expectedExecutable = path.join(installDir, 'uv');
         telemetryStub = sinon.stub(telemetrySender, 'sendTelemetryEvent');
         sinon.stub(windowApis, 'showErrorMessage');
-        sinon.stub(windowApis, 'showInformationMessage');
+        showInformationMessageStub = sinon.stub(windowApis, 'showInformationMessage');
         sinon
             .stub(windowApis, 'withProgress')
             .callsFake(async (_options, task) =>
@@ -585,6 +689,19 @@ suite('uvPythonInstaller - executable handoff', () => {
         assert.strictEqual(await helpers.getUvExecutable(), expectedExecutable);
         sinon.assert.calledWith(telemetryStub, EventNames.UV_PYTHON_INSTALL_COMPLETED);
         assert(!telemetryStub.calledWith(EventNames.UV_PYTHON_INSTALL_FAILED));
+    });
+
+    test('uses the installed executable to populate the Global version picker when PATH is unchanged', async () => {
+        const originalPath = process.env.PATH;
+        showInformationMessageStub.resolves(UvInstallStrings.installUv);
+        sinon.stub(windowApis, 'showQuickPick').callsFake(async (items) => (Array.isArray(items) ? items[0] : undefined));
+
+        assert.strictEqual(await selectPythonVersionToInstall(), '3.11.15');
+
+        assert.strictEqual(process.env.PATH, originalPath);
+        sinon.assert.calledWith(spawnStub, expectedExecutable, ['--version']);
+        sinon.assert.calledWith(spawnStub, expectedExecutable, ['python', 'list', '--output-format', 'json']);
+        assert.strictEqual(await helpers.getUvExecutable(), expectedExecutable);
     });
 
     test('does not replace executable resolution after an installer failure', async () => {

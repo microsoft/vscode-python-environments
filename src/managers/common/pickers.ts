@@ -108,6 +108,7 @@ function groupByInstalled(items: PackageQuickPickItem[], installed?: string[]): 
 interface PackagesPickerResult {
     install: string[];
     uninstall: string[];
+    selectedUris?: Uri[];
 }
 
 function selectionsToResult(selections: string[], installed: string[]): PackagesPickerResult {
@@ -280,11 +281,12 @@ export async function selectFromInstallableToInstall(
     );
 
     if (selected) {
-        if (Array.isArray(selected)) {
-            return { install: selected.flatMap((s) => s.args ?? []), uninstall: [] };
-        } else {
-            return { install: selected.args ?? [], uninstall: [] };
-        }
+        const selectedItems = Array.isArray(selected) ? selected : [selected];
+        return {
+            install: selectedItems.flatMap((item) => item.args ?? []),
+            uninstall: [],
+            selectedUris: selectedItems.flatMap((item) => (item.uri ? [item.uri] : [])),
+        };
     }
     return undefined;
 }

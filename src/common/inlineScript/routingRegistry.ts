@@ -31,8 +31,11 @@ export type InlineScriptSetupOutcome =
           readonly kind: 'failed';
           readonly category: InlineScriptEnvErrorCategory;
           readonly requiresPython?: string;
+          /** Optional installer-specific explanation, already localized for the setup UI. */
+          readonly message?: string;
+          readonly alreadyReported?: boolean;
       }
-    | { readonly kind: 'cancelled' }
+    | { readonly kind: 'cancelled'; readonly message?: string }
     | { readonly kind: 'skipped' };
 
 interface ScriptRoutingState {

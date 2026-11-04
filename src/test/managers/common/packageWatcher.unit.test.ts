@@ -2,8 +2,11 @@
 // Licensed under the MIT License.
 
 import * as assert from 'assert';
+import { promises as fs } from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as sinon from 'sinon';
-import { Disposable, EventEmitter, LogOutputChannel, RelativePattern, Terminal, Uri } from 'vscode';
+import { CancellationError, Disposable, EventEmitter, LogOutputChannel, RelativePattern, Terminal, Uri } from 'vscode';
 import {
     DidChangeEnvironmentEventArgs,
     PackageManager,
@@ -18,8 +21,9 @@ import type { EnvironmentManagers } from '../../../features/envManagers';
 import { InternalPackageManager } from '../../../managers/common/registeredManagers';
 import {
     PackageWatcherTerminalActivation,
-    registerPackageWatchers,
+    registerPackageWatchers as registerPackageWatchersCore,
     watchPackageChangesForEnvironment,
+    withPackageWatchersPaused,
 } from '../../../managers/common/packageWatcher';
 
 suite('Package Watcher', () => {
@@ -32,9 +36,17 @@ suite('Package Watcher', () => {
         activated: boolean;
     }>;
     let mockTerminalActivation: PackageWatcherTerminalActivation;
+    let registrations: Disposable[];
+
+    function registerPackageWatchers(...args: Parameters<typeof registerPackageWatchersCore>): Disposable {
+        const disposable = registerPackageWatchersCore(...args);
+        registrations.push(disposable);
+        return disposable;
+    }
 
     setup(() => {
         sandbox = sinon.createSandbox();
+        registrations = [];
         mockLogOutputChannel = {
             error: sandbox.stub(),
             warn: sandbox.stub(),
@@ -55,6 +67,7 @@ suite('Package Watcher', () => {
     });
 
     teardown(() => {
+        registrations.forEach((registration) => registration.dispose());
         terminalActivationChanges.dispose();
         sandbox.restore();
     });
@@ -102,6 +115,191 @@ suite('Package Watcher', () => {
             refresh: sandbox.stub().resolves([]),
         };
     }
+
+    suite('runtime installation coordination', () => {
+        let changes: EventEmitter<DidChangeEnvironmentEventArgs>;
+        let environment: PythonEnvironment;
+        let root: string;
+
+        setup(async () => {
+            root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pim-watcher-unit-')));
+            await Promise.all(['pim-runtime', 'other-runtime', 'replacement-runtime']
+                .map((directory) => fs.mkdir(path.join(root, directory))));
+            changes = new EventEmitter<DidChangeEnvironmentEventArgs>();
+            environment = createMockEnvironment({ sysPrefix: path.join(root, 'pim-runtime') });
+            createFileSystemWatcherStub.callsFake(() => createMockWatcher());
+            const packageManager = new InternalPackageManager('pip', createMockPackageManager() as PackageManager);
+            const managers = {
+                onDidChangeActiveEnvironment: changes.event,
+                getPackageManager: sandbox.stub().returns(packageManager),
+            } as unknown as EnvironmentManagers;
+            registerPackageWatchers(managers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
+        });
+
+        teardown(async () => {
+            changes.dispose();
+            await fs.rm(root, { recursive: true, force: true });
+        });
+
+        test('releases the shared runtime watcher before installation and restores it once', async () => {
+            const terminal = { name: 'active-runtime' } as Terminal;
+            changes.fire({ uri: undefined, new: environment, old: undefined });
+            terminalActivationChanges.fire({ terminal, environment, activated: true });
+            const watcher = createFileSystemWatcherStub.firstCall.returnValue;
+
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                sinon.assert.calledOnce(watcher.dispose);
+                assert.strictEqual(createFileSystemWatcherStub.callCount, 1);
+            });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 2, 'Shared consumers must restore one watcher');
+        });
+
+        for (const error of [new Error('install failed'), new CancellationError()]) {
+            test(`restores runtime watchers after ${error instanceof CancellationError ? 'cancellation' : 'failure'}`, async () => {
+                changes.fire({ uri: undefined, new: environment, old: undefined });
+
+                await assert.rejects(withPackageWatchersPaused(environment.sysPrefix, async () => { throw error; }));
+
+                assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+                sinon.assert.calledOnce(createFileSystemWatcherStub.firstCall.returnValue.dispose);
+            });
+        }
+
+        test('does not resume until every nested installation operation has finished', async () => {
+            changes.fire({ uri: undefined, new: environment, old: undefined });
+
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                    assert.strictEqual(createFileSystemWatcherStub.callCount, 1);
+                });
+                assert.strictEqual(createFileSystemWatcherStub.callCount, 1);
+            });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+        });
+
+        test('keeps watching an unrelated runtime without broadening watch roots', async () => {
+            const other = createMockEnvironment({
+                envId: { id: 'other', managerId: 'test-manager' },
+                sysPrefix: path.join(root, 'other-runtime'),
+            });
+            changes.fire({ uri: undefined, new: environment, old: undefined });
+            changes.fire({ uri: Uri.file(path.resolve('project')), new: other, old: undefined });
+            const unrelatedWatcher = createFileSystemWatcherStub.secondCall.returnValue;
+
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                sinon.assert.notCalled(unrelatedWatcher.dispose);
+            });
+
+            sinon.assert.notCalled(unrelatedWatcher.dispose);
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 3);
+        });
+
+        test('does not resurrect an old selection changed during installation', async () => {
+            const replacement = createMockEnvironment({
+                envId: { id: 'replacement', managerId: 'test-manager' },
+                sysPrefix: path.join(root, 'replacement-runtime'),
+            });
+            changes.fire({ uri: undefined, new: environment, old: undefined });
+
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                changes.fire({ uri: undefined, new: replacement, old: environment });
+            });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+        });
+
+        test('defers watchers for a runtime selected while installation is already in progress', async () => {
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                changes.fire({ uri: undefined, new: environment, old: undefined });
+                sinon.assert.notCalled(createFileSystemWatcherStub);
+            });
+
+            sinon.assert.calledOnce(createFileSystemWatcherStub);
+        });
+
+        test('does not restore a terminal watcher after it is deactivated during installation', async () => {
+            const terminal = { name: 'active-runtime' } as Terminal;
+            terminalActivationChanges.fire({ terminal, environment, activated: true });
+
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                terminalActivationChanges.fire({ terminal, environment, activated: false });
+            });
+
+            sinon.assert.calledOnce(createFileSystemWatcherStub);
+        });
+
+        test('releases a watcher whose prefix has a trailing separator before mutation begins', async () => {
+            const selected = { ...environment, sysPrefix: environment.sysPrefix + path.sep };
+            changes.fire({ uri: undefined, new: selected, old: undefined });
+            const watcher = createFileSystemWatcherStub.firstCall.returnValue;
+
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                sinon.assert.calledOnce(watcher.dispose);
+            });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+        });
+
+        test('releases a junction or symlink-spelled watcher before mutating its physical runtime', async () => {
+            const alias = path.join(root, 'runtime-alias');
+            await fs.symlink(environment.sysPrefix, alias, process.platform === 'win32' ? 'junction' : 'dir');
+            const selected = { ...environment, sysPrefix: alias };
+            changes.fire({ uri: undefined, new: selected, old: undefined });
+            const watcher = createFileSystemWatcherStub.firstCall.returnValue;
+
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                sinon.assert.calledOnce(watcher.dispose);
+            });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+        });
+
+        test('uses the native physical identity for an alternate short-path spelling', async () => {
+            const shortPrefix = path.join(root, 'PYTHON~1');
+            const realpath = sandbox.stub(fs, 'realpath').callThrough();
+            realpath.withArgs(shortPrefix).resolves(environment.sysPrefix);
+            changes.fire({ uri: undefined, new: { ...environment, sysPrefix: shortPrefix }, old: undefined });
+            const watcher = createFileSystemWatcherStub.firstCall.returnValue;
+
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                sinon.assert.calledOnce(watcher.dispose);
+            });
+
+            sinon.assert.calledWithExactly(realpath, shortPrefix);
+        });
+
+        test('bounds an unreadable prefix lookup and pauses its watcher conservatively', async () => {
+            sandbox.stub(fs, 'realpath').returns(new Promise<string>(() => undefined));
+            const clock = sandbox.useFakeTimers();
+            changes.fire({ uri: undefined, new: environment, old: undefined });
+            const watcher = createFileSystemWatcherStub.firstCall.returnValue;
+            let started = false;
+            const installation = withPackageWatchersPaused(environment.sysPrefix, async () => {
+                started = true;
+                sinon.assert.calledOnce(watcher.dispose);
+            });
+            assert.strictEqual(started, false);
+
+            await clock.tickAsync(1000);
+            await installation;
+
+            assert.strictEqual(started, true);
+            sinon.assert.calledOnce(mockLogOutputChannel.warn as sinon.SinonStub);
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+        });
+
+        test('does not recreate watchers after the registration is disposed during installation', async () => {
+            changes.fire({ uri: undefined, new: environment, old: undefined });
+
+            await withPackageWatchersPaused(environment.sysPrefix, async () => {
+                registrations[0].dispose();
+            });
+
+            sinon.assert.calledOnce(createFileSystemWatcherStub);
+        });
+    });
 
     suite('watchPackageChangesForEnvironment', () => {
         test('should create file system watchers for watch targets', () => {
@@ -468,8 +666,8 @@ suite('Package Watcher', () => {
             assert.ok((mockWatcher.dispose as sinon.SinonStub).called, 'Should dispose watcher after the final scope');
         });
 
-        test('should use separate watchers for project-bound package managers', () => {
-            createFileSystemWatcherStub.returns(createMockWatcher());
+        test('should preserve separate project-bound watchers across runtime installation', async () => {
+            createFileSystemWatcherStub.callsFake(() => createMockWatcher());
             const environmentChanges = new EventEmitter<DidChangeEnvironmentEventArgs>();
             const firstScope = Uri.file('workspace-one');
             const secondScope = Uri.file('workspace-two');
@@ -489,13 +687,23 @@ suite('Package Watcher', () => {
                     .stub()
                     .callsFake((scope) => (scope === firstScope ? firstPackageManager : secondPackageManager)),
             } as unknown as EnvironmentManagers;
-            const env = createMockEnvironment();
+            const env = createMockEnvironment({ sysPrefix: await fs.realpath(process.cwd()) });
 
             registerPackageWatchers(envManagers, mockTerminalActivation, mockLogOutputChannel as LogOutputChannel);
             environmentChanges.fire({ uri: firstScope, new: env, old: undefined });
             environmentChanges.fire({ uri: secondScope, new: env, old: undefined });
 
             assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+            const firstWatcher = createFileSystemWatcherStub.firstCall.returnValue;
+            const secondWatcher = createFileSystemWatcherStub.secondCall.returnValue;
+
+            await withPackageWatchersPaused(env.sysPrefix, async () => {
+                sinon.assert.calledOnce(firstWatcher.dispose);
+                sinon.assert.calledOnce(secondWatcher.dispose);
+                assert.strictEqual(createFileSystemWatcherStub.callCount, 2);
+            });
+
+            assert.strictEqual(createFileSystemWatcherStub.callCount, 4, 'Should restore both project-bound watchers');
         });
 
         test('should stop watching an environment when the active environment changes', () => {

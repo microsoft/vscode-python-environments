@@ -5,6 +5,8 @@ import { CancellationError, CancellationToken, CancellationTokenSource, LogOutpu
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
+import { PackageManagement } from '../../../common/localize';
+import { normalizePath } from '../../../common/utils/pathUtils';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
 import { PipListCommand } from '../../../managers/builtin/commands/list';
@@ -32,7 +34,10 @@ suite('Pip Utils - getProjectInstallable', () => {
             ) => {
                 return await callback(
                     {} as Progress<{ message?: string; increment?: number }>,
-                    { isCancellationRequested: false } as CancellationToken,
+                    {
+                        isCancellationRequested: false,
+                        onCancellationRequested: () => ({ dispose: () => {} }),
+                    } as CancellationToken,
                 );
             },
         );
@@ -54,26 +59,256 @@ suite('Pip Utils - getProjectInstallable', () => {
             sinon.restore();
         });
 
-        test('ordinary search retains its cancellation behavior while tool search rejects cancellation', async () => {
+        test('marks dependency progress cancellable and rejects a pre-cancelled interactive search', async () => {
             const source = new CancellationTokenSource();
             source.cancel();
-            findFilesStub.resolves([]);
-            withProgressStub.callsFake(async (_options, task) => task({ report: () => {} }, source.token));
+            withProgressStub.callsFake(async (options: ProgressOptions, task) => {
+                assert.strictEqual(options.cancellable, true);
+                return task({ report: () => {} }, source.token);
+            });
             const projects = [{ name: 'workspace', uri: Uri.file(process.cwd()) }];
             try {
-                const ordinary = await getProjectInstallable(mockApi as PythonEnvironmentApi, projects);
-                assert.deepStrictEqual(ordinary.installables, []);
                 await assert.rejects(
-                    getProjectInstallable(mockApi as PythonEnvironmentApi, projects, {
-                        runHeadless: true,
-                        token: source.token,
-                    }),
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, projects),
                     CancellationError,
                 );
-                assert.ok(withProgressStub.calledOnce);
+                assert.ok(findFilesStub.notCalled);
             } finally {
                 source.dispose();
             }
+        });
+
+        test('propagates the progress token and promptly rejects cancellation during file search', async () => {
+            const source = new CancellationTokenSource();
+            let startedCount = 0;
+            let markSearchesStarted!: () => void;
+            const searchesStarted = new Promise<void>((resolve) => {
+                markSearchesStarted = resolve;
+            });
+            findFilesStub.callsFake(
+                (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
+                    assert.strictEqual(token, source.token);
+                    startedCount += 1;
+                    if (startedCount === 4) {
+                        markSearchesStarted();
+                    }
+                    if (startedCount === 1) {
+                        return new Promise<Uri[]>(() => {});
+                    }
+                    return new Promise<Uri[]>((resolve) => {
+                        token.onCancellationRequested(() => resolve([]));
+                    });
+                },
+            );
+            withProgressStub.callsFake(async (options: ProgressOptions, task) => {
+                assert.strictEqual(options.cancellable, true);
+                const pending = task({ report: () => {} }, source.token);
+                await searchesStarted;
+                source.cancel();
+                return pending;
+            });
+
+            let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+            try {
+                await Promise.race([
+                    assert.rejects(
+                        getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                            { name: 'workspace', uri: Uri.file(process.cwd()) },
+                        ]),
+                        CancellationError,
+                    ),
+                    new Promise<void>((_resolve, reject) => {
+                        timeoutHandle = setTimeout(
+                            () => reject(new Error('Dependency search did not cancel promptly')),
+                            1_000,
+                        );
+                    }),
+                ]);
+                assert.strictEqual(findFilesStub.callCount, 4);
+            } finally {
+                clearTimeout(timeoutHandle);
+                source.dispose();
+            }
+        });
+
+        test('rejects cancellation after file searches resolve without processing partial results', async () => {
+            const source = new CancellationTokenSource();
+            const resolutions: Array<(uris: Uri[]) => void> = [];
+            const partialResult = Uri.file(path.join(process.cwd(), 'requirements.txt'));
+            const getPythonProject = sinon.stub().throws(new Error('Unexpected post-search processing'));
+            mockApi.getPythonProject = getPythonProject;
+            findFilesStub.callsFake(
+                (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
+                    assert.strictEqual(token, source.token);
+                    return new Promise<Uri[]>((resolve) => resolutions.push(resolve));
+                },
+            );
+            withProgressStub.callsFake(async (_options: ProgressOptions, task) => {
+                const pending = task({ report: () => {} }, source.token);
+                assert.strictEqual(resolutions.length, 4);
+                resolutions.forEach((resolve, index) => resolve(index === 0 ? [partialResult] : []));
+                source.cancel();
+                return pending;
+            });
+
+            try {
+                await assert.rejects(
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                        { name: 'workspace', uri: Uri.file(process.cwd()) },
+                    ]),
+                    CancellationError,
+                );
+                assert.ok(getPythonProject.notCalled);
+            } finally {
+                source.dispose();
+            }
+        });
+
+        test('observes a queued Cancel click before post-search processing succeeds', async () => {
+            const source = new CancellationTokenSource();
+            const partialResult = Uri.file(path.join(process.cwd(), 'requirements.txt'));
+            const getPythonProject = sinon.stub().throws(new Error('Unexpected post-search processing'));
+            mockApi.getPythonProject = getPythonProject;
+            findFilesStub.callsFake((pattern: string) =>
+                Promise.resolve(pattern === '**/*requirements*.txt' ? [partialResult] : []),
+            );
+            withProgressStub.callsFake(async (_options: ProgressOptions, task) => {
+                const pending = task({ report: () => {} }, source.token);
+                setImmediate(() => source.cancel());
+                return pending;
+            });
+
+            try {
+                await assert.rejects(
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                        { name: 'workspace', uri: Uri.file(process.cwd()) },
+                    ]),
+                    CancellationError,
+                );
+                assert.ok(getPythonProject.notCalled);
+            } finally {
+                source.dispose();
+            }
+        });
+
+        test('rejects cancellation during a TOML read before strict parsing or validation', async () => {
+            const temp = await fse.mkdtemp(path.join(os.tmpdir(), 'piputils-cancel-'));
+            const project = { name: 'workspace', uri: Uri.file(temp) };
+            const pyproject = Uri.file(path.join(temp, 'pyproject.toml'));
+            await fse.outputFile(pyproject.fsPath, '[invalid TOML');
+            mockApi.getPythonProject = () => project;
+            findFilesStub.callsFake((pattern: string) =>
+                Promise.resolve(pattern === '**/pyproject.toml' ? [pyproject] : []),
+            );
+
+            let cancelled = false;
+            let subscriptionCount = 0;
+            let markPostReadCheck!: () => void;
+            const postReadCheck = new Promise<void>((resolve) => {
+                markPostReadCheck = resolve;
+            });
+            const token = {
+                get isCancellationRequested() {
+                    if (cancelled) {
+                        markPostReadCheck();
+                    }
+                    return cancelled;
+                },
+                onCancellationRequested: (listener: () => unknown) => {
+                    subscriptionCount += 1;
+                    if (subscriptionCount === 2) {
+                        queueMicrotask(() => {
+                            cancelled = true;
+                            listener();
+                        });
+                    }
+                    return { dispose: () => {} };
+                },
+            } as unknown as CancellationToken;
+
+            try {
+                await assert.rejects(
+                    getProjectInstallable(mockApi as PythonEnvironmentApi, [project], {
+                        runHeadless: true,
+                        token,
+                    }),
+                    CancellationError,
+                );
+                await postReadCheck;
+                assert.strictEqual(subscriptionCount, 2);
+                assert.ok(withProgressStub.notCalled);
+            } finally {
+                await fse.remove(temp);
+            }
+        });
+
+        test('headless search preserves the caller token and CancellationError semantics', async () => {
+            const source = new CancellationTokenSource();
+            source.cancel();
+            try {
+                await assert.rejects(
+                    getProjectInstallable(
+                        mockApi as PythonEnvironmentApi,
+                        [{ name: 'workspace', uri: Uri.file(process.cwd()) }],
+                        { runHeadless: true, token: source.token },
+                    ),
+                    CancellationError,
+                );
+                assert.ok(withProgressStub.notCalled);
+                assert.ok(findFilesStub.notCalled);
+            } finally {
+                source.dispose();
+            }
+        });
+
+        test('headless search propagates in-flight cancellation and passes the caller token unchanged', async () => {
+            const source = new CancellationTokenSource();
+            let startedCount = 0;
+            let markSearchesStarted!: () => void;
+            const searchesStarted = new Promise<void>((resolve) => {
+                markSearchesStarted = resolve;
+            });
+            findFilesStub.callsFake(
+                (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
+                    assert.strictEqual(token, source.token);
+                    startedCount += 1;
+                    if (startedCount === 4) {
+                        markSearchesStarted();
+                    }
+                    return new Promise<Uri[]>((resolve) => {
+                        token.onCancellationRequested(() => resolve([]));
+                    });
+                },
+            );
+
+            try {
+                const pending = getProjectInstallable(
+                    mockApi as PythonEnvironmentApi,
+                    [{ name: 'workspace', uri: Uri.file(process.cwd()) }],
+                    { runHeadless: true, token: source.token },
+                );
+                await searchesStarted;
+                source.cancel();
+                await assert.rejects(pending, CancellationError);
+                assert.strictEqual(findFilesStub.callCount, 4);
+                assert.ok(withProgressStub.notCalled);
+            } finally {
+                source.dispose();
+            }
+        });
+
+        test('returns an empty result after a successful dependency search with no matches', async () => {
+            findFilesStub.resolves([]);
+            const workspacePath = Uri.file('/test/path/root').fsPath;
+
+            const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                { name: 'workspace', uri: Uri.file(workspacePath) },
+            ]);
+
+            assert.deepStrictEqual(result.installables, []);
+            assert.deepStrictEqual(result.validationErrors, []);
+            assert.strictEqual(findFilesStub.callCount, 4);
+            assert.ok(withProgressStub.calledOnce);
         });
 
         test('opens the package picker when listing installed packages fails', async () => {
@@ -108,6 +343,77 @@ suite('Pip Utils - getProjectInstallable', () => {
             assert.strictEqual(result, undefined);
             assert.ok(logError.calledOnceWithExactly('Error listing installed packages', listError));
             assert.ok(showQuickPick.calledOnce, 'The package picker should still open after a list failure');
+        });
+
+        test('does not block configurable creation when malformed pyproject.toml is unselected', async () => {
+            const tempRoot = await fse.mkdtemp(path.join(os.tmpdir(), 'piputils-selection-'));
+            try {
+                const invalidToml = path.join(tempRoot, 'pyproject.toml');
+                const requirements = path.join(tempRoot, 'requirements.txt');
+                await fse.writeFile(invalidToml, '[project]\nname = "unterminated\n');
+                await fse.writeFile(requirements, 'requests\n');
+                mockApi.getPythonProject = () => ({ name: 'workspace', uri: Uri.file(tempRoot) });
+                findFilesStub.callsFake((pattern: string) => {
+                    if (pattern === '**/pyproject.toml') {
+                        return Promise.resolve([Uri.file(invalidToml)]);
+                    }
+                    if (pattern === '*requirements*.txt') {
+                        return Promise.resolve([Uri.file(requirements)]);
+                    }
+                    return Promise.resolve([]);
+                });
+                const picker = sinon.stub(winapi, 'showQuickPickWithButtons');
+                picker.onFirstCall().callsFake(async (items) =>
+                    items.find((item) => item.label === PackageManagement.workspaceDependencies),
+                );
+                picker.onSecondCall().callsFake(async (items) => {
+                    const requirement = items.find((item) => (item as { args?: string[] }).args?.[0] === '-r');
+                    assert.ok(requirement);
+                    return [requirement];
+                });
+                const showError = sinon.stub(winapi, 'showErrorMessage').throws(new Error('Unexpected validation'));
+
+                const result = await getWorkspacePackagesToInstall(
+                    mockApi as PythonEnvironmentApi,
+                    { install: [], showSkipOption: true },
+                    [{ name: 'workspace', uri: Uri.file(tempRoot) }],
+                );
+
+                assert.deepStrictEqual(result, { install: ['-r', Uri.file(requirements).fsPath], uninstall: [] });
+                assert.ok(showError.notCalled);
+            } finally {
+                await fse.remove(tempRoot);
+            }
+        });
+
+        test('prompts when configurable creation selects an invalid-file-only workspace dependency', async () => {
+            const tempRoot = await fse.mkdtemp(path.join(os.tmpdir(), 'piputils-selection-'));
+            try {
+                const invalidToml = path.join(tempRoot, 'pyproject.toml');
+                await fse.writeFile(invalidToml, '[project]\nname = "unterminated\n');
+                mockApi.getPythonProject = () => ({ name: 'workspace', uri: Uri.file(tempRoot) });
+                findFilesStub.callsFake((pattern: string) =>
+                    pattern === '**/pyproject.toml'
+                        ? Promise.resolve([Uri.file(invalidToml)])
+                        : Promise.resolve([]),
+                );
+                sinon.stub(winapi, 'showQuickPickWithButtons').callsFake(async (items) =>
+                    items.find((item) => item.label === PackageManagement.workspaceDependencies),
+                );
+                const showError = sinon.stub(winapi, 'showErrorMessage');
+                showError.callsFake(async (...args: unknown[]) => args[3] as never);
+
+                const result = await getWorkspacePackagesToInstall(
+                    mockApi as PythonEnvironmentApi,
+                    { install: [], showSkipOption: true },
+                    [{ name: 'workspace', uri: Uri.file(tempRoot) }],
+                );
+
+                assert.strictEqual(result, undefined);
+                assert.ok(showError.calledOnce);
+            } finally {
+                await fse.remove(tempRoot);
+            }
         });
 
         test('shows progress while listing installed packages', async () => {
@@ -288,7 +594,7 @@ suite('Pip Utils - getProjectInstallable', () => {
                 deduplicateProjectPackages: true,
             });
             assert.deepStrictEqual(result.installables.map((item) => item.uri?.fsPath), [ownRequirement.fsPath]);
-            assert.strictEqual(result.validationError, undefined);
+            assert.strictEqual(result.validationErrors[0], undefined);
             assert.ok(withProgressStub.notCalled);
         } finally {
             source.dispose();
@@ -359,6 +665,76 @@ suite('Pip Utils - getProjectInstallable', () => {
             'Files should be ordered by depth relative to the project root',
         );
     });
+
+    test('preserves complete depth-then-path order across multiple merge rounds', async () => {
+        const workspacePath = Uri.file('/test/path/root').fsPath;
+        const dependencyPaths = Array.from({ length: 129 }, (_, index) => {
+            const directories = Array.from(
+                { length: index % 5 },
+                (_value, level) => `group-${(index + level) % 11}`,
+            );
+            return path.join(
+                workspacePath,
+                ...directories,
+                `requirements-${index.toString().padStart(3, '0')}.txt`,
+            );
+        });
+        findFilesStub.callsFake((pattern: string) =>
+            Promise.resolve(pattern === '**/*requirements*.txt' ? [...dependencyPaths].reverse().map(Uri.file) : []),
+        );
+
+        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [
+            { name: 'workspace', uri: Uri.file(workspacePath) },
+        ]);
+
+        const expected = [...dependencyPaths].sort((a, b) => {
+            const depthA = path.relative(workspacePath, a).split(path.sep).filter(Boolean).length;
+            const depthB = path.relative(workspacePath, b).split(path.sep).filter(Boolean).length;
+            if (depthA !== depthB) {
+                return depthA - depthB;
+            }
+            const normalizedA = normalizePath(a);
+            const normalizedB = normalizePath(b);
+            return normalizedA < normalizedB ? -1 : normalizedA > normalizedB ? 1 : 0;
+        });
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.uri?.fsPath),
+            expected,
+        );
+    });
+
+    test('cancels after batched processing starts without returning partial multi-chunk results', async () => {
+        const workspacePath = Uri.file('/test/path/root').fsPath;
+        const dependencyFiles = Array.from({ length: 129 }, (_, index) =>
+            Uri.file(
+                path.join(
+                    workspacePath,
+                    `group-${index % 7}`,
+                    `requirements-${index.toString().padStart(3, '0')}.txt`,
+                ),
+            ),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            Promise.resolve(pattern === '**/*requirements*.txt' ? dependencyFiles : []),
+        );
+        const source = new CancellationTokenSource();
+        withProgressStub.callsFake(async (_options: ProgressOptions, task) => {
+            const pending = task({ report: () => {} }, source.token);
+            setImmediate(() => setImmediate(() => source.cancel()));
+            return pending;
+        });
+
+        try {
+            await assert.rejects(
+                getProjectInstallable(mockApi as PythonEnvironmentApi, [
+                    { name: 'workspace', uri: Uri.file(workspacePath) },
+                ]),
+                CancellationError,
+            );
+        } finally {
+            source.dispose();
+        }
+    });
 });
 
 suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () => {
@@ -416,7 +792,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             ) => {
                 return await callback(
                     {} as Progress<{ message?: string; increment?: number }>,
-                    { isCancellationRequested: false } as CancellationToken,
+                    {
+                        isCancellationRequested: false,
+                        onCancellationRequested: () => ({ dispose: () => {} }),
+                    } as CancellationToken,
                 );
             },
         );
@@ -445,6 +824,410 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         if (tmpRoot) {
             await fse.remove(tmpRoot);
         }
+    });
+
+    test('reports invalid TOML syntax instead of treating the file as empty', async () => {
+        const invalidToml = await writeTomlContent('', '[project]\nname = \"unterminated\n');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(invalidToml)]) : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(projectRoot),
+        );
+
+        assert.strictEqual(result.installables.length, 0);
+        assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, invalidToml);
+    });
+
+    test('reports unreadable TOML instead of treating the file as empty', async () => {
+        const missingToml = path.join(projectRoot, 'missing', 'pyproject.toml');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(missingToml)]) : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+        );
+
+        assert.strictEqual(result.installables.length, 0);
+        assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, Uri.file(missingToml).fsPath);
+        assert.match(result.validationErrors[0]?.message ?? '', /read or parse/i);
+    });
+
+    test('reports malformed dependency values while retaining the editable install for Continue Anyway', async () => {
+        const invalidToml = await writeTomlContent(
+            '',
+            [
+                '[project]',
+                'name = "myapp"',
+                'dependencies = "requests"',
+                '',
+                '[build-system]',
+                'requires = ["setuptools"]',
+                'build-backend = "setuptools.build_meta"',
+                '',
+            ].join('\n'),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(invalidToml)]) : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+        );
+
+        assert.deepStrictEqual(result.installables[0]?.args, ['-e', projectRoot]);
+        assert.match(result.validationErrors[0]?.message ?? '', /dependencies.*array of strings/i);
+    });
+
+    test('rejects datetime values where a dependency table is required', async () => {
+        const invalidToml = await writeTomlContent(
+            '',
+            [
+                '[project]',
+                'name = "myapp"',
+                'optional-dependencies = 1979-05-27T07:32:00Z',
+                '',
+                '[build-system]',
+                'requires = ["setuptools"]',
+                'build-backend = "setuptools.build_meta"',
+                '',
+            ].join('\n'),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(invalidToml)]) : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+        );
+
+        assert.deepStrictEqual(result.installables[0]?.args, ['-e', projectRoot]);
+        assert.match(result.validationErrors[0]?.message ?? '', /optional-dependencies.*table/i);
+    });
+
+    test('reports invalid optional dependency group names before installation', async () => {
+        const invalidToml = await writeTomlContent(
+            '',
+            [
+                '[project]',
+                'name = "myapp"',
+                '',
+                '[project.optional-dependencies]',
+                '"bad extra" = ["pytest"]',
+                '',
+            ].join('\n'),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(invalidToml)]) : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+        );
+
+        assert.deepStrictEqual(result.installables[0]?.args, ['-e', `${projectRoot}[bad extra]`]);
+        assert.match(result.validationErrors[0]?.message ?? '', /invalid optional dependency group name/i);
+    });
+
+    test('returns a valid TOML installable without validation errors', async () => {
+        const validToml = await writeToml('', 'myapp');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(validToml)]) : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+        );
+
+        assert.deepStrictEqual(result.installables[0]?.args, ['-e', projectRoot]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
+    test('ignores malformed pyproject.toml from a sibling worktree outside the creation root', async () => {
+        const owningToml = await writeToml('main', 'myapp');
+        const siblingToml = await writeTomlContent('copilot', '[project]\nname = "unterminated\n');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [path.join(projectRoot, 'main')]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
+    test('does not substitute a valid sibling when the owning pyproject.toml is malformed', async () => {
+        const owningToml = await writeTomlContent('main', '[project]\nname = "unterminated\n');
+        const siblingToml = await writeToml('copilot', 'myapp');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        assert.deepStrictEqual(result.installables, []);
+        assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, owningToml);
+    });
+
+    test('ignores a non-installable schema error from a sibling worktree', async () => {
+        const owningToml = await writeToml('main', 'myapp');
+        const siblingToml = await writeTomlContent(
+            'copilot',
+            ['[project]', 'name = "myapp"', 'optional-dependencies = ["pytest"]', ''].join('\n'),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [path.join(projectRoot, 'main')]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
+    test('does not substitute a valid sibling when the owning pyproject.toml has a schema error', async () => {
+        const owningToml = await writeTomlContent(
+            'main',
+            ['[project]', 'name = "myapp"', 'optional-dependencies = ["pytest"]', ''].join('\n'),
+        );
+        const siblingToml = await writeToml('copilot', 'myapp');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        assert.deepStrictEqual(result.installables, []);
+        assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, owningToml);
+    });
+
+    test('ignores an installable schema-invalid sibling outside the creation root', async () => {
+        const owningToml = await writeToml('main', 'myapp');
+        const siblingToml = await writeTomlContent(
+            'copilot',
+            [
+                'project = "not-a-table"',
+                '',
+                '[build-system]',
+                'requires = ["setuptools"]',
+                'build-backend = "setuptools.build_meta"',
+                '',
+            ].join('\n'),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [path.join(projectRoot, 'main')]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
+    test('prefers a valid same-name descendant over a disjoint sibling before duplicate selection', async () => {
+        const owningToml = await writeToml(path.join('main', 'pkg'), 'shared');
+        const siblingToml = await writeToml('copilot', 'shared');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
+            path.join(projectRoot, 'main', 'pkg'),
+        ]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
+    test('keeps a schema-invalid exact owner ahead of a valid same-name ancestor', async () => {
+        const ancestorToml = await writeToml('main', 'shared');
+        const owningToml = await writeTomlContent(
+            path.join('main', 'pkg'),
+            ['[project]', 'name = "shared"', 'optional-dependencies = ["pytest"]', ''].join('\n'),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(ancestorToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main', 'pkg')),
+        );
+
+        assert.deepStrictEqual(result.installables, []);
+        assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, owningToml);
+    });
+
+    test('ignores a same-name invalid ancestor that emits no installable when an exact owner is selected', async () => {
+        const ancestorToml = await writeTomlContent(
+            'main',
+            ['[project]', 'name = "shared"', 'optional-dependencies = ["pytest"]', ''].join('\n'),
+        );
+        const owningToml = await writeToml(path.join('main', 'pkg'), 'shared');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(ancestorToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main', 'pkg')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
+            path.join(projectRoot, 'main', 'pkg'),
+        ]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
+    test('lets an exact valid owner replace an invalid ancestor without changing disjoint eligibility', async () => {
+        const ancestorToml = await writeTomlContent(
+            'main',
+            [
+                '[project]',
+                'name = "shared"',
+                'dependencies = "requests"',
+                '',
+                '[build-system]',
+                'requires = ["setuptools"]',
+                'build-backend = "setuptools.build_meta"',
+                '',
+            ].join('\n'),
+        );
+        const owningToml = await writeToml(path.join('main', 'pkg'), 'shared');
+        const siblingToml = await writeToml('copilot', 'other-package');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(ancestorToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main', 'pkg')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
+            path.join(projectRoot, 'main', 'pkg'),
+        ]);
+        assert.deepStrictEqual(result.validationErrors, []);
+    });
+
+    test('keeps a schema-invalid same-name descendant eligible before duplicate selection', async () => {
+        const owningToml = await writeTomlContent(
+            path.join('main', 'pkg'),
+            [
+                '[project]',
+                'name = "shared"',
+                'dependencies = "requests"',
+                '',
+                '[build-system]',
+                'requires = ["setuptools"]',
+                'build-backend = "setuptools.build_meta"',
+                '',
+            ].join('\n'),
+        );
+        const siblingToml = await writeToml('copilot', 'shared');
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
+            path.join(projectRoot, 'main', 'pkg'),
+        ]);
+        assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, owningToml);
+    });
+
+    test('ignores a schema-invalid same-name sibling before duplicate selection', async () => {
+        const owningToml = await writeToml(path.join('main', 'pkg'), 'shared');
+        const siblingToml = await writeTomlContent(
+            'copilot',
+            [
+                '[project]',
+                'name = "shared"',
+                'dependencies = "requests"',
+                '',
+                '[build-system]',
+                'requires = ["setuptools"]',
+                'build-backend = "setuptools.build_meta"',
+                '',
+            ].join('\n'),
+        );
+        findFilesStub.callsFake((pattern: string) =>
+            pattern === '**/pyproject.toml'
+                ? Promise.resolve([Uri.file(siblingToml), Uri.file(owningToml)])
+                : Promise.resolve([]),
+        );
+
+        const result = await getProjectInstallable(
+            mockApi as PythonEnvironmentApi,
+            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
+            automaticOptions(path.join(projectRoot, 'main')),
+        );
+
+        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
+            path.join(projectRoot, 'main', 'pkg'),
+        ]);
+        assert.deepStrictEqual(result.validationErrors, []);
     });
 
     test('omits ambiguous editable installs from sibling git worktrees', async () => {
@@ -517,7 +1300,7 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         const editable = result.installables.filter((item) => item.args?.[0] === '-e');
         assert.strictEqual(editable.length, 1);
         assert.strictEqual(editable[0].args?.[1], path.join(projectRoot, 'z-valid'));
-        assert.strictEqual(result.validationError, undefined, 'ignored duplicates should not surface validation errors');
+        assert.strictEqual(result.validationErrors[0], undefined, 'ignored duplicates should not surface validation errors');
     });
 
     test('reports validation from the preferred candidate instead of substituting another worktree', async () => {
@@ -544,7 +1327,7 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         const editable = result.installables.filter((item) => item.args?.[0] === '-e');
         assert.strictEqual(editable.length, 1);
         assert.strictEqual(editable[0].args?.[1], path.join(projectRoot, 'main'));
-        assert.strictEqual(result.validationError?.fileUri.fsPath, invalidToml);
+        assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, invalidToml);
     });
 
     test('does not let a metadata-only TOML with optional dependencies suppress an installable duplicate', async () => {

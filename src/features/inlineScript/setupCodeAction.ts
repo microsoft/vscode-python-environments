@@ -16,7 +16,6 @@ import {
 import { readInlineScriptMetadata, sliceHeaderBytes } from '../../common/inlineScript/metadata';
 import { getInlineScriptRoutingKey, InlineScriptRoutingRegistry } from '../../common/inlineScript/routingRegistry';
 import { InlineScriptStrings } from '../../common/localize';
-import { isInlineScriptsFeatureEnabled } from '../../helpers';
 
 /**
  * Diagnostic codes meaning "this import did not resolve", lowercased for comparison.
@@ -82,9 +81,6 @@ export class InlineScriptSetupCodeActionProvider implements CodeActionProvider {
         context: CodeActionContext,
         _token: CancellationToken,
     ): CodeAction[] {
-        if (!isInlineScriptsFeatureEnabled()) {
-            return [];
-        }
         if (!context.diagnostics.some(isUnresolvedImportDiagnostic)) {
             return [];
         }
@@ -108,7 +104,7 @@ export class InlineScriptSetupCodeActionProvider implements CodeActionProvider {
     }
 }
 
-/** Register the inline-script quick fix for local `.py` files. */
+/** Register the inline-script quick fix for local `.py` files while the preview is active. */
 export function registerInlineScriptSetupCodeAction(
     routing: InlineScriptRoutingRegistry,
     setupCommand: string,

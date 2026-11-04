@@ -99,6 +99,8 @@ my_package_project/
 
 When you create a script, the extension generates a single `.py` file with PEP 723 inline script metadata, which allows you to specify dependencies directly in the file.
 
+> **Preview:** Inline-script environment support is controlled by `python-envs.inlineScripts.enabled` and defaults to `false`. The effective default may be enabled for some users through gradual rollout. You can explicitly enable or disable the setting at user or workspace scope; reload the window after changing it.
+
 An inline-script environment is built from the script's `# /// script` block and stored in the extension's cache, where it is shared by every script with the same dependencies and base interpreter. Because editing one would silently change the others, these environments are not user-managed: the Python Environments views do not offer install, uninstall, or version-change actions for them. Their package list remains visible.
 
 A CodeLens stays above the `# /// script` block, including while its metadata is incomplete, malformed, or unsaved. It offers **Set up environment for this script** until the block matches a validated environment, then displays **Script environment ready (Python X.Y.Z)** as persistent, non-clickable text. The ready label also appears for environments restored after reopening VS Code.

@@ -5,10 +5,11 @@ import assert from 'node:assert';
 import { Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import { getPythonVersionsForCreation } from '../../../managers/conda/condaUtils';
+import { SYSTEM_MANAGER_ID } from '../../../common/constants';
 
 function makeEnvironment(version: string): PythonEnvironment {
     return {
-        envId: { id: version, managerId: 'ms-python.python:system' },
+        envId: { id: version, managerId: SYSTEM_MANAGER_ID },
         name: version,
         displayName: version,
         displayPath: version,

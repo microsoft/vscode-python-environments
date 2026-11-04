@@ -10,7 +10,7 @@ export interface InlineScriptFeatureActivation {
 }
 
 /**
- * Latch the inline-script feature flag once during activation.
+ * Latch the inline-script preview setting once during activation.
  * The setting requires a window reload, so later config changes
  * in the same activation must not change the chosen mode.
  */

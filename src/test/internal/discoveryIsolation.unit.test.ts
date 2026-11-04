@@ -14,10 +14,12 @@ import * as workspaceApis from '../../common/workspace.apis';
 import type { PythonProjectManager } from '../../features/projectManager';
 import { pythonToolSupport, ToolEnvironmentManager, waitForToolRead } from '../../internal/pythonToolSupport';
 import * as cache from '../../managers/builtin/cache';
+import * as pythonInstaller from '../../managers/builtin/pythonInstaller';
 import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import * as systemUtils from '../../managers/builtin/utils';
-import * as uvInstaller from '../../managers/builtin/uvPythonInstaller';
-import { VenvManager } from '../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 import * as commonUtils from '../../managers/common/utils';
@@ -54,11 +56,13 @@ suite('Agent discovery isolation from public onboarding', () => {
         {
             name: 'venv',
             create: () =>
-                new VenvManager(
+                new BuiltInEnvironmentManager(
                     finder,
                     api,
                     new SysPythonManager(finder, api, createMockLogOutputChannel()),
                     createMockLogOutputChannel(),
+                    new VenvEnvironmentManager(),
+                    new UvEnvironmentManager(),
                 ),
         },
         {
@@ -91,7 +95,7 @@ suite('Agent discovery isolation from public onboarding', () => {
             entered.resolve();
             return release.promise;
         };
-        prompt = sinon.stub(uvInstaller, 'promptInstallPythonViaUv').callsFake(async () => {
+        prompt = sinon.stub(pythonInstaller, 'promptInstallPython').callsFake(async () => {
             await wait();
             return undefined;
         });
@@ -189,7 +193,7 @@ suite('Agent discovery isolation from public onboarding', () => {
     });
 
     suite('venv public initialization recovery', () => {
-        let manager: VenvManager;
+        let manager: BuiltInEnvironmentManager;
         let base: PythonEnvironment;
         let local: PythonEnvironment;
         let discovery: sinon.SinonStub;
@@ -217,11 +221,13 @@ suite('Agent discovery isolation from public onboarding', () => {
             (systemUtils.resolveSystemPythonEnvironmentPath as sinon.SinonStub).resolves(base);
             persistence = sinon.stub(cache, 'setSystemEnvForGlobal').rejects(failure);
             discovery = venvUtils.findVirtualEnvironments as sinon.SinonStub;
-            manager = new VenvManager(
+            manager = new BuiltInEnvironmentManager(
                 finder,
                 api,
                 new SysPythonManager(finder, api, createMockLogOutputChannel()),
                 createMockLogOutputChannel(),
+                new VenvEnvironmentManager(),
+                new UvEnvironmentManager(),
             );
         });
 

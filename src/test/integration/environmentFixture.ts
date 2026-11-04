@@ -40,6 +40,8 @@ export interface EnvironmentFixtureRequest {
     readonly name: string;
     readonly packageManagerId: string;
     readonly provider: EnvironmentFixtureProvider;
+    /** Parent for the owned project directory; defaults to the system temporary directory. */
+    readonly parentDirectory?: vscode.Uri;
 }
 
 export interface EnvironmentFixture {
@@ -68,7 +70,7 @@ export async function createEnvironmentFixture(
 ): Promise<EnvironmentFixture> {
     const token = randomUUID();
     const fixtureName = `pyenvs-${sanitizeName(request.name).slice(0, 8)}-${process.pid}-${token.slice(0, 8)}`;
-    const projectUri = vscode.Uri.file(path.join(os.tmpdir(), fixtureName));
+    const projectUri = vscode.Uri.file(path.join(request.parentDirectory?.fsPath ?? os.tmpdir(), fixtureName));
     const prefix = vscode.Uri.joinPath(projectUri, request.provider.environmentDirectory);
     const markerUri = vscode.Uri.joinPath(projectUri, OWNERSHIP_FILE_NAME);
     const config = vscode.workspace.getConfiguration('python-envs', workspaceFolder.uri);

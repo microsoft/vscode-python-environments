@@ -11,6 +11,58 @@ env:
   NODE_VERSION: '22.21.1'
 
 jobs:
+  api-compatibility:
+    name: API package compatibility
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Identify API release inputs
+        id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/api-changed-files"
+          if grep -Eq '^(src/(api|types|publicErrors|capabilities|legacyCapabilities)\.ts$|api/(package(-lock)?\.json$|runtime/|scripts/|test/|tsconfig|\.npmignore$)|\.github/workflows/pr-(check|file-check)\.yml$|build/azure-pipeline\.npm\.yml$)' "$RUNNER_TEMP/api-changed-files"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Node
+        if: steps.scope.outputs.relevant == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install API dependencies
+        if: steps.scope.outputs.relevant == 'true'
+        run: npm ci
+        working-directory: api
+
+      - name: Validate latest stable extension baseline
+        if: steps.scope.outputs.relevant == 'true'
+        run: npm run check:release
+        working-directory: api
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Build and test API package
+        if: steps.scope.outputs.relevant == 'true'
+        run: npm run compile && npm test
+        working-directory: api
+
   build-vsix:
     name: Create VSIX
     runs-on: ubuntu-latest
@@ -33,7 +85,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -42,7 +94,7 @@ jobs:
         run: npm ci
 
       - name: Run Linter
-        run: npm run lint
+        run: npm run lint -- api/runtime api/scripts api/test
 
   ts-unit-tests:
     name: TypeScript Unit Tests
@@ -57,7 +109,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -100,7 +152,9 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
 
       - name: Cache Rust build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -132,7 +186,7 @@ jobs:
         shell: bash
 
       - name: Install Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -154,9 +208,10 @@ jobs:
 
       - name: Run Smoke Tests (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@b706e4e27b14669b486812790492dc50ca16b465 # v1.7
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run smoke-test
+          script: smoke-test
+          artifact-name: smoke-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run Smoke Tests (non-Linux)
         if: runner.os != 'Linux'
@@ -188,7 +243,9 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
 
       - name: Cache Rust build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -220,7 +277,7 @@ jobs:
         shell: bash
 
       - name: Install Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -242,9 +299,10 @@ jobs:
 
       - name: Run E2E Tests (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@b706e4e27b14669b486812790492dc50ca16b465 # v1.7
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run e2e-test
+          script: e2e-test
+          artifact-name: e2e-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run E2E Tests (non-Linux)
         if: runner.os != 'Linux'
@@ -279,7 +337,9 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Install Rust Toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # v1
+        with:
+          toolchain: stable
 
       - name: Cache Rust build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -311,7 +371,7 @@ jobs:
         shell: bash
 
       - name: Install Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -332,16 +392,20 @@ jobs:
         run: npm run compile-tests
 
       - name: Set up Conda
-        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
+        uses: conda-incubator/setup-miniconda@be893c923ea9cf1cf7cd510fbdde27c7e18cbdcb # v4.1.0
         with:
           activate-environment: ''
           auto-activate: false
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+
       - name: Run Integration Tests (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@b706e4e27b14669b486812790492dc50ca16b465 # v1.7
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run integration-test
+          script: integration-test
+          artifact-name: integration-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run Integration Tests (non-Linux)
         if: runner.os != 'Linux'
@@ -362,7 +426,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -384,9 +448,10 @@ jobs:
 
       - name: Run Integration Tests Multi-Root (Linux)
         if: runner.os == 'Linux'
-        uses: GabrielBB/xvfb-action@b706e4e27b14669b486812790492dc50ca16b465 # v1.7
+        uses: ./.github/actions/run-linux-tests
         with:
-          run: npm run integration-test-multiroot
+          script: integration-test-multiroot
+          artifact-name: integration-multiroot-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
       - name: Run Integration Tests Multi-Root (non-Linux)
         if: runner.os != 'Linux'

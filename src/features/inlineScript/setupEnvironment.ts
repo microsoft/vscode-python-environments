@@ -29,14 +29,14 @@ import { registerInlineScriptSetupCodeAction } from './setupCodeAction';
 
 /**
  * Hidden command invoked by the inline-script CodeLens to set up the environment for one script.
- * Intentionally not contributed in `package.json` while the feature is behind the internal flag.
+ * Intentionally not contributed in `package.json` because only the CodeLens and quick fix invoke it.
  */
 export const SETUP_INLINE_SCRIPT_ENV_COMMAND = 'python-envs.setupInlineScriptEnv';
 
 /**
  * Command that scans the workspace and sets up environments for the selected inline-script files.
  * Contributed in `package.json` but only shown in the Command Palette while the inline-scripts
- * feature flag is enabled (gated by the `pythonEnvsInlineScriptsEnabled` context key).
+ * preview is active (gated by the activation-latched `pythonEnvsInlineScriptsEnabled` context key).
  */
 export const SETUP_INLINE_SCRIPT_ENVS_COMMAND = 'python-envs.setupInlineScriptEnvs';
 
@@ -220,16 +220,23 @@ export function notifyInlineScriptSetupOutcome(uri: Uri, routing: InlineScriptRo
         return;
     }
     if (outcome?.kind === 'cancelled') {
-        showInformationMessage(l10n.t('Environment setup was canceled.'));
+        showInformationMessage(outcome.message ?? l10n.t('Environment setup was canceled.'));
         return;
     }
     if (outcome?.kind === 'failed') {
+        if (outcome.alreadyReported) {
+            return;
+        }
         if (outcome.category === 'compatible-python-declined') {
             // User declined the install prompt; don't nag.
             return;
         }
         if (outcome.category === 'no-compatible-python') {
             showWarningMessage(buildNoCompatiblePythonMessage(outcome.requiresPython));
+            return;
+        }
+        if (outcome.message) {
+            showErrorMessage(outcome.message);
             return;
         }
     }
@@ -402,9 +409,9 @@ async function filterInlineScriptFiles(files: readonly Uri[]): Promise<Uri[]> {
 
 /**
  * Register the inline-script user-facing surfaces (the CodeLens, the quick fix, and their setup
- * commands). Only called when the PEP 723 inline-script feature flag is enabled. The single-file
+ * commands). Only called when the PEP 723 inline-script preview is active. The single-file
  * setup command is invoked by both surfaces and stays out of `package.json`; the bulk command is
- * palette-gated behind the flag.
+ * palette-gated behind the activation-latched context key.
  */
 export function registerInlineScriptUx(em: EnvironmentManagers, routing: InlineScriptRoutingRegistry): Disposable[] {
     const codeLens = registerInlineScriptCodeLens(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND);

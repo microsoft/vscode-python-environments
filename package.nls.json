@@ -5,6 +5,7 @@
     "python-envs.pythonProjects.path.description": "The path to a folder or file in the workspace to be treated as a Python project.",
     "python-envs.pythonProjects.envManager.description": "The environment manager for creating and managing environments for this project.",
     "python-envs.pythonProjects.packageManager.description": "The package manager for managing packages in environments for this project.",
+    "python-envs.inlineScripts.enabled.description": "Enables preview support for creating and selecting Python environments from PEP 723 inline script metadata. Reload the window after changing this setting.",
     "python-envs.terminal.showActivateButton.description": "Whether to show the 'Activate' button in the terminal menu",
     "python-envs.terminal.autoActivationType.description": "Specifies how the extension can activate an environment in a terminal.\n\nShell startup activates using [shell integration](https://code.visualstudio.com/docs/terminal/shell-integration) or may require changes to the shell initialization files and is only enabled for the following shells: zsh, fsh, pwsh, bash, cmd. When set to `command`, any shell can be activated.\n\n**Legacy Setting Support:** This setting takes precedence over the legacy `python.terminal.activateEnvironment` setting. If this setting is not explicitly set and `python.terminal.activateEnvironment` is set to false, this setting will automatically be set to `off` to preserve your preference.\n\nThis setting applies only when terminals are created, so you will need to restart your terminals for it to take effect.\n\nTo revert changes made during shellStartup, run `Python Envs: Revert Shell Startup Script Changes`.",
     "python-envs.terminal.autoActivationType.command": "Activation by executing a command in the terminal.",
@@ -49,5 +50,14 @@
     "python-envs.runPetInTerminal.title": "Run Python Environment Tool (PET) in Terminal...",
     "python-envs.managePackageVersion.title": "Manage Package Version",
     "python-envs.alwaysUseUv.description": "When set to true, uv will be used to manage all virtual environments if available. When set to false, uv will only manage virtual environments explicitly created by uv.",
+    "python-envs.globalPackageInstallationAction.description": "Controls what happens when installing packages into a global Python environment.",
+    "python-envs.globalPackageInstallationAction.ask.label": "Ask",
+    "python-envs.globalPackageInstallationAction.ask.description": "Ask where to install packages each time.",
+    "python-envs.globalPackageInstallationAction.continueGlobally.label": "Continue Globally",
+    "python-envs.globalPackageInstallationAction.continueGlobally.description": "Install packages into the selected global Python environment.",
+    "python-envs.globalPackageInstallationAction.useExisting.label": "Use Existing",
+    "python-envs.globalPackageInstallationAction.useExisting.description": "Ask which existing virtual environment should receive the packages.",
+    "python-envs.globalPackageInstallationAction.createNew.label": "Create New",
+    "python-envs.globalPackageInstallationAction.createNew.description": "Create a new virtual environment for the packages.",
     "python-envs.packageWatchers.description": "When enabled, file system watchers monitor site-packages for install/uninstall changes and automatically refresh the package list. Disable this if you experience performance issues in large workspaces."
 }

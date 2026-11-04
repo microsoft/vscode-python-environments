@@ -15,6 +15,8 @@ import type { PythonEnvironmentApi } from './types.js';
 
 export * from './types.js';
 export * from './publicErrors.js';
+export * from './capabilities.js';
+export * from './legacyCapabilities.js';
 
 export const EXTENSION_ID = 'ms-python.vscode-python-envs';
 

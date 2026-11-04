@@ -6,6 +6,7 @@ export enum EventNames {
     PACKAGE_MANAGER_REGISTERED = 'PACKAGE_MANAGER.REGISTERED',
     ENVIRONMENT_MANAGER_SELECTED = 'ENVIRONMENT_MANAGER.SELECTED',
     PACKAGE_MANAGER_SELECTED = 'PACKAGE_MANAGER.SELECTED',
+    MANAGER_CAPABILITY_QUERY = 'MANAGER.CAPABILITY_QUERY',
 
     VENV_USING_UV = 'VENV.USING_UV',
     VENV_CREATION = 'VENV.CREATION',
@@ -14,6 +15,7 @@ export enum EventNames {
     UV_PYTHON_INSTALL_STARTED = 'UV.PYTHON_INSTALL_STARTED',
     UV_PYTHON_INSTALL_COMPLETED = 'UV.PYTHON_INSTALL_COMPLETED',
     UV_PYTHON_INSTALL_FAILED = 'UV.PYTHON_INSTALL_FAILED',
+    PYTHON_INSTALLER_OPERATION = 'PYTHON_INSTALLER.OPERATION',
 
     PACKAGE_MANAGEMENT = 'PACKAGE_MANAGEMENT',
     ADD_PROJECT = 'ADD_PROJECT',
@@ -329,6 +331,25 @@ export interface IEventNamePropertyMapping {
     };
 
     /* __GDPR__
+        "manager.capability_query": {
+            "managerId": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "managerKind": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "managerVersion": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "capability": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "outcome": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" },
+            "isLegacy": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eduardovil" }
+        }
+    */
+    [EventNames.MANAGER_CAPABILITY_QUERY]: {
+        managerId: string;
+        managerKind: 'environment' | 'package';
+        managerVersion: string;
+        capability: string;
+        outcome: 'supported' | 'unsupported' | 'unavailable' | 'error';
+        isLegacy: boolean;
+    };
+
+    /* __GDPR__
         "environment_manager.selected": {
             "managerId" : { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "eleanorjboyd" }
         }
@@ -390,6 +411,23 @@ export interface IEventNamePropertyMapping {
     */
     [EventNames.UV_PYTHON_INSTALL_FAILED]: {
         stage: 'uvInstall' | 'uvNotOnPath' | 'pythonInstall' | 'findPath';
+    };
+
+    /* __GDPR__
+        "python_installer.operation": {
+            "provider": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "trigger": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "phase": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "reason": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "owner": "StellaHuang95" },
+            "duration": { "classification": "SystemMetaData", "purpose": "FeatureInsight", "isMeasurement": true, "owner": "StellaHuang95" }
+        }
+    */
+    [EventNames.PYTHON_INSTALLER_OPERATION]: {
+        provider: 'pymanager' | 'uv';
+        trigger: 'activation' | 'createEnvironment' | 'inlineScript' | 'globalCreate';
+        phase: 'prompted' | 'started' | 'completed' | 'failed' | 'cancelled' | 'declined' | 'reused';
+        reason?: 'provider-unusable' | 'catalogue-failed' | 'no-compatible-python' | 'runtime-conflict' |
+            'install-failed' | 'verification-failed';
     };
 
     /* __GDPR__

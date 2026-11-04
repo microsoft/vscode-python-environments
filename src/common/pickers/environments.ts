@@ -9,6 +9,7 @@ import { isWindows } from '../utils/platformUtils';
 import { handlePythonPath } from '../utils/pythonPath';
 import {
     showErrorMessage,
+    showInputBox,
     showOpenDialog,
     showQuickPick,
     showQuickPickWithButtons,
@@ -61,8 +62,29 @@ async function browseForPython(
     if (!uris || uris.length === 0) {
         return;
     }
-    const uri = uris[0];
+    return resolvePython(uris[0], managers, projectEnvManagers);
+}
 
+async function enterPythonPath(
+    managers: InternalEnvironmentManager[],
+    projectEnvManagers: InternalEnvironmentManager[],
+): Promise<PythonEnvironment | undefined> {
+    const interpreterPath = await showInputBox({
+        title: Interpreter.enterInterpreterPath,
+        prompt: l10n.t('Enter the full path to a Python interpreter'),
+        ignoreFocusOut: true,
+    });
+    if (!interpreterPath?.trim()) {
+        return;
+    }
+    return resolvePython(Uri.file(interpreterPath.trim()), managers, projectEnvManagers);
+}
+
+async function resolvePython(
+    uri: Uri,
+    managers: InternalEnvironmentManager[],
+    projectEnvManagers: InternalEnvironmentManager[],
+): Promise<PythonEnvironment | undefined> {
     const environment = await withProgress(
         {
             location: ProgressLocation.Notification,
@@ -136,6 +158,8 @@ async function pickEnvironmentImpl(
     if (selected && !Array.isArray(selected)) {
         if (selected.label === Interpreter.browsePath) {
             return browseForPython(managers, projectEnvManagers);
+        } else if (selected.label === Interpreter.enterInterpreterPath) {
+            return enterPythonPath(managers, projectEnvManagers);
         } else if (selected.label === Interpreter.createVirtualEnvironment) {
             sendTelemetryEvent(EventNames.CREATE_ENVIRONMENT, undefined, {
                 manager: 'none',
@@ -154,6 +178,10 @@ export async function pickEnvironment(
     options: EnvironmentPickOptions,
 ): Promise<PythonEnvironment | undefined> {
     const items: (QuickPickItem | (QuickPickItem & { result: PythonEnvironment }))[] = [
+        {
+            label: Interpreter.enterInterpreterPath,
+            iconPath: new ThemeIcon('edit'),
+        },
         {
             label: Interpreter.browsePath,
             iconPath: new ThemeIcon('folder'),
