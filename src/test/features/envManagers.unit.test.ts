@@ -328,7 +328,7 @@ suite('PythonEnvironmentManagers - cross-manager global selection', () => {
         const selectedSystemGet = sandbox.stub().resolves(selectedSystemEnvironment);
         registerFakeManager(SYSTEM_MANAGER_ID, selectedSystemGet);
 
-        await envManagers.setEnvironments('global', selectedSystemEnvironment, false);
+        await envManagers.setEnvironments('global', selectedSystemEnvironment, false, { explicit: true });
 
         assert.strictEqual(
             envManagers.getEnvironmentManager(undefined)?.id,
