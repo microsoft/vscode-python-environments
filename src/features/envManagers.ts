@@ -1239,7 +1239,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             ? this._environmentManagers.get(cachedEnv.envId.managerId)
             : undefined;
 
-        if (context === undefined && cachedManager) {
+        if (context === undefined && cachedManager && this._explicitSelections.has('global')) {
             return cachedManager;
         }
 
