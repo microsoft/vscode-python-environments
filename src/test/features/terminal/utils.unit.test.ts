@@ -339,7 +339,46 @@ suite('Terminal Utils - getAutoActivationType', () => {
     });
 
     suite('Priority Order Tests', () => {
-        test('should return globalRemoteValue when set (highest priority)', () => {
+        test('should return workspaceFolderValue when set (highest priority)', () => {
+            const mockInspectResult = {
+                workspaceFolderValue: ACT_TYPE_OFF,
+                workspaceValue: ACT_TYPE_SHELL,
+                globalRemoteValue: ACT_TYPE_COMMAND,
+            };
+            pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns(mockInspectResult);
+
+            const result = getAutoActivationType();
+
+            assert.strictEqual(result, ACT_TYPE_OFF, 'Should return workspaceFolderValue when set');
+        });
+
+        test('should return workspaceValue when workspaceFolderValue is undefined', () => {
+            const mockInspectResult = {
+                workspaceFolderValue: undefined,
+                workspaceValue: ACT_TYPE_SHELL,
+                globalRemoteValue: ACT_TYPE_COMMAND,
+            };
+            pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns(mockInspectResult);
+
+            const result = getAutoActivationType();
+
+            assert.strictEqual(result, ACT_TYPE_SHELL, 'Should return workspaceValue when workspaceFolderValue is undefined');
+        });
+
+        test('should ignore globalRemoteValue when workspaceValue exists', () => {
+            const mockInspectResult = {
+                workspaceValue: ACT_TYPE_OFF,
+                globalRemoteValue: ACT_TYPE_SHELL,
+                globalLocalValue: ACT_TYPE_COMMAND,
+            };
+            pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns(mockInspectResult);
+
+            const result = getAutoActivationType();
+
+            assert.strictEqual(result, ACT_TYPE_OFF, 'Should prioritize workspaceValue over globalRemoteValue');
+        });
+
+        test('should return globalRemoteValue when set and no workspace values exist', () => {
             // Mock - globalRemoteValue is set
             const mockInspectResult = {
                 globalRemoteValue: ACT_TYPE_SHELL,
