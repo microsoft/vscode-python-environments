@@ -115,7 +115,7 @@ extends:
 
               - script: npm run check:release -- --provenance
                 workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Verify latest stable baseline and released API sources
+                displayName: Verify API sources against declared extension baseline
 
               - script: npm test
                 workingDirectory: $(Build.SourcesDirectory)/api
@@ -157,7 +157,7 @@ extends:
 
               - script: npm run check:release -- --artifact-directory "$(Pipeline.Workspace)/npm-package"
                 workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Revalidate packed compatibility baseline before publishing
+                displayName: Validate packed compatibility metadata before publishing
 
               - template: MicroBuild.Publish.yml@MicroBuildTemplate
                 parameters:

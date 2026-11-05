@@ -50,7 +50,7 @@ async function requestGitHub(resource, { fetchImpl = fetch, wait = sleep, method
             await wait(1000 * 2 ** attempt);
             continue;
         }
-        if (response.ok || (redirect === 'manual' && response.status === 302)) {
+        if (response.ok) {
             return response;
         }
         const retryable =
@@ -68,43 +68,16 @@ async function requestGitHub(resource, { fetchImpl = fetch, wait = sleep, method
     }
 }
 
-/** Resolves GitHub's public latest-release redirect, rejecting unrelated URLs and prerelease tags. */
-async function getLatestStableRelease(options) {
-    const latestUrl = `https://github.com/${repository}/releases/latest`;
-    const response = await requestGitHub(latestUrl, { ...options, method: 'HEAD', redirect: 'manual' });
-    const releaseUrl = new URL(response.headers.get('location') ?? '', latestUrl);
-    const prefix = `/${repository}/releases/tag/`;
-    if (
-        response.status !== 302 ||
-        releaseUrl.origin !== 'https://github.com' ||
-        !releaseUrl.pathname.startsWith(prefix) ||
-        releaseUrl.search ||
-        releaseUrl.hash
-    ) {
-        throw new Error('GitHub did not return a valid latest stable extension release.');
-    }
-    const tag = decodeURIComponent(releaseUrl.pathname.slice(prefix.length));
-    const version = validateMinimumExtensionVersion({ minimumExtensionVersion: tag.replace(/^v/, '') });
-    return {
-        version,
-        tag,
-        url: `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`,
-    };
-}
-
-/** Enforces the new-npm-release policy without modifying already-published package metadata. */
-function assertLatestStable(manifest, release) {
-    const minimum = validateMinimumExtensionVersion(manifest);
-    if (minimum !== release.version) {
-        throw new Error(
-            `minimumExtensionVersion is ${minimum}; latest stable is ${release.version} (${release.url}). Update api/package.json, rebuild, and rerun validation.`,
-        );
-    }
-}
-
-/** Rejects unreleased shared API sources, including stale staged copies, at packaging time. */
-async function verifySourceProvenance(packageRoot, release, options = {}) {
-    const tagRef = `refs/tags/${release.tag}`;
+/** Checks shared API syntax against the declared release, ignoring comments and formatting. */
+async function verifySourceProvenance(packageRoot, minimum, options = {}) {
+    validateMinimumExtensionVersion({ minimumExtensionVersion: minimum });
+    const tag = `v${minimum}`;
+    await requestGitHub(`https://github.com/${repository}/releases/tag/${tag}`, {
+        ...options,
+        method: 'HEAD',
+        redirect: 'error',
+    });
+    const tagRef = `refs/tags/${tag}`;
     const output = (options.execFileSyncImpl ?? execFileSync)(
         'git',
         ['ls-remote', '--tags', `https://github.com/${repository}.git`, tagRef, `${tagRef}^{}`],
@@ -121,19 +94,45 @@ async function verifySourceProvenance(packageRoot, release, options = {}) {
     );
     const commit = refs.get(`${tagRef}^{}`) ?? refs.get(tagRef);
     if (!/^[a-f0-9]{40}$/.test(commit)) {
-        throw new Error(`Cannot resolve ${release.tag} to an immutable release commit.`);
+        throw new Error(`Cannot resolve ${tag} to an immutable release commit.`);
     }
-    const normalize = (contents) => contents.replace(/\r\n/g, '\n');
+    const ts = require('typescript');
+    const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
+    const normalize = (contents, fileName) => {
+        const source = ts.createSourceFile(fileName, contents, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+        if (source.parseDiagnostics.length) {
+            throw new Error(`Cannot parse API source ${fileName} for comparison with ${tag}.`);
+        }
+        // Printing makes automatic semicolon insertion explicit; parsed tokens retain literal contents.
+        const printed = ts.createSourceFile(
+            fileName,
+            printer.printFile(source),
+            ts.ScriptTarget.Latest,
+            false,
+            ts.ScriptKind.TS,
+        );
+        const tokens = [];
+        const visit = (node) => {
+            const children = node.getChildren(printed);
+            if (children.length) {
+                children.forEach(visit);
+            } else {
+                tokens.push([node.kind, node.getText(printed)]);
+            }
+        };
+        visit(printed);
+        return JSON.stringify(tokens);
+    };
     for (const source of sharedSources) {
         const remote = await requestGitHub(
             `https://raw.githubusercontent.com/${repository}/${commit}/src/${source}`,
             options,
         );
-        const released = normalize(await remote.text());
+        const released = normalize(await remote.text(), source);
         for (const local of [path.join(packageRoot, '..', 'src', source), path.join(packageRoot, 'src', source)]) {
-            if (normalize(fs.readFileSync(local, 'utf8')) !== released) {
+            if (normalize(fs.readFileSync(local, 'utf8'), source) !== released) {
                 throw new Error(
-                    `${local} differs from ${release.tag} (${commit}). Publish the stable extension containing these API sources, then update the npm baseline and rebuild.`,
+                    `${local} differs from the declared baseline ${tag} (${commit}). Select a released extension containing these API sources and rebuild.`,
                 );
             }
         }
@@ -184,21 +183,17 @@ async function main() {
     const manifest = artifact
         ? validatePackedArtifact(artifact)
         : JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'));
-    validateMinimumExtensionVersion(manifest);
-    const release = await getLatestStableRelease();
-    assertLatestStable(manifest, release);
+    const minimum = validateMinimumExtensionVersion(manifest);
     if (values.provenance) {
-        await verifySourceProvenance(packageRoot, release);
+        await verifySourceProvenance(packageRoot, minimum);
     }
-    process.stdout.write(`Extension compatibility baseline verified: ${release.version} (${release.url}).\n`);
+    process.stdout.write(`Extension compatibility baseline verified: ${minimum} (declared minimum).\n`);
 }
 
 module.exports = {
     sharedSources,
     validateMinimumExtensionVersion,
     requestGitHub,
-    getLatestStableRelease,
-    assertLatestStable,
     verifySourceProvenance,
     validatePackedArtifact,
 };

@@ -12,14 +12,16 @@ const {
     sharedSources,
     validateMinimumExtensionVersion,
     requestGitHub,
-    getLatestStableRelease,
-    assertLatestStable,
     verifySourceProvenance,
     validatePackedArtifact,
 } = require('../scripts/check-extension-version.cjs');
 
 const stable = { tag_name: 'v1.40.0', draft: false, prerelease: false };
 const response = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers });
+const validator = path.join(__dirname, '..', 'scripts', 'check-extension-version.cjs');
+const offlineGuard = `data:text/javascript,${encodeURIComponent(
+    'globalThis.fetch = () => { throw new Error("Release metadata validation must not access the network"); };',
+)}`;
 
 test('minimum metadata rejects ranges, noncanonical versions, prereleases, and build metadata', () => {
     assert.equal(validateMinimumExtensionVersion({ minimumExtensionVersion: '1.40.0' }), '1.40.0');
@@ -68,52 +70,15 @@ test('staging regenerates the embedded floor after a manifest change and rejects
     assert.throws(() => copySources(packageRoot), /exact stable SemVer/);
 });
 
-test('latest stable uses the release tag and rejects invalid release metadata', async () => {
-    for (const tag of ['v1.40.0', '1.40.0']) {
-        const release = await getLatestStableRelease({
-            fetchImpl: async (url, options) => {
-                assert.equal(url, 'https://github.com/microsoft/vscode-python-environments/releases/latest');
-                assert.equal(options.method, 'HEAD');
-                assert.equal(options.redirect, 'manual');
-                assert.equal(options.headers.Authorization, undefined);
-                return new Response(null, {
-                    status: 302,
-                    headers: { location: `/microsoft/vscode-python-environments/releases/tag/${tag}` },
-                });
-            },
-        });
-        assert.equal(release.version, '1.40.0');
-        assertLatestStable({ minimumExtensionVersion: '1.40.0' }, release);
-        assert.throws(
-            () => assertLatestStable({ minimumExtensionVersion: '1.38.0' }, release),
-            /latest stable is 1.40.0/,
-        );
-        assert.throws(
-            () => assertLatestStable({ minimumExtensionVersion: '1.42.0' }, release),
-            /latest stable is 1.40.0/,
-        );
-    }
-    for (const location of [
-        '',
-        'https://example.com/microsoft/vscode-python-environments/releases/tag/v1.40.0',
-        '/microsoft/another-repository/releases/tag/v1.40.0',
-        '/microsoft/vscode-python-environments/releases',
-        '/microsoft/vscode-python-environments/releases/tag/v1.41.0-rc.1',
-        '/microsoft/vscode-python-environments/releases/tag/v1.40.0?untrusted=true',
-    ]) {
-        await assert.rejects(
-            getLatestStableRelease({
-                fetchImpl: async () => new Response(null, { status: 302, headers: { location } }),
-            }),
-        );
-    }
-    await assert.rejects(getLatestStableRelease({ fetchImpl: async () => response(stable) }));
+test('ordinary release validation accepts the declared minimum without a network lookup', () => {
+    const output = execFileSync(process.execPath, ['--import', offlineGuard, validator], { encoding: 'utf8' });
+    assert.match(output, /Extension compatibility baseline verified: .* \(declared minimum\)/);
 });
 
 test('GitHub lookups retry network/server failures, rate limits, and fail closed after exhaustion', async () => {
     const waits = [];
     let attempts = 0;
-    const result = await requestGitHub('releases/latest', {
+    const result = await requestGitHub('https://github.com/microsoft/vscode-python-environments/releases/tag/v1.40.0', {
         fetchImpl: async () => {
             attempts += 1;
             if (attempts === 1) {
@@ -127,7 +92,7 @@ test('GitHub lookups retry network/server failures, rate limits, and fail closed
     assert.deepEqual(waits, [1000, 2000]);
     for (const status of [429, 403]) {
         attempts = 0;
-        await requestGitHub('releases/latest', {
+        await requestGitHub('https://github.com/microsoft/vscode-python-environments/releases/tag/v1.40.0', {
             fetchImpl: async () => (++attempts === 1 ? response({}, status, { 'retry-after': '1' }) : response(stable)),
             wait: async () => {},
         });
@@ -135,7 +100,7 @@ test('GitHub lookups retry network/server failures, rate limits, and fail closed
     }
     attempts = 0;
     await assert.rejects(
-        requestGitHub('releases/latest', {
+        requestGitHub('https://github.com/microsoft/vscode-python-environments/releases/tag/v1.40.0', {
             fetchImpl: async () => {
                 attempts += 1;
                 return response({}, 503);
@@ -147,7 +112,7 @@ test('GitHub lookups retry network/server failures, rate limits, and fail closed
     assert.equal(attempts, 3);
     attempts = 0;
     await assert.rejects(
-        requestGitHub('releases/latest', {
+        requestGitHub('https://github.com/microsoft/vscode-python-environments/releases/tag/v1.40.0', {
             fetchImpl: async () => {
                 attempts += 1;
                 return response({}, 404);
@@ -158,16 +123,18 @@ test('GitHub lookups retry network/server failures, rate limits, and fail closed
     assert.equal(attempts, 1);
 });
 
-test('provenance follows annotated tags to an immutable commit and checks original and staged sources', async (t) => {
+test('release provenance pins the declared baseline and ignores only source trivia', async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'python-api-provenance-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }));
     const packageRoot = path.join(root, 'api');
     const sha = 'a'.repeat(40);
     const tagSha = 'b'.repeat(40);
+    const releasedSource =
+        'export interface Api { id: string; }\nexport function createApi() { return { id: "value" }; }\nexport const pattern = /a b/;\nexport const message = `id ${1} a b`;\n';
     for (const directory of [path.join(root, 'src'), path.join(packageRoot, 'src')]) {
         fs.mkdirSync(directory, { recursive: true });
         for (const source of sharedSources) {
-            fs.writeFileSync(path.join(directory, source), `${source}\r\n`);
+            fs.writeFileSync(path.join(directory, source), releasedSource.replace(/\n/g, '\r\n'));
         }
     }
     const options = {
@@ -176,31 +143,68 @@ test('provenance follows annotated tags to an immutable commit and checks origin
             assert.deepEqual(args.slice(-2), [`refs/tags/${stable.tag_name}`, `refs/tags/${stable.tag_name}^{}`]);
             return `${tagSha}\trefs/tags/${stable.tag_name}\n${sha}\trefs/tags/${stable.tag_name}^{}\n`;
         },
-        fetchImpl: async (url) => {
+        fetchImpl: async (url, request) => {
+            if (url === `https://github.com/microsoft/vscode-python-environments/releases/tag/${stable.tag_name}`) {
+                assert.equal(request.method, 'HEAD');
+                assert.equal(request.redirect, 'error');
+                assert.equal(request.headers.Authorization, undefined);
+                return new Response(null);
+            }
             assert.ok(
                 url.startsWith(`https://raw.githubusercontent.com/microsoft/vscode-python-environments/${sha}/src/`),
             );
-            const source = new URL(url).pathname.split('/').pop();
-            return new Response(`${source}\n`);
+            return new Response(releasedSource);
         },
     };
-    const release = { tag: stable.tag_name };
-    await verifySourceProvenance(packageRoot, release, options);
-    await verifySourceProvenance(packageRoot, release, {
+    const minimum = '1.40.0';
+    await verifySourceProvenance(packageRoot, minimum, options);
+    await verifySourceProvenance(packageRoot, minimum, {
         ...options,
         execFileSyncImpl: () => `${sha}\trefs/tags/${stable.tag_name}\n`,
     });
     for (const directory of [path.join(root, 'src'), path.join(packageRoot, 'src')]) {
         const file = path.join(directory, 'types.ts');
-        fs.writeFileSync(file, 'unreleased contract\n');
-        await assert.rejects(verifySourceProvenance(packageRoot, release, options), /differs from v1.40.0/);
-        fs.writeFileSync(file, 'types.ts\n');
+        fs.writeFileSync(
+            file,
+            releasedSource
+                .replace(
+                    'export interface Api { id: string; }',
+                    '// Updated documentation\n\nexport interface Api {\n    id: string;\n}',
+                )
+                .replace(
+                    'export function createApi() { return { id: "value" }; }',
+                    'export function createApi() {\n    return { id: "value" };\n}',
+                )
+                .replace(/\n/g, '\r\n'),
+        );
+        await verifySourceProvenance(packageRoot, minimum, options);
+        for (const changed of [
+            releasedSource.replace('id: string', 'id: number'),
+            releasedSource.replace('return {', 'return\n{'),
+            releasedSource.replace('/a b/', '/a  b/'),
+            releasedSource.replace('`id ${1} a b`', '`id ${1} a  b`'),
+        ]) {
+            fs.writeFileSync(file, changed);
+            await assert.rejects(
+                verifySourceProvenance(packageRoot, minimum, options),
+                /differs from the declared baseline v1.40.0/,
+            );
+        }
+        fs.writeFileSync(file, releasedSource);
     }
     await assert.rejects(
-        verifySourceProvenance(packageRoot, release, {
+        verifySourceProvenance(packageRoot, minimum, {
+            ...options,
             execFileSyncImpl: () => `${sha}\trefs/tags/unrelated\n`,
         }),
         /immutable release commit/,
+    );
+    await assert.rejects(
+        verifySourceProvenance(packageRoot, minimum, {
+            ...options,
+            fetchImpl: async () => response({}, 404),
+        }),
+        /GitHub lookup failed \(404\)/,
     );
 });
 
@@ -226,6 +230,15 @@ test('packed artifact validation detects a manifest/compiled-floor mismatch in e
             assert.throws(() => validatePackedArtifact(artifact), /does not match the packed minimumExtensionVersion/);
         } else {
             assert.equal(validatePackedArtifact(artifact).minimumExtensionVersion, '1.40.0');
+            for (const args of [
+                ['--artifact', artifact],
+                ['--artifact-directory', root],
+            ]) {
+                const output = execFileSync(process.execPath, ['--import', offlineGuard, validator, ...args], {
+                    encoding: 'utf8',
+                });
+                assert.match(output, /verified: 1.40.0 \(declared minimum\)/);
+            }
         }
     }
 });

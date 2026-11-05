@@ -1996,9 +1996,10 @@ using SemVer precedence. A `1.40.0` floor rejects `1.40.0-rc.1`, but accepts
 Incompatible versions produce an error asking the consumer to update the
 extension and reload VS Code; invalid or missing version metadata also rejects.
 
-New npm releases use the latest stable extension as their baseline. Already
-published packages keep their original floor, so supporting an older extension
-may require pinning an older npm package. This is a minimum-version guarantee,
+New npm releases select a supported stable extension as their baseline, not
+necessarily the latest release. Already published packages keep their original
+floor. Pin an older npm package if an update raises the floor beyond your
+supported extension version. This is a minimum-version guarantee,
 not protection against future breaking extension changes. Type-only imports or
 direct access to the extension's exports bypass the helper's runtime check.
 

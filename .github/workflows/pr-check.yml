@@ -51,7 +51,7 @@ jobs:
         run: npm ci
         working-directory: api
 
-      - name: Validate latest stable extension baseline
+      - name: Validate declared extension minimum
         if: steps.scope.outputs.relevant == 'true'
         run: npm run check:release
         working-directory: api
