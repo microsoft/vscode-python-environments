@@ -42,7 +42,7 @@ variables:
   - name: PackageDir
     value: api
   - name: NodeVersion
-    value: '22.21.1'
+    value: '24.22.1'
   - name: AZURE_ARTIFACTS_FEED
     value: 'https://devdiv.pkgs.visualstudio.com/DevDiv/_packaging/Pylance_PublicPackages/npm/registry/'
   - name: npmTag

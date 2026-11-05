@@ -59,7 +59,7 @@ export function initialize() {
             return mockedVSCode;
         }
         if (request === '@vscode/extension-telemetry') {
-            return { default: vscMockTelemetryReporter as any };
+            return { TelemetryReporter: vscMockTelemetryReporter };
         }
         // less files need to be in import statements to be converted to css
         // But we don't want to try to load them in the mock vscode
