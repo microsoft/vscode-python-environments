@@ -1,6 +1,7 @@
-import { Disposable, Uri } from 'vscode';
+import { CancellationToken, CancellationTokenSource, Disposable, Uri } from 'vscode';
 import { executeCommand } from '../../common/command.api';
 import { traceError } from '../../common/logging';
+import { createSimpleDebounce } from '../../common/utils/debounce';
 import {
     createFileSystemWatcher,
     findFiles,
@@ -27,8 +28,11 @@ const EXCLUDE = '**/{node_modules,.git,site-packages}/**';
 // `createFileSystemWatcher` has no exclude option, so the same folders are filtered in the handlers.
 const EXCLUDE_RE = /[\\/](node_modules|\.git|site-packages)[\\/]/;
 
-async function hasPythonContent(): Promise<boolean> {
-    const markers = await findFiles(MARKER_GLOB, EXCLUDE, 1);
+/** How long deletes and workspace folder changes must settle before the workspace is scanned again. */
+export const RESCAN_DEBOUNCE_MS = 500;
+
+async function hasPythonContent(token: CancellationToken): Promise<boolean> {
+    const markers = await findFiles(MARKER_GLOB, EXCLUDE, 1, token);
     if (markers.length > 0) {
         return true;
     }
@@ -39,41 +43,116 @@ async function hasPythonContent(): Promise<boolean> {
 /**
  * Keeps the `python-envs.workspaceHasPython` context key up to date. It controls whether the Python
  * activity bar icon and its views are shown.
+ *
+ * Every `findFiles` call is a full workspace search, and a branch switch can create or delete
+ * thousands of marker files at once, so events never scan directly:
+ * - a new marker file or an opened Python document proves the answer is `true` without a scan;
+ * - deletes and workspace folder changes can turn it `false`, so they share one debounced rescan;
+ * - only one scan runs at a time, and a rescan requested meanwhile runs once after it.
  */
 export function registerWorkspacePythonContext(disposables: Disposable[]): void {
-    // Every refresh takes a ticket and only the newest one may write the context key, so a slow older
-    // scan can never overwrite the result of a newer one.
-    let latestTicket = 0;
+    let hasPython: boolean | undefined;
+    let running: CancellationTokenSource | undefined;
+    let rescanAfterRunning = false;
+    // `SimpleDebounce` cannot be cancelled, so a pending rescan is dropped by clearing this flag.
+    let rescanPending = false;
+    let disposed = false;
 
-    const refresh = async (): Promise<void> => {
-        const ticket = ++latestTicket;
+    const setHasPython = async (value: boolean): Promise<void> => {
+        if (value === hasPython) {
+            return;
+        }
+        hasPython = value;
+        await executeCommand('setContext', PYTHON_WORKSPACE_KEY, value);
+    };
+
+    const scan = async (): Promise<void> => {
+        if (disposed) {
+            return;
+        }
+        if (running) {
+            rescanAfterRunning = true;
+            return;
+        }
+        const cts = new CancellationTokenSource();
+        running = cts;
         try {
-            const hasPython = await hasPythonContent();
-            if (ticket === latestTicket) {
-                await executeCommand('setContext', PYTHON_WORKSPACE_KEY, hasPython);
+            const result = await hasPythonContent(cts.token);
+            // A cancelled scan was overtaken by `markHasPython` or by disposal, so its result is stale.
+            if (!cts.token.isCancellationRequested) {
+                await setHasPython(result);
             }
         } catch (ex) {
-            traceError('Failed to update the Python workspace context', ex);
+            if (!cts.token.isCancellationRequested) {
+                traceError('Failed to update the Python workspace context', ex);
+            }
+        } finally {
+            cts.dispose();
+            running = undefined;
+        }
+        if (rescanAfterRunning && !disposed) {
+            rescanAfterRunning = false;
+            await scan();
         }
     };
 
-    const onMarkerChanged = (uri: Uri): void => {
-        if (!EXCLUDE_RE.test(uri.fsPath)) {
-            void refresh();
+    const debouncedRescan = createSimpleDebounce(RESCAN_DEBOUNCE_MS, () => {
+        if (rescanPending) {
+            rescanPending = false;
+            void scan();
         }
+    });
+
+    const scheduleRescan = (): void => {
+        if (!disposed) {
+            rescanPending = true;
+            debouncedRescan.trigger();
+        }
+    };
+
+    // A new marker file or an opened Python document proves the answer is `true`, whatever a running or
+    // pending scan would report.
+    const markHasPython = (): void => {
+        running?.cancel();
+        rescanPending = false;
+        rescanAfterRunning = false;
+        setHasPython(true).catch((ex) => traceError('Failed to update the Python workspace context', ex));
+    };
+
+    const onMarkerCreated = (uri: Uri): void => {
+        if (!EXCLUDE_RE.test(uri.fsPath)) {
+            markHasPython();
+        }
+    };
+
+    const onMarkerDeleted = (uri: Uri): void => {
+        if (EXCLUDE_RE.test(uri.fsPath)) {
+            return;
+        }
+        // A delete can only turn the answer off, so there is nothing to recheck while it is already off,
+        // unless a running scan may still report the deleted file.
+        if (hasPython === false && !running) {
+            return;
+        }
+        scheduleRescan();
     };
 
     const watcher = createFileSystemWatcher(MARKER_GLOB, false, true, false);
     disposables.push(
         watcher,
-        watcher.onDidCreate(onMarkerChanged),
-        watcher.onDidDelete(onMarkerChanged),
-        onDidChangeWorkspaceFolders(() => void refresh()),
+        watcher.onDidCreate(onMarkerCreated),
+        watcher.onDidDelete(onMarkerDeleted),
+        onDidChangeWorkspaceFolders(() => scheduleRescan()),
         onDidOpenTextDocument((doc) => {
             if (doc.languageId === 'python') {
-                void refresh();
+                markHasPython();
             }
         }),
+        new Disposable(() => {
+            disposed = true;
+            debouncedRescan.dispose();
+            running?.cancel();
+        }),
     );
-    void refresh();
+    void scan();
 }
