@@ -68,8 +68,11 @@ export class InlineScriptLazyDetector implements Disposable {
     // disposal does not emit telemetry on a detector the host has
     // already torn down.
     private disposed = false;
+    private activated = false;
+    private routingEventsRegistered = false;
+    private activationReplayPending = false;
 
-    constructor(private readonly routingRegistry?: InlineScriptRoutingRegistry) {}
+    constructor(private routingRegistry?: InlineScriptRoutingRegistry) {}
 
     /**
      * Subscribe to workspace text-document events. Safe to call once
@@ -92,25 +95,69 @@ export class InlineScriptLazyDetector implements Disposable {
      * arrive too.
      */
     public activate(): void {
+        if (this.activated || this.disposed) {
+            return;
+        }
+        this.activated = true;
         this.subscriptions.push(
             onDidOpenTextDocument((doc) => this.handleDocument(doc, 'open')),
             onDidSaveTextDocument((doc) => this.handleDocument(doc, 'save')),
             onDidChangeTextDocument((e) => this.handleChange(e)),
         );
-        if (this.routingRegistry) {
-            this.subscriptions.push(
-                onDidDeleteFiles((e) => e.files.forEach((uri) => this.clearRouteability(uri))),
-                onDidRenameFiles((e) =>
-                    Promise.all(e.files.map((file) => this.handleRename(file.oldUri, file.newUri))),
-                ),
-            );
-        }
+        this.registerRoutingEvents();
         // Defer the catch-up pass so we observe `workspace.textDocuments`
         // AFTER VS Code finishes registering the document that triggered
         // our activation. Running the loop synchronously here can race
         // against VS Code's own initialization on `onLanguage:*` activation.
-        const handle = setImmediate(() => this.replayOpenDocuments('activate'));
+        this.activationReplayPending = true;
+        const handle = setImmediate(() => {
+            this.activationReplayPending = false;
+            this.replayOpenDocuments('activate');
+        });
+        this.subscriptions.push(
+            new Disposable(() => {
+                this.activationReplayPending = false;
+                clearImmediate(handle);
+            }),
+        );
+    }
+
+    /**
+     * Enables route-aware metadata tracking after a late experimental default activates PEP 723.
+     * Already-open documents are replayed so they gain routing without being reopened.
+     */
+    public enableRouting(routingRegistry: InlineScriptRoutingRegistry): void {
+        if (this.disposed) {
+            throw new Error('Cannot enable routing on a disposed inline-script detector.');
+        }
+        if (this.routingRegistry && this.routingRegistry !== routingRegistry) {
+            throw new Error('Inline-script routing is already enabled with a different registry.');
+        }
+        if (this.routingRegistry === routingRegistry) {
+            return;
+        }
+
+        this.routingRegistry = routingRegistry;
+        if (!this.activated) {
+            return;
+        }
+        this.registerRoutingEvents();
+        if (this.activationReplayPending) {
+            return;
+        }
+        const handle = setImmediate(() => this.replayOpenDocuments('routing-enabled'));
         this.subscriptions.push(new Disposable(() => clearImmediate(handle)));
+    }
+
+    private registerRoutingEvents(): void {
+        if (!this.routingRegistry || this.routingEventsRegistered) {
+            return;
+        }
+        this.routingEventsRegistered = true;
+        this.subscriptions.push(
+            onDidDeleteFiles((e) => e.files.forEach((uri) => this.clearRouteability(uri))),
+            onDidRenameFiles((e) => Promise.all(e.files.map((file) => this.handleRename(file.oldUri, file.newUri)))),
+        );
     }
 
     /**
@@ -119,7 +166,7 @@ export class InlineScriptLazyDetector implements Disposable {
      * for the deferred activation catch-up. The per-URI dedup in
      * `handleDocument` keeps this safe to call repeatedly.
      */
-    private replayOpenDocuments(source: 'activate'): void {
+    private replayOpenDocuments(source: 'activate' | 'routing-enabled'): void {
         const openDocs = getOpenTextDocuments().filter((d) => this.shouldTrackUri(d.uri));
         const candidateDescription = this.routingRegistry ? 'candidate local .py' : 'candidate .py';
         if (openDocs.length === 0) {
@@ -229,7 +276,10 @@ export class InlineScriptLazyDetector implements Disposable {
                 return;
             }
             if (this.routingRegistry) {
-                if (this.routingReadGenerations.get(this.getReadKey(uri)) === routingGeneration) {
+                if (
+                    routingGeneration !== undefined &&
+                    this.routingReadGenerations.get(this.getReadKey(uri)) === routingGeneration
+                ) {
                     this.routingRegistry.setMetadata(uri, metadata);
                 }
                 if (!shouldEmitTelemetry || metadata === undefined) {

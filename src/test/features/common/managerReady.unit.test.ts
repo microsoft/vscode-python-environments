@@ -261,6 +261,56 @@ suite('ManagerReady - race condition handling', () => {
         assert.ok(!showErrorStub.called, 'should not prompt when manager already registered');
     });
 
+    test('an unregistered manager no longer satisfies future waits', async () => {
+        const manager = { id: VENV_MANAGER_ID } as unknown as InternalEnvironmentManager;
+        envManagerEmitter.fire({ kind: 'registered', manager });
+        envManagerEmitter.fire({ kind: 'unregistered', manager });
+
+        let settled = false;
+        const waitPromise = waitForEnvManagerId([VENV_MANAGER_ID]).then(() => {
+            settled = true;
+        });
+        await clock.tickAsync(0);
+        assert.strictEqual(settled, false, 'the removed manager should not remain ready');
+
+        clock.tick(MANAGER_READY_TIMEOUT_MS);
+        await clock.tickAsync(0);
+        await waitPromise;
+        assert.strictEqual(settled, true, 'the normal readiness timeout should still complete the wait');
+    });
+
+    test('a stale unregister event does not clear a replacement manager', async () => {
+        const original = { id: VENV_MANAGER_ID } as unknown as InternalEnvironmentManager;
+        const replacement = { id: VENV_MANAGER_ID } as unknown as InternalEnvironmentManager;
+        envManagerEmitter.fire({ kind: 'registered', manager: original });
+        envManagerEmitter.fire({ kind: 'registered', manager: replacement });
+        envManagerEmitter.fire({ kind: 'unregistered', manager: original });
+
+        await waitForEnvManagerId([VENV_MANAGER_ID]);
+
+        const showErrorStub = windowApis.showErrorMessage as sinon.SinonStub;
+        assert.ok(!showErrorStub.called, 'the replacement manager should remain ready');
+    });
+
+    test('disposing readiness resolves pending waits and cancels timeout effects', async () => {
+        let settled = false;
+        const waitPromise = waitForEnvManagerId([VENV_MANAGER_ID]).then(() => {
+            settled = true;
+        });
+        await clock.tickAsync(0);
+
+        disposables.forEach((disposable) => disposable.dispose());
+        disposables = [];
+        await clock.tickAsync(0);
+        assert.strictEqual(settled, true, 'dispose should settle pending manager waits');
+
+        clock.tick(MANAGER_READY_TIMEOUT_MS);
+        await clock.tickAsync(0);
+        await waitPromise;
+        assert.strictEqual((telemetrySender.sendTelemetryEvent as sinon.SinonStub).callCount, 0);
+        assert.strictEqual((windowApis.showErrorMessage as sinon.SinonStub).callCount, 0);
+    });
+
     test('pkg manager wait resolves when registration event fires', async () => {
         const waitPromise = waitForPkgManagerId([DEFAULT_PACKAGE_MANAGER_ID]);
 
@@ -274,5 +324,18 @@ suite('ManagerReady - race condition handling', () => {
 
         const showErrorStub = windowApis.showErrorMessage as sinon.SinonStub;
         assert.ok(!showErrorStub.called, 'should not prompt when pkg manager registered');
+    });
+
+    test('a stale package unregister event does not clear a replacement manager', async () => {
+        const original = { id: DEFAULT_PACKAGE_MANAGER_ID } as unknown as InternalPackageManager;
+        const replacement = { id: DEFAULT_PACKAGE_MANAGER_ID } as unknown as InternalPackageManager;
+        pkgManagerEmitter.fire({ kind: 'registered', manager: original });
+        pkgManagerEmitter.fire({ kind: 'registered', manager: replacement });
+        pkgManagerEmitter.fire({ kind: 'unregistered', manager: original });
+
+        await waitForPkgManagerId([DEFAULT_PACKAGE_MANAGER_ID]);
+
+        const showErrorStub = windowApis.showErrorMessage as sinon.SinonStub;
+        assert.ok(!showErrorStub.called, 'the replacement package manager should remain ready');
     });
 });

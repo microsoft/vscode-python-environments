@@ -1,8 +1,9 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 
-import { commands, Disposable, l10n, QuickPickItem, TextDocument, Uri, window } from 'vscode';
+import { Disposable, l10n, QuickPickItem, TextDocument, Uri, window } from 'vscode';
 import { PythonEnvironment } from '../../api';
+import { registerCommand } from '../../common/command.api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 import {
     getInlineScriptSetupProblem,
@@ -411,19 +412,28 @@ async function filterInlineScriptFiles(files: readonly Uri[]): Promise<Uri[]> {
  * Register the inline-script user-facing surfaces (the CodeLens, the quick fix, and their setup
  * commands). Only called when the PEP 723 inline-script preview is active. The single-file
  * setup command is invoked by both surfaces and stays out of `package.json`; the bulk command is
- * palette-gated behind the activation-latched context key.
+ * palette-gated behind the one-way activation context key.
  */
 export function registerInlineScriptUx(em: EnvironmentManagers, routing: InlineScriptRoutingRegistry): Disposable[] {
-    const codeLens = registerInlineScriptCodeLens(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND);
-    return [
-        codeLens.disposable,
-        registerInlineScriptSetupCodeAction(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND),
-        commands.registerCommand(
-            SETUP_INLINE_SCRIPT_ENV_COMMAND,
-            setupInlineScriptEnvironmentHandler(em, routing),
-        ),
-        commands.registerCommand(SETUP_INLINE_SCRIPT_ENVS_COMMAND, () =>
-            setUpInlineScriptEnvironmentsInWorkspace(em, routing),
-        ),
-    ];
+    const disposables: Disposable[] = [];
+    try {
+        const codeLens = registerInlineScriptCodeLens(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND);
+        disposables.push(codeLens.disposable);
+        disposables.push(registerInlineScriptSetupCodeAction(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND));
+        disposables.push(
+            registerCommand(
+                SETUP_INLINE_SCRIPT_ENV_COMMAND,
+                setupInlineScriptEnvironmentHandler(em, routing),
+            ),
+        );
+        disposables.push(
+            registerCommand(SETUP_INLINE_SCRIPT_ENVS_COMMAND, () =>
+                setUpInlineScriptEnvironmentsInWorkspace(em, routing),
+            ),
+        );
+        return disposables;
+    } catch (error) {
+        disposables.reverse().forEach((disposable) => disposable.dispose());
+        throw error;
+    }
 }

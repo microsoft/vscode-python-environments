@@ -5,16 +5,14 @@ import assert from 'assert';
 import * as sinon from 'sinon';
 import { Disposable, LogOutputChannel, Memento, Uri } from 'vscode';
 import { EnvironmentManager, PythonEnvironmentApi } from '../../../../api';
-import * as cacheLayout from '../../../../common/inlineScript/cacheLayout';
 import { InlineScriptRoutingRegistry } from '../../../../common/inlineScript/routingRegistry';
-import * as persistentState from '../../../../common/persistentState';
 import * as workspaceApis from '../../../../common/workspace.apis';
-import { latchInlineScriptFeatureActivation } from '../../../../features/inlineScript/activation';
-import { InlineScriptLazyDetector } from '../../../../features/inlineScript/lazyDetector';
 import * as pythonApi from '../../../../extensionApi';
-import * as helpers from '../../../../helpers';
 import { InlineScriptEnvManager } from '../../../../managers/builtin/inlineScript/envManager';
-import { registerInlineScriptFeatures } from '../../../../managers/builtin/inlineScript/main';
+import {
+    prepareInlineScriptFeatures,
+    scheduleInlineScriptActivationDiscovery,
+} from '../../../../managers/builtin/inlineScript/main';
 import { NativePythonFinder } from '../../../../managers/common/nativePythonFinder';
 
 function makeFakeLog(): LogOutputChannel {
@@ -38,8 +36,7 @@ function nextTurn(): Promise<void> {
     return new Promise((resolve) => setImmediate(resolve));
 }
 
-suite('registerInlineScriptFeatures (feature-flag gate)', () => {
-    let isEnabledStub: sinon.SinonStub;
+suite('prepareInlineScriptFeatures', () => {
     let getPythonApiStub: sinon.SinonStub;
     let registerEnvironmentManagerStub: sinon.SinonStub;
     let startActivationDiscoveryStub: sinon.SinonStub;
@@ -56,7 +53,6 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
     } as unknown as Memento;
 
     setup(() => {
-        isEnabledStub = sinon.stub(helpers, 'isInlineScriptsFeatureEnabled');
         registerEnvironmentManagerStub = sinon.stub<[unknown], Disposable>().returns({ dispose: () => undefined });
         startActivationDiscoveryStub = sinon.stub(InlineScriptEnvManager.prototype, 'startActivationDiscovery');
         onDidDeleteFilesStub = sinon
@@ -75,188 +71,85 @@ suite('registerInlineScriptFeatures (feature-flag gate)', () => {
         sinon.restore();
     });
 
-    test('when the feature flag is FALSE: does not register, does not even fetch the API', async () => {
+    test('prepares an inert manager and publishes it only at the commit point', async () => {
         const disposables: Disposable[] = [];
+        const getPersistedState = sinon.spy(workspaceMemento, 'get');
 
-        await registerInlineScriptFeatures(
+        const prepared = await prepareInlineScriptFeatures(
             nativeFinder,
             disposables,
             makeFakeLog(),
             baseManager,
             globalStorageUri,
-            { enabled: false, routingRegistry: undefined },
-            workspaceMemento,
-        );
-
-        assert.strictEqual(disposables.length, 0, 'no disposables should be added when flag is off');
-        assert.strictEqual(getPythonApiStub.called, false, 'should not even call getPythonApi when gated off');
-        assert.strictEqual(registerEnvironmentManagerStub.called, false);
-    });
-
-    test('when the feature flag is TRUE without a routing registry: fails before touching the API', async () => {
-        const disposables: Disposable[] = [];
-
-        await assert.rejects(
-            registerInlineScriptFeatures(
-                nativeFinder,
-                disposables,
-                makeFakeLog(),
-                baseManager,
-                globalStorageUri,
-                { enabled: true, routingRegistry: undefined },
-                workspaceMemento,
-            ),
-            /routing registry/i,
-        );
-
-        assert.strictEqual(disposables.length, 0, 'no disposables should be added when the registry is missing');
-        assert.strictEqual(getPythonApiStub.called, false, 'should fail before getPythonApi when the registry is missing');
-        assert.strictEqual(registerEnvironmentManagerStub.called, false);
-    });
-
-    test('when the feature flag is TRUE: registers the manager and pushes the disposable', async () => {
-        const disposables: Disposable[] = [];
-
-        await registerInlineScriptFeatures(
-            nativeFinder,
-            disposables,
-            makeFakeLog(),
-            baseManager,
-            globalStorageUri,
-            { enabled: true, routingRegistry },
+            routingRegistry,
             workspaceMemento,
         );
 
         assert.strictEqual(getPythonApiStub.callCount, 1);
-        assert.strictEqual(registerEnvironmentManagerStub.callCount, 1);
-        assert.strictEqual(disposables.length, 2, 'expected manager + registration disposable');
-        const manager = registerEnvironmentManagerStub.firstCall.args[0];
-        assert.ok(disposables.includes(manager), 'manager itself should be disposed');
-        assert.ok(
-            disposables.includes(registerEnvironmentManagerStub.firstCall.returnValue),
-            'registration disposable should be disposed',
-        );
-        assert.strictEqual(typeof manager.create, 'function');
+        assert.strictEqual(registerEnvironmentManagerStub.callCount, 0);
+        assert.strictEqual(onDidDeleteFilesStub.callCount, 0);
+        assert.strictEqual(onDidRenameFilesStub.callCount, 0);
+        assert.strictEqual(getPersistedState.callCount, 0);
+        assert.strictEqual(disposables.length, 1);
+        assert.strictEqual(disposables[0], prepared.manager);
+
+        prepared.manager.start();
         await nextTurn();
+        const registration = prepared.registerManager();
+        disposables.push(registration);
+
+        assert.strictEqual(registerEnvironmentManagerStub.callCount, 1);
+        assert.strictEqual(registerEnvironmentManagerStub.firstCall.args[0], prepared.manager);
+        assert.strictEqual(onDidDeleteFilesStub.callCount, 1);
+        assert.strictEqual(onDidRenameFilesStub.callCount, 1);
+        assert.ok(getPersistedState.calledOnce, 'persisted state should load only after start');
+        assert.strictEqual(typeof prepared.manager.create, 'function');
         disposables.forEach((disposable) => disposable.dispose());
     });
 
-    test('when the feature flag is TRUE: defers activation-time discovery to the next turn', async () => {
+    test('keeps the manager tracked for rollback when API publication fails', async () => {
+        registerEnvironmentManagerStub.throws(new Error('registration failed'));
         const disposables: Disposable[] = [];
-
-        await registerInlineScriptFeatures(
+        const prepared = await prepareInlineScriptFeatures(
             nativeFinder,
             disposables,
             makeFakeLog(),
             baseManager,
             globalStorageUri,
-            { enabled: true, routingRegistry },
+            routingRegistry,
+            workspaceMemento,
+        );
+
+        assert.throws(() => prepared.registerManager(), /registration failed/);
+        assert.strictEqual(disposables.length, 1);
+        assert.strictEqual(disposables[0], prepared.manager);
+        disposables.forEach((disposable) => disposable.dispose());
+    });
+
+    test('schedules activation-time discovery only when requested by the caller', async () => {
+        const disposables: Disposable[] = [];
+
+        const prepared = await prepareInlineScriptFeatures(
+            nativeFinder,
+            disposables,
+            makeFakeLog(),
+            baseManager,
+            globalStorageUri,
+            routingRegistry,
             workspaceMemento,
         );
 
         assert.strictEqual(
             startActivationDiscoveryStub.callCount,
             0,
-            'activation should not synchronously start bootstrap discovery',
+            'registration should not start discovery before the full feature transaction commits',
         );
 
+        const scheduled = scheduleInlineScriptActivationDiscovery(prepared.manager);
         await nextTurn();
 
         sinon.assert.calledOnceWithExactly(startActivationDiscoveryStub);
+        scheduled.dispose();
         disposables.forEach((disposable) => disposable.dispose());
-    });
-
-    test('latches FALSE through deferred registration even if the live setting flips TRUE later', async () => {
-        isEnabledStub.onFirstCall().returns(false);
-        isEnabledStub.onSecondCall().returns(true);
-        const activation = latchInlineScriptFeatureActivation();
-        const disposables: Disposable[] = [];
-
-        await (activation.enabled
-            ? registerInlineScriptFeatures(
-                  nativeFinder,
-                  disposables,
-                  makeFakeLog(),
-                  baseManager,
-                  globalStorageUri,
-                  activation,
-                  workspaceMemento,
-              )
-            : Promise.resolve());
-
-        assert.strictEqual(activation.enabled, false);
-        assert.strictEqual(activation.routingRegistry, undefined);
-        assert.strictEqual(isEnabledStub.callCount, 1, 'activation should read the setting only once');
-        assert.strictEqual(disposables.length, 0, 'disabled activation should not add disposables later');
-        assert.strictEqual(getPythonApiStub.called, false, 'disabled activation should never touch the API later');
-        assert.strictEqual(registerEnvironmentManagerStub.called, false);
-    });
-
-    test('absent flag performs no inline registration, persistence, cache, or routing-listener work', async () => {
-        isEnabledStub.returns(false);
-        const persistentStateStub = sinon.stub(persistentState, 'getWorkspacePersistentState');
-        const inspectMetaJsonStub = sinon.stub(cacheLayout, 'inspectMetaJson');
-        const writeMetaJsonStub = sinon.stub(cacheLayout, 'writeMetaJson');
-        sinon.stub(workspaceApis, 'onDidOpenTextDocument').returns(new Disposable(() => undefined));
-        sinon.stub(workspaceApis, 'onDidSaveTextDocument').returns(new Disposable(() => undefined));
-        sinon.stub(workspaceApis, 'onDidChangeTextDocument').returns(new Disposable(() => undefined));
-        sinon.stub(workspaceApis, 'getOpenTextDocuments').returns([]);
-
-        const activation = latchInlineScriptFeatureActivation();
-        const detector = new InlineScriptLazyDetector(activation.routingRegistry);
-        detector.activate();
-        const disposables: Disposable[] = [];
-        await (activation.enabled
-            ? registerInlineScriptFeatures(
-                  nativeFinder,
-                  disposables,
-                  makeFakeLog(),
-                  baseManager,
-                  globalStorageUri,
-                  activation,
-                  workspaceMemento,
-              )
-            : Promise.resolve());
-        await nextTurn();
-
-        assert.strictEqual(activation.enabled, false);
-        assert.strictEqual(activation.routingRegistry, undefined);
-        assert.strictEqual(isEnabledStub.callCount, 1);
-        assert.strictEqual(getPythonApiStub.callCount, 0);
-        assert.strictEqual(registerEnvironmentManagerStub.callCount, 0);
-        assert.strictEqual(startActivationDiscoveryStub.callCount, 0);
-        assert.strictEqual(persistentStateStub.callCount, 0);
-        assert.strictEqual(inspectMetaJsonStub.callCount, 0);
-        assert.strictEqual(writeMetaJsonStub.callCount, 0);
-        assert.strictEqual(onDidDeleteFilesStub.callCount, 0);
-        assert.strictEqual(onDidRenameFilesStub.callCount, 0);
-        assert.strictEqual(disposables.length, 0);
-        detector.dispose();
-    });
-
-    test('latches TRUE through deferred registration even if the live setting flips FALSE later', async () => {
-        isEnabledStub.onFirstCall().returns(true);
-        isEnabledStub.onSecondCall().returns(false);
-        const activation = latchInlineScriptFeatureActivation();
-        const disposables: Disposable[] = [];
-
-        await (activation.enabled
-            ? registerInlineScriptFeatures(
-                  nativeFinder,
-                  disposables,
-                  makeFakeLog(),
-                  baseManager,
-                  globalStorageUri,
-                  activation,
-                  workspaceMemento,
-              )
-            : Promise.resolve());
-
-        assert.strictEqual(activation.enabled, true);
-        assert.ok(activation.routingRegistry, 'enabled activation should latch a routing registry');
-        assert.strictEqual(isEnabledStub.callCount, 1, 'deferred registration should not reread the setting');
-        assert.strictEqual(getPythonApiStub.callCount, 1);
-        assert.strictEqual(registerEnvironmentManagerStub.callCount, 1);
-        assert.strictEqual(disposables.length, 2, 'enabled activation should still register later');
     });
 });
