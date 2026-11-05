@@ -205,6 +205,47 @@ suite('InlineScriptLazyDetector', () => {
         detector.dispose();
     });
 
+    test('enableRouting() subscribes to file events and replays already-open documents', async () => {
+        const uri = Uri.file(path.resolve('/ws/late-enabled.py'));
+        readMetadataStub.resolves(VALID_METADATA);
+        const detector = createDetectorWithoutRouting();
+        getOpenTextDocumentsStub.returns([makeDoc(uri)]);
+
+        detector.enableRouting(routingRegistry);
+        await flushImmediate();
+        await flushImmediate();
+
+        assert.ok(onDidDeleteStub.calledOnce, 'late routing should subscribe to onDidDeleteFiles');
+        assert.ok(onDidRenameStub.calledOnce, 'late routing should subscribe to onDidRenameFiles');
+        assert.ok(readMetadataStub.calledOnceWithExactly(uri), 'late routing should replay the open script');
+        assert.deepStrictEqual(routingRegistry.getMetadata(uri)?.dependencies, VALID_METADATA.dependencies);
+        detector.enableRouting(routingRegistry);
+        assert.strictEqual(onDidDeleteStub.callCount, 1, 'repeated enablement should remain idempotent');
+        assert.strictEqual(onDidRenameStub.callCount, 1, 'repeated enablement should remain idempotent');
+        detector.dispose();
+    });
+
+    test('a telemetry-only read already in flight cannot publish routing metadata after enablement', async () => {
+        const uri = Uri.file(path.resolve('/ws/in-flight-before-routing.py'));
+        const metadata = createDeferred<ism.InlineScriptMetadata | undefined>();
+        readMetadataStub.returns(metadata.promise);
+        const detector = createDetectorWithoutRouting();
+        await flushImmediate();
+
+        const open = fireOpen(uri);
+        await Promise.resolve();
+        detector.enableRouting(routingRegistry);
+        metadata.resolve(VALID_METADATA);
+        await open;
+
+        assert.strictEqual(
+            routingRegistry.getMetadata(uri),
+            undefined,
+            'the route-aware replay, not an earlier telemetry-only read, must seed routing',
+        );
+        detector.dispose();
+    });
+
     test('skips non-file URI schemes', async () => {
         const detector = createDetector();
         await fireOpen(Uri.parse('untitled:foo.py'));
