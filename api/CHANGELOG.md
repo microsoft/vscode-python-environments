@@ -11,11 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `minimumExtensionVersion` metadata recording the independently versioned extension baseline required by this npm release.
 - An npm-only compatibility guard that rejects older or invalid extension versions before activation or access to the API, with localized update guidance.
-- Offline PR validation of the declared extension minimum, packed-metadata checks, and release-time verification that shared API source syntax has shipped in the selected stable release.
+- Local validation of the declared extension minimum and packed-metadata consistency checks.
 
 ### Changed
 
-- New npm releases select a supported stable extension baseline rather than requiring the latest release. Existing npm releases keep their original minimum; source provenance ignores comments and formatting.
+- New npm releases select a supported stable extension baseline rather than requiring the latest release. Existing npm releases keep their original minimum.
 
 ### Notes
 

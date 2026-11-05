@@ -11,13 +11,9 @@ const { copySources } = require('../scripts/copy-sources.cjs');
 const {
     sharedSources,
     validateMinimumExtensionVersion,
-    requestGitHub,
-    verifySourceProvenance,
     validatePackedArtifact,
 } = require('../scripts/check-extension-version.cjs');
 
-const stable = { tag_name: 'v1.40.0', draft: false, prerelease: false };
-const response = (body, status = 200, headers = {}) => new Response(JSON.stringify(body), { status, headers });
 const validator = path.join(__dirname, '..', 'scripts', 'check-extension-version.cjs');
 const offlineGuard = `data:text/javascript,${encodeURIComponent(
     'globalThis.fetch = () => { throw new Error("Release metadata validation must not access the network"); };',
@@ -73,139 +69,6 @@ test('staging regenerates the embedded floor after a manifest change and rejects
 test('ordinary release validation accepts the declared minimum without a network lookup', () => {
     const output = execFileSync(process.execPath, ['--import', offlineGuard, validator], { encoding: 'utf8' });
     assert.match(output, /Extension compatibility baseline verified: .* \(declared minimum\)/);
-});
-
-test('GitHub lookups retry network/server failures, rate limits, and fail closed after exhaustion', async () => {
-    const waits = [];
-    let attempts = 0;
-    const result = await requestGitHub('https://github.com/microsoft/vscode-python-environments/releases/tag/v1.40.0', {
-        fetchImpl: async () => {
-            attempts += 1;
-            if (attempts === 1) {
-                throw new TypeError('network unavailable');
-            }
-            return attempts === 2 ? response({}, 503) : response(stable);
-        },
-        wait: async (delay) => waits.push(delay),
-    });
-    assert.deepEqual(await result.json(), stable);
-    assert.deepEqual(waits, [1000, 2000]);
-    for (const status of [429, 403]) {
-        attempts = 0;
-        await requestGitHub('https://github.com/microsoft/vscode-python-environments/releases/tag/v1.40.0', {
-            fetchImpl: async () => (++attempts === 1 ? response({}, status, { 'retry-after': '1' }) : response(stable)),
-            wait: async () => {},
-        });
-        assert.equal(attempts, 2);
-    }
-    attempts = 0;
-    await assert.rejects(
-        requestGitHub('https://github.com/microsoft/vscode-python-environments/releases/tag/v1.40.0', {
-            fetchImpl: async () => {
-                attempts += 1;
-                return response({}, 503);
-            },
-            wait: async () => {},
-        }),
-        /GitHub lookup failed \(503\)/,
-    );
-    assert.equal(attempts, 3);
-    attempts = 0;
-    await assert.rejects(
-        requestGitHub('https://github.com/microsoft/vscode-python-environments/releases/tag/v1.40.0', {
-            fetchImpl: async () => {
-                attempts += 1;
-                return response({}, 404);
-            },
-        }),
-        /GitHub lookup failed \(404\)/,
-    );
-    assert.equal(attempts, 1);
-});
-
-test('release provenance pins the declared baseline and ignores only source trivia', async (t) => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'python-api-provenance-'));
-    t.after(() => fs.rmSync(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 }));
-    const packageRoot = path.join(root, 'api');
-    const sha = 'a'.repeat(40);
-    const tagSha = 'b'.repeat(40);
-    const releasedSource =
-        'export interface Api { id: string; }\nexport function createApi() { return { id: "value" }; }\nexport const pattern = /a b/;\nexport const message = `id ${1} a b`;\n';
-    for (const directory of [path.join(root, 'src'), path.join(packageRoot, 'src')]) {
-        fs.mkdirSync(directory, { recursive: true });
-        for (const source of sharedSources) {
-            fs.writeFileSync(path.join(directory, source), releasedSource.replace(/\n/g, '\r\n'));
-        }
-    }
-    const options = {
-        execFileSyncImpl: (command, args) => {
-            assert.equal(command, 'git');
-            assert.deepEqual(args.slice(-2), [`refs/tags/${stable.tag_name}`, `refs/tags/${stable.tag_name}^{}`]);
-            return `${tagSha}\trefs/tags/${stable.tag_name}\n${sha}\trefs/tags/${stable.tag_name}^{}\n`;
-        },
-        fetchImpl: async (url, request) => {
-            if (url === `https://github.com/microsoft/vscode-python-environments/releases/tag/${stable.tag_name}`) {
-                assert.equal(request.method, 'HEAD');
-                assert.equal(request.redirect, 'error');
-                assert.equal(request.headers.Authorization, undefined);
-                return new Response(null);
-            }
-            assert.ok(
-                url.startsWith(`https://raw.githubusercontent.com/microsoft/vscode-python-environments/${sha}/src/`),
-            );
-            return new Response(releasedSource);
-        },
-    };
-    const minimum = '1.40.0';
-    await verifySourceProvenance(packageRoot, minimum, options);
-    await verifySourceProvenance(packageRoot, minimum, {
-        ...options,
-        execFileSyncImpl: () => `${sha}\trefs/tags/${stable.tag_name}\n`,
-    });
-    for (const directory of [path.join(root, 'src'), path.join(packageRoot, 'src')]) {
-        const file = path.join(directory, 'types.ts');
-        fs.writeFileSync(
-            file,
-            releasedSource
-                .replace(
-                    'export interface Api { id: string; }',
-                    '// Updated documentation\n\nexport interface Api {\n    id: string;\n}',
-                )
-                .replace(
-                    'export function createApi() { return { id: "value" }; }',
-                    'export function createApi() {\n    return { id: "value" };\n}',
-                )
-                .replace(/\n/g, '\r\n'),
-        );
-        await verifySourceProvenance(packageRoot, minimum, options);
-        for (const changed of [
-            releasedSource.replace('id: string', 'id: number'),
-            releasedSource.replace('return {', 'return\n{'),
-            releasedSource.replace('/a b/', '/a  b/'),
-            releasedSource.replace('`id ${1} a b`', '`id ${1} a  b`'),
-        ]) {
-            fs.writeFileSync(file, changed);
-            await assert.rejects(
-                verifySourceProvenance(packageRoot, minimum, options),
-                /differs from the declared baseline v1.40.0/,
-            );
-        }
-        fs.writeFileSync(file, releasedSource);
-    }
-    await assert.rejects(
-        verifySourceProvenance(packageRoot, minimum, {
-            ...options,
-            execFileSyncImpl: () => `${sha}\trefs/tags/unrelated\n`,
-        }),
-        /immutable release commit/,
-    );
-    await assert.rejects(
-        verifySourceProvenance(packageRoot, minimum, {
-            ...options,
-            fetchImpl: async () => response({}, 404),
-        }),
-        /GitHub lookup failed \(404\)/,
-    );
 });
 
 test('packed artifact validation detects a manifest/compiled-floor mismatch in either runtime format', (t) => {

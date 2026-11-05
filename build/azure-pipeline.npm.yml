@@ -113,10 +113,6 @@ extends:
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Compile TypeScript
 
-              - script: npm run check:release -- --provenance
-                workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Verify API sources against declared extension baseline
-
               - script: npm test
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Pack and validate npm package

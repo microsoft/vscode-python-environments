@@ -126,8 +126,7 @@ Its generated `api/src` sources are **not committed** (see [`api/.gitignore`](./
 - Run `npm --prefix api test` after compilation. This tests the release validator
   and packs/installs the package for modern/legacy TypeScript and ESM/CommonJS
   runtime checks. `npm --prefix api run check:release` validates the declared
-  minimum locally; add `-- --provenance` for a release-time check of original and
-  staged sources against that specific extension release.
+  minimum locally without network requests.
 - Shared API sources are also checked by the extension's lint and TypeScript
   compile. The PR's **API package compatibility** job builds/tests npm release
   inputs and validates their declared minimum without a GitHub lookup.
@@ -155,14 +154,10 @@ Release in this order: merge API changes without an npm version bump, ship the
 stable extension, then merge an npm release PR updating
 `minimumExtensionVersion`, the npm version, and the changelog. The stable npm
 version bump starts the publication pipeline automatically. Development can merge
-before the extension ships: source provenance is checked explicitly by the npm
-release pipeline, not on PRs or during ordinary packing. The pipeline verifies
-that the declared baseline has a public release, resolves its `v<minimumExtensionVersion>`
-tag to an immutable commit, and compares all five shared source files, including
-their staged copies. TypeScript parsing and printing ignore comments and
-formatting while preserving type and code changes, including meaningful line
-breaks. This conservative syntax check is not a comprehensive compatibility analyzer.
-The npm-only wrapper can evolve without changing those shared extension sources.
+before the extension ships. Release authors must confirm that the declared
+minimum contains the APIs required by the npm package. Automated GitHub release
+and source-provenance checks are deferred to a separate PR; neither PR checks
+nor the publication pipeline currently performs those lookups.
 
 The packed manifest and both compiled runtime floors must agree. The publish
 stage checks this metadata in the actual tarball locally, without a GitHub
@@ -170,10 +165,7 @@ lookup. A newer stable extension does not invalidate the selected baseline or
 require repacking. To change the minimum, update the manifest, rebuild, retest,
 and rerun the pipeline; do not restamp the existing artifact. Both `latest` and
 `next` npm tags currently use a stable baseline: preview-only API publishing
-needs a separate policy. Release-time public HTTP lookups use bounded retries
-and fail closed. Provenance uses the specific public release page, `git ls-remote`,
-and raw sources at the resolved commit, without GitHub REST API calls or tokens.
-Git and the package's TypeScript dev dependency are required for provenance.
+needs a separate policy.
 
 - **Releasing:** merging a stable version change in `api/package.json` into `main` automatically starts the [npm pipeline](./build/azure-pipeline.npm.yml), including its existing build, package tests, and MicroBuild approval process. Other manifest edits build and validate the package without publishing. The version check compares the merged commit with its parent, relying on the repository's squash-only merge policy; direct pushes to `main` also trigger it. Preview releases remain manual: queue the pipeline with `quality: preview` and `publishPackage: true`. Manual runs otherwise remain build-only unless `publishPackage` is explicitly enabled.
 
