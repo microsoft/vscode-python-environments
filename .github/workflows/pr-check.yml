@@ -55,8 +55,6 @@ jobs:
         if: steps.scope.outputs.relevant == 'true'
         run: npm run check:release
         working-directory: api
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Build and test API package
         if: steps.scope.outputs.relevant == 'true'

@@ -71,9 +71,15 @@ test('staging regenerates the embedded floor after a manifest change and rejects
 test('latest stable uses the release tag and rejects invalid release metadata', async () => {
     for (const tag of ['v1.40.0', '1.40.0']) {
         const release = await getLatestStableRelease({
-            fetchImpl: async (url) => {
-                assert.ok(url.endsWith('/releases/latest'));
-                return response({ ...stable, tag_name: tag, target_commitish: 'main' });
+            fetchImpl: async (url, options) => {
+                assert.equal(url, 'https://github.com/microsoft/vscode-python-environments/releases/latest');
+                assert.equal(options.method, 'HEAD');
+                assert.equal(options.redirect, 'manual');
+                assert.equal(options.headers.Authorization, undefined);
+                return new Response(null, {
+                    status: 302,
+                    headers: { location: `/microsoft/vscode-python-environments/releases/tag/${tag}` },
+                });
             },
         });
         assert.equal(release.version, '1.40.0');
@@ -87,14 +93,21 @@ test('latest stable uses the release tag and rejects invalid release metadata', 
             /latest stable is 1.40.0/,
         );
     }
-    for (const invalid of [
-        { ...stable, draft: true },
-        { ...stable, prerelease: true },
-        {},
-        { ...stable, tag_name: 'v1.41.0-rc.1' },
+    for (const location of [
+        '',
+        'https://example.com/microsoft/vscode-python-environments/releases/tag/v1.40.0',
+        '/microsoft/another-repository/releases/tag/v1.40.0',
+        '/microsoft/vscode-python-environments/releases',
+        '/microsoft/vscode-python-environments/releases/tag/v1.41.0-rc.1',
+        '/microsoft/vscode-python-environments/releases/tag/v1.40.0?untrusted=true',
     ]) {
-        await assert.rejects(getLatestStableRelease({ fetchImpl: async () => response(invalid) }));
+        await assert.rejects(
+            getLatestStableRelease({
+                fetchImpl: async () => new Response(null, { status: 302, headers: { location } }),
+            }),
+        );
     }
+    await assert.rejects(getLatestStableRelease({ fetchImpl: async () => response(stable) }));
 });
 
 test('GitHub lookups retry network/server failures, rate limits, and fail closed after exhaustion', async () => {
@@ -110,7 +123,7 @@ test('GitHub lookups retry network/server failures, rate limits, and fail closed
         },
         wait: async (delay) => waits.push(delay),
     });
-    assert.deepEqual(result, stable);
+    assert.deepEqual(await result.json(), stable);
     assert.deepEqual(waits, [1000, 2000]);
     for (const status of [429, 403]) {
         attempts = 0;
@@ -158,20 +171,25 @@ test('provenance follows annotated tags to an immutable commit and checks origin
         }
     }
     const options = {
+        execFileSyncImpl: (command, args) => {
+            assert.equal(command, 'git');
+            assert.deepEqual(args.slice(-2), [`refs/tags/${stable.tag_name}`, `refs/tags/${stable.tag_name}^{}`]);
+            return `${tagSha}\trefs/tags/${stable.tag_name}\n${sha}\trefs/tags/${stable.tag_name}^{}\n`;
+        },
         fetchImpl: async (url) => {
-            if (url.includes('/git/ref/tags/')) {
-                return response({ object: { type: 'tag', sha: tagSha } });
-            }
-            if (url.endsWith(`/git/tags/${tagSha}`)) {
-                return response({ object: { type: 'commit', sha } });
-            }
-            assert.equal(new URL(url).searchParams.get('ref'), sha);
+            assert.ok(
+                url.startsWith(`https://raw.githubusercontent.com/microsoft/vscode-python-environments/${sha}/src/`),
+            );
             const source = new URL(url).pathname.split('/').pop();
-            return response({ encoding: 'base64', content: Buffer.from(`${source}\n`).toString('base64') });
+            return new Response(`${source}\n`);
         },
     };
     const release = { tag: stable.tag_name };
     await verifySourceProvenance(packageRoot, release, options);
+    await verifySourceProvenance(packageRoot, release, {
+        ...options,
+        execFileSyncImpl: () => `${sha}\trefs/tags/${stable.tag_name}\n`,
+    });
     for (const directory of [path.join(root, 'src'), path.join(packageRoot, 'src')]) {
         const file = path.join(directory, 'types.ts');
         fs.writeFileSync(file, 'unreleased contract\n');
@@ -180,7 +198,7 @@ test('provenance follows annotated tags to an immutable commit and checks origin
     }
     await assert.rejects(
         verifySourceProvenance(packageRoot, release, {
-            fetchImpl: async () => response({ object: { type: 'tree', sha } }),
+            execFileSyncImpl: () => `${sha}\trefs/tags/unrelated\n`,
         }),
         /immutable release commit/,
     );

@@ -27,16 +27,16 @@ function validateMinimumExtensionVersion(manifest) {
     return version;
 }
 
-/** Reads public repository metadata with bounded retries for transient failures only. */
-async function requestGitHub(resource, { fetchImpl = fetch, token = process.env.GITHUB_TOKEN, wait = sleep } = {}) {
+/** Reads public GitHub endpoints without credentials, retrying transient failures only. */
+async function requestGitHub(resource, { fetchImpl = fetch, wait = sleep, method = 'GET', redirect = 'follow' } = {}) {
     for (let attempt = 0; attempt < 3; attempt += 1) {
         let response;
         try {
-            response = await fetchImpl(`https://api.github.com/repos/${repository}/${resource}`, {
+            response = await fetchImpl(resource, {
+                method,
+                redirect,
                 headers: {
-                    Accept: 'application/vnd.github+json',
                     'User-Agent': 'python-environments-api-release-check',
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
                 signal: AbortSignal.timeout(15000),
             });
@@ -50,8 +50,8 @@ async function requestGitHub(resource, { fetchImpl = fetch, token = process.env.
             await wait(1000 * 2 ** attempt);
             continue;
         }
-        if (response.ok) {
-            return response.json();
+        if (response.ok || (redirect === 'manual' && response.status === 302)) {
+            return response;
         }
         const retryable =
             response.status === 429 ||
@@ -68,17 +68,27 @@ async function requestGitHub(resource, { fetchImpl = fetch, token = process.env.
     }
 }
 
-/** Resolves GitHub's designated latest stable release, not the development manifest or preview channel. */
+/** Resolves GitHub's public latest-release redirect, rejecting unrelated URLs and prerelease tags. */
 async function getLatestStableRelease(options) {
-    const release = await requestGitHub('releases/latest', options);
-    if (release?.draft !== false || release.prerelease !== false || typeof release.tag_name !== 'string') {
+    const latestUrl = `https://github.com/${repository}/releases/latest`;
+    const response = await requestGitHub(latestUrl, { ...options, method: 'HEAD', redirect: 'manual' });
+    const releaseUrl = new URL(response.headers.get('location') ?? '', latestUrl);
+    const prefix = `/${repository}/releases/tag/`;
+    if (
+        response.status !== 302 ||
+        releaseUrl.origin !== 'https://github.com' ||
+        !releaseUrl.pathname.startsWith(prefix) ||
+        releaseUrl.search ||
+        releaseUrl.hash
+    ) {
         throw new Error('GitHub did not return a valid latest stable extension release.');
     }
-    const version = validateMinimumExtensionVersion({ minimumExtensionVersion: release.tag_name.replace(/^v/, '') });
+    const tag = decodeURIComponent(releaseUrl.pathname.slice(prefix.length));
+    const version = validateMinimumExtensionVersion({ minimumExtensionVersion: tag.replace(/^v/, '') });
     return {
         version,
-        tag: release.tag_name,
-        url: `https://github.com/${repository}/releases/tag/${encodeURIComponent(release.tag_name)}`,
+        tag,
+        url: `https://github.com/${repository}/releases/tag/${encodeURIComponent(tag)}`,
     };
 }
 
@@ -93,25 +103,37 @@ function assertLatestStable(manifest, release) {
 }
 
 /** Rejects unreleased shared API sources, including stale staged copies, at packaging time. */
-async function verifySourceProvenance(packageRoot, release, options) {
-    let object = (await requestGitHub(`git/ref/tags/${encodeURIComponent(release.tag)}`, options)).object;
-    for (let depth = 0; object?.type === 'tag' && depth < 5; depth += 1) {
-        object = (await requestGitHub(`git/tags/${object.sha}`, options)).object;
-    }
-    if (object?.type !== 'commit' || !/^[a-f0-9]{40}$/.test(object.sha)) {
+async function verifySourceProvenance(packageRoot, release, options = {}) {
+    const tagRef = `refs/tags/${release.tag}`;
+    const output = (options.execFileSyncImpl ?? execFileSync)(
+        'git',
+        ['ls-remote', '--tags', `https://github.com/${repository}.git`, tagRef, `${tagRef}^{}`],
+        { encoding: 'utf8', timeout: 60000, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } },
+    );
+    const refs = new Map(
+        output
+            .trim()
+            .split(/\r?\n/)
+            .map((line) => {
+                const [sha, ref] = line.split(/\s+/);
+                return [ref, sha];
+            }),
+    );
+    const commit = refs.get(`${tagRef}^{}`) ?? refs.get(tagRef);
+    if (!/^[a-f0-9]{40}$/.test(commit)) {
         throw new Error(`Cannot resolve ${release.tag} to an immutable release commit.`);
     }
     const normalize = (contents) => contents.replace(/\r\n/g, '\n');
     for (const source of sharedSources) {
-        const remote = await requestGitHub(`contents/src/${source}?ref=${object.sha}`, options);
-        if (remote.encoding !== 'base64' || typeof remote.content !== 'string') {
-            throw new Error(`Cannot read released API source src/${source} at ${object.sha}.`);
-        }
-        const released = normalize(Buffer.from(remote.content, 'base64').toString('utf8'));
+        const remote = await requestGitHub(
+            `https://raw.githubusercontent.com/${repository}/${commit}/src/${source}`,
+            options,
+        );
+        const released = normalize(await remote.text());
         for (const local of [path.join(packageRoot, '..', 'src', source), path.join(packageRoot, 'src', source)]) {
             if (normalize(fs.readFileSync(local, 'utf8')) !== released) {
                 throw new Error(
-                    `${local} differs from ${release.tag} (${object.sha}). Publish the stable extension containing these API sources, then update the npm baseline and rebuild.`,
+                    `${local} differs from ${release.tag} (${commit}). Publish the stable extension containing these API sources, then update the npm baseline and rebuild.`,
                 );
             }
         }

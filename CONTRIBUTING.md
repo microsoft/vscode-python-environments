@@ -167,8 +167,11 @@ new stable release appeared during review or between packaging and publishing,
 explicitly update the minimum, rebuild, retest, and rerun the pipeline; do not
 restamp the existing artifact. Both `latest` and `next` npm tags currently use
 this stable baseline: preview-only API publishing needs a separate policy.
-Public GitHub lookups use bounded retries and fail closed. Local runs can set
-`GITHUB_TOKEN` to avoid anonymous rate limits; PRs use their read-only token.
+Public HTTP lookups use bounded retries and fail closed. The baseline uses
+GitHub's public `releases/latest` redirect, and provenance resolves the release
+tag with `git ls-remote` before comparing raw sources at that immutable commit.
+These checks do not use the GitHub REST API or require a GitHub token. Git must
+be installed for provenance checks.
 
 - **Releasing:** merging a stable version change in `api/package.json` into `main` automatically starts the [npm pipeline](./build/azure-pipeline.npm.yml), including its existing build, package tests, and MicroBuild approval process. Other manifest edits build and validate the package without publishing. The version check compares the merged commit with its parent, relying on the repository's squash-only merge policy; direct pushes to `main` also trigger it. Preview releases remain manual: queue the pipeline with `quality: preview` and `publishPackage: true`. Manual runs otherwise remain build-only unless `publishPackage` is explicitly enabled.
 
