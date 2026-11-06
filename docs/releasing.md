@@ -109,6 +109,12 @@ credentials or write permissions. Candidate execution restores no dependencies
 and uses no source checkout. The verification fixture's reviewed harness pin
 is **not** a production/runtime dependency or a release pipeline default.
 
+Upgrade phases require ordinary isolated windows and graceful shutdown:
+`--extensionTestsPath` makes VS Code 1.110 use in-memory storage even with a
+stable profile path. A controller-owned global/workspace Memento nonce must
+survive restart before the product's saved selection is read, without reseeding
+it. A broken storage control is infrastructure failure, not a product regression.
+
 This unsigned source-head check does not establish DevDiv template expansion,
 detached-signature validity or identity with final signed publication bytes.
 Do not convert a retained baseline error into a claim of an error-free baseline.

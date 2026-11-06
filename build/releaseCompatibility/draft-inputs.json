@@ -5,7 +5,7 @@
     "vscodeVersion": "1.110.0",
     "harness": {
         "repository": "StellaHuang95/vscode-python",
-        "commit": "794fb473b5229e78046678c26d4e541f780fcf74",
+        "commit": "36931aba4f11db19e29f7bdefaeec9acdaff1832",
         "repositoryLockSha256": "110cc8382eecd1c79f796cc8833c851b11ea377f0c2c47835ec73735465d4006"
     },
     "core": {

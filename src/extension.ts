@@ -842,6 +842,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     return api;
 }
 
+/**
+ * Attempt every cleanup and report failures, rejecting with the first only after all settle.
+ * @param disposables The captured subscriptions to dispose.
+ */
 export async function disposeAll(disposables: IDisposable[]): Promise<void> {
     const results = await Promise.allSettled(disposables.map(async (disposable) => disposable.dispose()));
     const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
