@@ -4,6 +4,7 @@
 """Prepare immutable inputs for opt-in draft CI, not a production release dependency."""
 
 import argparse
+import gzip
 import json
 import os
 from pathlib import Path
@@ -14,12 +15,14 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
+import zlib
 
 from report import SEMVER, SHA256, extract_archive, inspect_vsix, pinned_partner, read_object, require_hash, sha256
 
 
 COMMIT = re.compile(r"[0-9a-f]{40}")
 REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/vscode-python")
+MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024
 
 
 def read_config(file):
@@ -94,9 +97,25 @@ def verify_snapshot(directory, repository, commit):
 
 
 def download_partner(artifact, destination):
-    """Download only a fixed version asset and verify its required hash before use."""
+    """Decode supported HTTP transport and verify the original, unmodified VSIX bytes."""
     with urllib.request.urlopen(artifact["downloadUrl"], timeout=60) as source, destination.open("xb") as output:
-        shutil.copyfileobj(source, output)
+        encoding = source.headers.get("Content-Encoding", "identity").strip().lower()
+        if encoding not in ("", "identity", "gzip"):
+            raise ValueError(f"Unsupported partner HTTP Content-Encoding: {encoding}")
+
+        def copy(stream):
+            size = 0
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                size += len(chunk)
+                if size > MAX_DOWNLOAD_BYTES:
+                    raise ValueError("Decoded partner VSIX exceeds the download size limit")
+                output.write(chunk)
+
+        if encoding == "gzip":
+            with gzip.GzipFile(fileobj=source, mode="rb") as decoded:
+                copy(decoded)
+        else:
+            copy(source)
     require_hash(destination, artifact["sha256"])
 
 
@@ -225,7 +244,7 @@ def main():
             )
         print(json.dumps(result, indent=2))
         return 0
-    except (OSError, ValueError, TypeError, subprocess.SubprocessError, zipfile.BadZipFile) as error:
+    except (OSError, ValueError, TypeError, EOFError, zlib.error, subprocess.SubprocessError, zipfile.BadZipFile) as error:
         print(f"Draft compatibility infrastructure error: {type(error).__name__}: {error}", file=sys.stderr)
         return 2
 

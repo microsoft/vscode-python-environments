@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 import copy
+import gzip
 import hashlib
 import io
 import json
@@ -12,10 +13,17 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+import zlib
 
 import draft_ci
 import report
 from test_report import write_vsix
+
+
+class Response(io.BytesIO):
+    def __init__(self, data, encoding=None):
+        super().__init__(data)
+        self.headers = {} if encoding is None else {"Content-Encoding": encoding}
 
 
 class DraftCiTests(unittest.TestCase):
@@ -83,7 +91,7 @@ class DraftCiTests(unittest.TestCase):
     def prepare(self):
         def download(url, **_kwargs):
             file = self.core if "/python/" in url else self.baseline
-            return io.BytesIO(file.read_bytes())
+            return Response(file.read_bytes())
 
         with patch.object(draft_ci, "verify_snapshot") as snapshots, patch.object(
             draft_ci.urllib.request, "urlopen", side_effect=download,
@@ -181,6 +189,46 @@ class DraftCiTests(unittest.TestCase):
         write_vsix(self.candidate, "vscode-python-envs", "1.43.0", pet=True)
         with self.assertRaises(ValueError):
             self.prepare()
+
+    def test_identity_and_gzip_transport_preserve_the_same_original_vsix_hash(self):
+        data = self.core.read_bytes()
+        for encoding in (None, "identity", "gzip"):
+            with self.subTest(encoding=encoding):
+                wire = gzip.compress(data) if encoding == "gzip" else data
+                destination = self.root / f"download-{encoding}.vsix"
+                with patch.object(draft_ci.urllib.request, "urlopen", return_value=Response(wire, encoding)):
+                    draft_ci.download_partner(self.config["core"], destination)
+                self.assertEqual(destination.read_bytes(), data)
+                self.assertEqual(report.sha256(destination), self.config["core"]["sha256"])
+
+    def test_corrupt_truncated_or_unsupported_transport_is_not_a_valid_artifact(self):
+        wire = gzip.compress(self.core.read_bytes())
+        corrupt_crc = bytearray(wire)
+        corrupt_crc[-8] ^= 1
+        cases = ((wire[:-5], "gzip"), (b"not gzip", "gzip"), (bytes(corrupt_crc), "gzip"), (wire, "br"))
+        for index, (data, encoding) in enumerate(cases):
+            with self.subTest(index=index):
+                with patch.object(draft_ci.urllib.request, "urlopen", return_value=Response(data, encoding)):
+                    with self.assertRaises((OSError, EOFError, ValueError, zlib.error)):
+                        draft_ci.download_partner(self.config["core"], self.root / f"invalid-{index}.vsix")
+
+    def test_decoded_not_wire_size_is_bounded(self):
+        for size in (16, 17):
+            with self.subTest(size=size):
+                data = b"x" * size
+                wire = gzip.compress(data)
+                artifact = {**self.config["core"], "sha256": hashlib.sha256(data).hexdigest()}
+                destination = self.root / f"bounded-{size}.vsix"
+                with patch.object(draft_ci, "MAX_DOWNLOAD_BYTES", 16), patch.object(
+                    draft_ci.urllib.request, "urlopen", return_value=Response(wire, "gzip"),
+                ):
+                    if size == 16:
+                        draft_ci.download_partner(artifact, destination)
+                        self.assertEqual(destination.read_bytes(), data)
+                    else:
+                        with self.assertRaisesRegex(ValueError, "size limit"):
+                            draft_ci.download_partner(artifact, destination)
+                        self.assertLessEqual(destination.stat().st_size, 16)
 
 
 if __name__ == "__main__":
