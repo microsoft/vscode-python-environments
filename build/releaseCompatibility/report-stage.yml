@@ -1,0 +1,96 @@
+parameters:
+  - name: inputsPipelineId
+    type: string
+  - name: inputsBuildId
+    type: string
+  - name: inputsSha256
+    type: string
+  - name: nodeVersion
+    type: string
+
+stages:
+  - stage: PackagedCompatibility
+    displayName: Packaged compatibility (pre-sign, report-only)
+    dependsOn: Build
+    jobs:
+      - job: PackagedCompatibility
+        displayName: Installed VSIX compatibility (Windows x64)
+        timeoutInMinutes: 30
+        pool:
+          name: AzurePipelines-EO
+          image: 1ESPT-Windows2022
+          os: windows
+        templateContext:
+          mb:
+            signing:
+              enabled: false
+          outputs:
+            - output: pipelineArtifact
+              displayName: Publish compatibility evidence (not a release artifact)
+              artifactName: packaged-compatibility-win32-x64
+              targetPath: $(Build.ArtifactStagingDirectory)/packaged-compatibility-$(System.JobAttempt)
+              isProduction: false
+              condition: always()
+        steps:
+          - checkout: self
+            persistCredentials: false
+
+          - task: NodeTool@0
+            displayName: Select compatibility runner Node.js
+            continueOnError: true
+            inputs:
+              versionSpec: ${{ parameters.nodeVersion }}
+
+          - task: UsePythonVersion@0
+            displayName: Select fixture Python
+            continueOnError: true
+            condition: succeededOrFailed()
+            inputs:
+              versionSpec: '3.12'
+              architecture: x64
+
+          - task: DownloadPipelineArtifact@2
+            displayName: Download original Build VSIX (do not rebuild)
+            continueOnError: true
+            condition: succeededOrFailed()
+            inputs:
+              buildType: current
+              artifactName: vsix-win32-x64
+              targetPath: $(Pipeline.Workspace)/packaged-compatibility/candidate
+
+          - ${{ if and(ne(parameters.inputsPipelineId, ''), ne(parameters.inputsBuildId, '')) }}:
+              - task: DownloadPipelineArtifact@2
+                displayName: Download exact reviewed compatibility inputs
+                continueOnError: true
+                condition: succeededOrFailed()
+                inputs:
+                  buildType: specific
+                  project: $(System.TeamProject)
+                  definition: ${{ parameters.inputsPipelineId }}
+                  buildVersionToDownload: specific
+                  pipelineId: ${{ parameters.inputsBuildId }}
+                  artifactName: python-compatibility-inputs
+                  itemPattern: inputs.zip
+                  targetPath: $(Pipeline.Workspace)/packaged-compatibility/inputs
+
+          - pwsh: |
+              python build\releaseCompatibility\report.py `
+                --candidate-directory "$env:COMPATIBILITY_CANDIDATE" `
+                --inputs "$env:COMPATIBILITY_INPUTS" `
+                --inputs-sha256 "$env:COMPATIBILITY_INPUTS_SHA256" `
+                --output "$env:COMPATIBILITY_OUTPUT" `
+                --preparation-status "$env:COMPATIBILITY_PREPARATION_STATUS"
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "##vso[task.logissue type=error]Packaged compatibility did not pass. Inspect adapter-report.json and runner.log; this pre-sign result is report-only."
+                exit $LASTEXITCODE
+              }
+            displayName: Report installed-artifact compatibility and upgrade
+            condition: succeededOrFailed()
+            continueOnError: true
+            env:
+              COMPATIBILITY_CANDIDATE: $(Pipeline.Workspace)/packaged-compatibility/candidate
+              COMPATIBILITY_INPUTS: $(Pipeline.Workspace)/packaged-compatibility/inputs/inputs.zip
+              COMPATIBILITY_INPUTS_SHA256: ${{ parameters.inputsSha256 }}
+              COMPATIBILITY_OUTPUT: $(Build.ArtifactStagingDirectory)/packaged-compatibility-$(System.JobAttempt)
+              COMPATIBILITY_PREPARATION_STATUS: $(Agent.JobStatus)
+              SYSTEM_ACCESSTOKEN: ''

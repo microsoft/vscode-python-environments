@@ -33,6 +33,23 @@ parameters:
     type: boolean
     default: true
 
+  - name: runPackagedCompatibility
+    displayName: Report packaged compatibility (pre-sign, Windows x64)
+    type: boolean
+    default: false
+
+  - name: compatibilityInputsPipelineId
+    type: string
+    default: ''
+
+  - name: compatibilityInputsBuildId
+    type: string
+    default: ''
+
+  - name: compatibilityInputsSha256
+    type: string
+    default: ''
+
   - name: buildPlatforms
     type: object
     default:
@@ -101,9 +118,22 @@ extends:
               customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
               nodeVersion: $(NodeVersion)
 
+      - ${{ if parameters.runPackagedCompatibility }}:
+          - template: releaseCompatibility/report-stage.yml
+            parameters:
+              inputsPipelineId: ${{ parameters.compatibilityInputsPipelineId }}
+              inputsBuildId: ${{ parameters.compatibilityInputsBuildId }}
+              inputsSha256: ${{ parameters.compatibilityInputsSha256 }}
+              nodeVersion: $(NodeVersion)
+
       - stage: WaitForValidation
         displayName: Wait for Validation
-        dependsOn: Build
+        dependsOn:
+          - Build
+          - ${{ if parameters.runPackagedCompatibility }}:
+              - PackagedCompatibility
+        ${{ if parameters.runPackagedCompatibility }}:
+          condition: and(not(canceled()), in(dependencies.Build.result, 'Succeeded', 'SucceededWithIssues'), in(dependencies.PackagedCompatibility.result, 'Succeeded', 'SucceededWithIssues', 'Failed'))
         jobs:
           - job: wait_for_validation
             displayName: Wait for manual validation
