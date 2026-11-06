@@ -81,6 +81,40 @@ Environments packages as PET-free.
 
 ## Packaged compatibility report (opt-in)
 
+### Read-only draft verification
+
+The PR workflow also has a bounded, opt-in installed-artifact check on a clean
+Windows x64 runner. Its explicit draft PR number, exact VS Code/released partner
+versions and hashes, and reviewed immutable harness repository/commit/lock hash
+are recorded in `build/releaseCompatibility/draft-inputs.json`. A nonmatching PR
+or a non-draft does not request this check; that is not a compatibility pass.
+Moving branches, absent pins and a changed source lock are rejected.
+
+The preparation job checks out the **exact PR head**, normally packages a
+Windows x64 VSIX, and separately checks out the reviewed harness snapshot. It
+uses the harness producer and existing lock, not a copied implementation or a
+floating source ref. Its public dependencies are restored without install
+lifecycle scripts. The source snapshots must remain tracked-clean. Candidate,
+input ZIP, driver and harness hashes plus source provenance are retained.
+The execution job consumes the producer's immutable artifact ID, so a failed-job
+retry still uses the original prepared bytes rather than a new attempt's name.
+
+A separate clean Windows job downloads only those same-run artifacts, checks
+the candidate/driver/input hashes and invokes the real `report.py`. Products
+are installed from the frozen VSIXes; only the independent controller is a
+development extension. Raw host logs, requested/effective modes, exact Python
+execution outputs, PET/backend evidence and before/after-upgrade results are
+preserved even when the job fails. Neither job has signing/publication
+credentials or write permissions. Candidate execution restores no dependencies
+and uses no source checkout. The verification fixture's reviewed harness pin
+is **not** a production/runtime dependency or a release pipeline default.
+
+This unsigned source-head check does not establish DevDiv template expansion,
+detached-signature validity or identity with final signed publication bytes.
+Do not convert a retained baseline error into a claim of an error-free baseline.
+
+### DevDiv report-only stage
+
 Both DevDiv definitions accept **runPackagedCompatibility** (default `false`).
 When enabled, the graph is:
 
@@ -165,10 +199,14 @@ executable. The runner must:
   install the unmodified candidate, and relaunch with the same profile,
   workspace and persisted selection. Check the association and explicit-off
   preference survive; do not reseed them to conceal an upgrade regression.
-- Observe the actual `Starting Python Locator ... server` log, verify the path
-  belongs to the expected installed extension, and match the binary hash to the
-  pinned VSIX contents. Optional PET `info` metadata can be unknown; supplier
-  identity and the execution assertions cannot.
+- For the enabled Environments path, observe the actual `Starting Python Locator
+  ... server` log, verify the path belongs to the expected installed extension,
+  and match the binary hash to the pinned VSIX contents. Explicit-off may use
+  the released core's JavaScript locators: require positive legacy-backend
+  evidence and report PET as not started, rather than inventing a PET identity
+  or forcing a native experiment. Both paths still require real discovery,
+  selection and execution assertions. Optional PET `info` metadata can be
+  unknown; an observed native supplier's identity cannot.
 
 The job does not use a signing plugin, a publication service connection, a
 release-job context, or persisted checkout credentials. The adapter starts the
@@ -206,3 +244,21 @@ and upgrade scenarios there. Do not rebuild/restamp packages to obtain a passing
 result. Template expansion, input-artifact permissions, runtime observations,
 and stable/prerelease ordering still require an actual non-publishing hosted
 acceptance run; YAML and unit checks alone do not prove them.
+
+### Opt-out shutdown regression
+
+Installed-pair validation exposed an existing shutdown bug: VS Code invokes
+`deactivate()` without an argument, but the extension previously required an
+`ExtensionContext` and read its subscriptions unconditionally. The entry point
+now retains the activation subscriptions and disposes them once through the
+zero-argument callback, including after skipped or partially failed activation.
+All captured cleanup is awaited even when a disposer fails; failures are
+logged and the first is propagated rather than silently discarded. The owned
+batch is detached before cleanup, so shutdown does not dispose it twice or
+erase late registrations that still belong to VS Code's context owner.
+Concurrent shutdown callbacks await the same in-flight promise and receive the
+same failure if cleanup rejects. The output channel/logger remains available
+through resource cleanup and error reporting, then is disposed last.
+Explicit opt-out still skips activation; this fix changes neither defaults nor
+saved settings. Released upgrade baselines remain unmodified, with any observed
+shutdown error retained in their evidence.

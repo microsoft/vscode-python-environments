@@ -39,6 +39,213 @@ jobs:
       - name: Check report adapter and negative controls
         run: python -m unittest discover -s build/releaseCompatibility -p "test_*.py" -v
 
+  packaged-draft-inputs:
+    name: Prepare pinned packaged draft inputs
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft
+    needs: [packaged-compatibility-adapter]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      enabled: ${{ steps.scope.outputs.enabled }}
+      inputs_sha256: ${{ steps.prepare.outputs.inputs_sha256 }}
+      driver_sha256: ${{ steps.prepare.outputs.driver_sha256 }}
+      candidate_sha256: ${{ steps.prepare.outputs.candidate_sha256 }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Checkout exact candidate source head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: environments
+          persist-credentials: false
+
+      - name: Select Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Read explicit draft verification scope and immutable pins
+        id: scope
+        env:
+          DRAFT_PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python environments/build/releaseCompatibility/draft_ci.py describe \
+            --config environments/build/releaseCompatibility/draft-inputs.json \
+            --pull-request "$DRAFT_PR_NUMBER" --draft true
+
+      - name: Checkout reviewed immutable harness snapshot
+        if: steps.scope.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ steps.scope.outputs.harness_repository }}
+          ref: ${{ steps.scope.outputs.harness_commit }}
+          path: harness-source
+          persist-credentials: false
+
+      - name: Select Node
+        if: steps.scope.outputs.enabled == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build self-contained reviewed harness from its existing lock
+        if: steps.scope.outputs.enabled == 'true'
+        working-directory: harness-source
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run test:releaseCompatibility
+          npm run package:releaseCompatibility -- "$RUNNER_TEMP/reviewed-harness.zip"
+
+      - name: Normally package the exact candidate head for Windows x64
+        if: steps.scope.outputs.enabled == 'true'
+        working-directory: environments
+        run: |
+          npm ci --no-audit --no-fund
+          npx --no-install vsce package --target win32-x64 --pre-release --out "$RUNNER_TEMP/environments-candidate.vsix"
+
+      - name: Freeze candidate, reviewed harness and exact released partners
+        id: prepare
+        if: steps.scope.outputs.enabled == 'true'
+        env:
+          SOURCE_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python environments/build/releaseCompatibility/draft_ci.py prepare \
+            --config environments/build/releaseCompatibility/draft-inputs.json \
+            --source-root environments --source-repository "$SOURCE_REPOSITORY" --source-head "$SOURCE_HEAD" \
+            --harness-root harness-source --candidate "$RUNNER_TEMP/environments-candidate.vsix" \
+            --harness "$RUNNER_TEMP/reviewed-harness.zip" --output "$RUNNER_TEMP/packaged-draft-inputs"
+
+      - name: Retain truthful preparation status
+        if: always()
+        env:
+          PREPARATION_STATUS: ${{ job.status }}
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
+          REQUESTED: ${{ steps.scope.outputs.enabled }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]) / "packaged-draft-inputs"
+          root.mkdir(parents=True, exist_ok=True)
+          (root / "preparation-status.json").write_text(json.dumps({
+              "scope": "draft-ci-preparation",
+              "workflowJobStatus": os.environ["PREPARATION_STATUS"],
+              "requested": os.environ["REQUESTED"],
+              "sourceHead": os.environ["SOURCE_HEAD"],
+              "runtimeValidated": False,
+          }, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Preserve immutable inputs or preparation failure evidence
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packaged-draft-inputs-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/packaged-draft-inputs
+          if-no-files-found: error
+          retention-days: 7
+
+  packaged-draft-compatibility:
+    name: Installed packaged compatibility (draft, Windows x64)
+    if: needs.packaged-draft-inputs.outputs.enabled == 'true'
+    needs: [packaged-draft-inputs]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Download only this run's frozen inputs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.packaged-draft-inputs.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/packaged-draft-inputs
+
+      - name: Select Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Select fixture Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+          architecture: x64
+
+      - name: Execute the real adapter against the original packaged bytes
+        env:
+          INPUTS_SHA256: ${{ needs.packaged-draft-inputs.outputs.inputs_sha256 }}
+          DRIVER_SHA256: ${{ needs.packaged-draft-inputs.outputs.driver_sha256 }}
+          CANDIDATE_SHA256: ${{ needs.packaged-draft-inputs.outputs.candidate_sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $inputs = Join-Path $env:RUNNER_TEMP 'packaged-draft-inputs'
+          $driver = Join-Path $inputs 'adapter\report.py'
+          $candidate = Join-Path $inputs 'candidate\environments.vsix'
+          if ((Get-FileHash -LiteralPath $driver -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:DRIVER_SHA256) {
+            throw 'The adapter does not match the reviewed source-head artifact'
+          }
+          if ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:CANDIDATE_SHA256) {
+            throw 'The candidate bytes changed between preparation and execution'
+          }
+          python $driver --candidate-directory (Join-Path $inputs 'candidate') `
+            --inputs (Join-Path $inputs 'inputs.zip') --inputs-sha256 $env:INPUTS_SHA256 `
+            --output (Join-Path $env:RUNNER_TEMP 'packaged-draft-result')
+          exit $LASTEXITCODE
+
+      - name: Retain execution status even if the runner could not start
+        if: always()
+        env:
+          EXECUTION_STATUS: ${{ job.status }}
+          SOURCE_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP 'packaged-draft-result'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $report = Join-Path $root 'adapter-report.json'
+          $status = if (Test-Path -LiteralPath $report) {
+            (Get-Content -LiteralPath $report -Raw | ConvertFrom-Json).status
+          } else {
+            'infrastructure-error'
+          }
+          @{
+            scope = 'draft-ci-unsigned-source-head'
+            workflowJobStatus = $env:EXECUTION_STATUS
+            compatibilityStatus = $status
+            sourceHead = $env:SOURCE_HEAD
+            finalSignedArtifactValidated = $false
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $root 'execution-status.json') -Encoding utf8
+
+      - name: Preserve reports, provenance, execution results and raw host logs
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packaged-draft-evidence-win32-x64-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/packaged-draft-result/adapter-report.json
+            ${{ runner.temp }}/packaged-draft-result/plan.json
+            ${{ runner.temp }}/packaged-draft-result/runner.log
+            ${{ runner.temp }}/packaged-draft-result/execution-status.json
+            ${{ runner.temp }}/packaged-draft-result/inputs/provenance.json
+            ${{ runner.temp }}/packaged-draft-result/runner/report.json
+            ${{ runner.temp }}/packaged-draft-result/runner/**/result.json
+            ${{ runner.temp }}/packaged-draft-result/runner/**/host-report.json
+            ${{ runner.temp }}/packaged-draft-result/runner/**/case.json
+            ${{ runner.temp }}/packaged-draft-result/runner/**/process.log
+            ${{ runner.temp }}/packaged-draft-result/runner/**/user-data/logs/**
+            ${{ runner.temp }}/packaged-draft-result/runner/**/workspace/probe-*.json
+            ${{ runner.temp }}/packaged-draft-result/runner/**/workspace/.vscode/settings.json
+            ${{ runner.temp }}/packaged-draft-result/runner/**/user-data/User/settings.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   api-compatibility:
     name: API package compatibility
     if: github.event_name == 'pull_request'
