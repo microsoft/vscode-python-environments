@@ -54,6 +54,8 @@ variables:
 extends:
   template: azure-pipelines/MicroBuild.1ES.Official.Publish.yml@MicroBuildTemplate
   parameters:
+    settings:
+      networkIsolationPolicy: Preferred,GitHub,NodeTool
     sdl:
       sourceAnalysisPool: VSEng-MicroBuildVSStable
       codeSignValidation:
@@ -111,10 +113,6 @@ extends:
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Compile TypeScript
 
-              - script: npm run check:release -- --provenance
-                workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Verify latest stable baseline and released API sources
-
               - script: npm test
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Pack and validate npm package
@@ -143,10 +141,11 @@ extends:
                 artifact: npm-package
                 displayName: Download npm-package artifact
 
-              - task: NodeTool@0
-                inputs:
-                  versionSpec: $(NodeVersion)
-                displayName: Select Node version
+              - template: azure-pipelines/extension/templates/steps/setup.yml@templates
+                parameters:
+                  installPython: false
+                  customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
+                  nodeVersion: $(NodeVersion)
 
               - script: npm ci --ignore-scripts
                 workingDirectory: $(Build.SourcesDirectory)/api
@@ -154,7 +153,7 @@ extends:
 
               - script: npm run check:release -- --artifact-directory "$(Pipeline.Workspace)/npm-package"
                 workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Revalidate packed compatibility baseline before publishing
+                displayName: Validate packed compatibility metadata before publishing
 
               - template: MicroBuild.Publish.yml@MicroBuildTemplate
                 parameters:

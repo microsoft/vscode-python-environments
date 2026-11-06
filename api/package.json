@@ -40,7 +40,7 @@
     "scripts": {
         "prepublishOnly": "echo \"⛔ Can only publish from a secure pipeline ⛔\" && node -e \"process.exitCode = 1\"",
         "prepack": "npm run all:publish",
-        "all:publish": "npm ci && npm run compile && npm run check:release -- --provenance && npm test",
+        "all:publish": "npm ci && npm run compile && npm run check:release && npm test",
         "copy:sources": "node ./scripts/copy-sources.cjs",
         "compile": "npm run copy:sources && npm run clean && npm run compile:types && npm run compile:esm && npm run compile:cjs",
         "compile:types": "tsc -b ./tsconfig.types.json",
