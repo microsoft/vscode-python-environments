@@ -1,8 +1,20 @@
 import assert from 'node:assert';
 import { reset, verify, when } from 'ts-mockito';
-import { Disposable, MessageItem, MessageOptions, TextDocument, WindowState } from 'vscode';
+import {
+    Disposable,
+    EventEmitter,
+    MessageItem,
+    MessageOptions,
+    QuickInputButton,
+    QuickPick,
+    QuickPickItem,
+    QuickPickItemButtonEvent,
+    TextDocument,
+    WindowState,
+} from 'vscode';
 import { executeCommand, registerCommand } from '../../common/command.api';
-import { onDidChangeWindowState, showWarningMessage } from '../../common/window.apis';
+import { createDeferred } from '../../common/utils/deferred';
+import { onDidChangeWindowState, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { onDidOpenTextDocument } from '../../common/workspace.apis';
 import { mockedVSCodeNamespaces } from '../unittests';
 
@@ -10,6 +22,67 @@ suite('Typed API wrappers', () => {
     const commands = mockedVSCodeNamespaces.commands!;
     const window = mockedVSCodeNamespaces.window!;
     const workspace = mockedVSCodeNamespaces.workspace!;
+
+    function createFakeQuickPick<T extends QuickPickItem>() {
+        const didAccept = new EventEmitter<void>();
+        const didHide = new EventEmitter<void>();
+        const didTriggerButton = new EventEmitter<QuickInputButton>();
+        const didTriggerItemButton = new EventEmitter<QuickPickItemButtonEvent<T>>();
+        let items: readonly T[] = [];
+        let activeItems: readonly T[] = [];
+        let selectedItems: readonly T[] = [];
+        let activeItemsSetCount = 0;
+        let showCount = 0;
+        let disposeCount = 0;
+        const quickPick = {
+            get items() {
+                return items;
+            },
+            set items(value: readonly T[]) {
+                items = value;
+                activeItems = [];
+                selectedItems = [];
+            },
+            get activeItems() {
+                return activeItems;
+            },
+            set activeItems(value: readonly T[]) {
+                activeItems = value;
+                activeItemsSetCount += 1;
+            },
+            get selectedItems() {
+                return selectedItems;
+            },
+            set selectedItems(value: readonly T[]) {
+                selectedItems = value;
+            },
+            buttons: [],
+            show: () => {
+                showCount += 1;
+            },
+            hide: () => didHide.fire(),
+            dispose: () => {
+                disposeCount += 1;
+            },
+            onDidAccept: didAccept.event,
+            onDidHide: didHide.event,
+            onDidTriggerButton: didTriggerButton.event,
+            onDidTriggerItemButton: didTriggerItemButton.event,
+        } as unknown as QuickPick<T>;
+        return {
+            quickPick,
+            hide: () => didHide.fire(),
+            get showCount() {
+                return showCount;
+            },
+            get disposeCount() {
+                return disposeCount;
+            },
+            get activeItemsSetCount() {
+                return activeItemsSetCount;
+            },
+        };
+    }
 
     teardown(() => {
         reset(commands);
@@ -114,5 +187,94 @@ suite('Typed API wrappers', () => {
 
         assert.strictEqual(selected, action);
         assert.strictEqual(selected?.id, 1);
+    });
+
+    test('updates quick pick items without losing focus while loading', async () => {
+        const fake = createFakeQuickPick<QuickPickItem>();
+        const initial = { label: 'initial' };
+        const discovered = { label: 'discovered' };
+        const release = createDeferred<void>();
+        const loaderStarted = createDeferred<void>();
+        const loaderFinished = createDeferred<void>();
+        when(window.createQuickPick<QuickPickItem>()).thenReturn(fake.quickPick);
+
+        const selection = showQuickPickWithButtons([initial], {
+            itemLoader: async (updateItems) => {
+                loaderStarted.resolve();
+                await release.promise;
+                updateItems([initial, discovered]);
+                loaderFinished.resolve();
+            },
+        });
+        await loaderStarted.promise;
+
+        fake.quickPick.activeItems = [initial];
+        fake.quickPick.selectedItems = [initial];
+        assert.strictEqual(fake.quickPick.busy, true);
+        assert.strictEqual(fake.showCount, 1);
+
+        release.resolve();
+        await loaderFinished.promise;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        assert.deepStrictEqual(fake.quickPick.items, [initial, discovered]);
+        assert.deepStrictEqual(fake.quickPick.activeItems, [initial]);
+        assert.deepStrictEqual(fake.quickPick.selectedItems, [initial]);
+        assert.strictEqual(fake.activeItemsSetCount, 2);
+        assert.strictEqual(fake.quickPick.keepScrollPosition, true);
+        assert.strictEqual(fake.quickPick.busy, false);
+
+        fake.hide();
+        assert.strictEqual(await selection, undefined);
+    });
+
+    test('ignores item updates after the quick pick is dismissed', async () => {
+        const fake = createFakeQuickPick<QuickPickItem>();
+        const initial = { label: 'initial' };
+        const release = createDeferred<void>();
+        const loaderStarted = createDeferred<void>();
+        const loaderFinished = createDeferred<void>();
+        when(window.createQuickPick<QuickPickItem>()).thenReturn(fake.quickPick);
+
+        const selection = showQuickPickWithButtons([initial], {
+            itemLoader: async (updateItems) => {
+                loaderStarted.resolve();
+                await release.promise;
+                updateItems([{ label: 'late result' }]);
+                loaderFinished.resolve();
+            },
+        });
+        await loaderStarted.promise;
+
+        fake.hide();
+        assert.strictEqual(await selection, undefined);
+        assert.strictEqual(fake.disposeCount, 1);
+
+        release.resolve();
+        await loaderFinished.promise;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        assert.deepStrictEqual(fake.quickPick.items, [initial]);
+        assert.strictEqual(fake.showCount, 1);
+    });
+
+    test('does not clear focus when items load before the initial focus is established', async () => {
+        const fake = createFakeQuickPick<QuickPickItem>();
+        const loaderFinished = createDeferred<void>();
+        when(window.createQuickPick<QuickPickItem>()).thenReturn(fake.quickPick);
+
+        const selection = showQuickPickWithButtons([{ label: 'initial' }], {
+            itemLoader: async (updateItems) => {
+                updateItems([{ label: 'initial' }, { label: 'discovered' }]);
+                loaderFinished.resolve();
+            },
+        });
+        await loaderFinished.promise;
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        assert.strictEqual(fake.activeItemsSetCount, 0);
+
+        fake.hide();
+        assert.strictEqual(await selection, undefined);
     });
 });
