@@ -36,6 +36,22 @@ import { NativeEnvInfo, NativePythonFinder } from '../managers/common/nativePyth
 const DEFAULT_INTERPRETER_PATH_SETTING = 'python';
 
 /**
+ * Manager ids named by a setting (`pythonProjects[]` or `defaultEnvManager`) that were not registered when the
+ * priority chain ran. Managers contributed by other extensions (e.g. Pixi, Hatch) register from their own
+ * `activate()`, which can run after startup selection has already fallen back to another environment. When one
+ * of these managers registers, selection is applied again (see registerLateManagerRegistrationListener).
+ */
+const pendingConfiguredManagerIds = new Set<string>();
+
+/** Serializes selection runs so a re-run triggered by a late registration cannot be overwritten by an older run. */
+let selectionQueue: Promise<void> = Promise.resolve();
+
+/** Test hook: forget managers recorded as missing by earlier selection runs. */
+export function resetPendingConfiguredManagers(): void {
+    pendingConfiguredManagerIds.clear();
+}
+
+/**
  * Result from the priority chain resolution.
  */
 export interface PriorityChainResult {
@@ -94,6 +110,7 @@ async function resolvePriorityChainCore(
                 configuredValue: projectManagerId,
             };
             errors.push(error);
+            pendingConfiguredManagerIds.add(projectManagerId);
             traceWarn(`${logPrefix} pythonProjects[] manager '${projectManagerId}' not found, trying next priority`);
         }
     }
@@ -112,6 +129,7 @@ async function resolvePriorityChainCore(
             configuredValue: userConfiguredManager,
         };
         errors.push(error);
+        pendingConfiguredManagerIds.add(userConfiguredManager);
         traceWarn(`${logPrefix} defaultEnvManager '${userConfiguredManager}' not found, trying next priority`);
     }
 
@@ -281,7 +299,31 @@ async function autoDiscoverEnvironment(
  * @param changeEvent - The settings change that triggered a re-run. The global scope is resolved again only when
  *   a setting it depends on changed, so a user's global selection is kept otherwise.
  */
-export async function applyInitialEnvironmentSelection(
+export function applyInitialEnvironmentSelection(
+    envManagers: EnvironmentManagers,
+    projectManager: PythonProjectManager,
+    nativeFinder: NativePythonFinder,
+    api: PythonEnvironmentApi,
+    activationToReadyDurationMs?: number,
+    globalScopeDeferredRef?: { value: 'deferred' | 'not_deferred' | 'unknown' },
+    changeEvent?: ConfigurationChangeEvent,
+): Promise<void> {
+    const run = selectionQueue.then(() =>
+        applyEnvironmentSelectionNow(
+            envManagers,
+            projectManager,
+            nativeFinder,
+            api,
+            activationToReadyDurationMs,
+            globalScopeDeferredRef,
+            changeEvent,
+        ),
+    );
+    selectionQueue = run.catch(() => undefined);
+    return run;
+}
+
+async function applyEnvironmentSelectionNow(
     envManagers: EnvironmentManagers,
     projectManager: PythonProjectManager,
     nativeFinder: NativePythonFinder,
@@ -718,6 +760,33 @@ async function tryResolveInterpreterPath(
         traceVerbose(`[tryResolveInterpreterPath] Resolution failed for '${interpreterPath}': ${err}`);
     }
     return undefined;
+}
+
+/**
+ * Re-apply environment selection when a manager named by a setting registers after the priority chain skipped it.
+ *
+ * Startup selection does not wait for managers contributed by other extensions, because there is no way to know
+ * which extensions will register or when. Instead of blocking on them, selection falls back immediately and is
+ * corrected here once the configured manager actually registers. Register this before startup selection runs so
+ * that registrations which happen while selection is still in progress are not missed.
+ */
+export function registerLateManagerRegistrationListener(
+    envManagers: EnvironmentManagers,
+    projectManager: PythonProjectManager,
+    nativeFinder: NativePythonFinder,
+    api: PythonEnvironmentApi,
+): Disposable {
+    return envManagers.onDidChangeEnvironmentManager((e) => {
+        if (e.kind !== 'registered' || !pendingConfiguredManagerIds.delete(e.manager.id)) {
+            return;
+        }
+        traceInfo(
+            `[interpreterSelection] Configured manager '${e.manager.id}' registered after it was skipped, re-applying environment selection`,
+        );
+        applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api).catch((err) =>
+            traceError(`[interpreterSelection] Re-applying selection for '${e.manager.id}' failed: ${err}`),
+        );
+    });
 }
 
 /**
