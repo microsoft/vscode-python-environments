@@ -22,7 +22,7 @@ import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
     registerLateManagerRegistrationListener,
-    resetPendingConfiguredManagers,
+    resetFallbackSelections,
     resetSettingWarnings,
     resolveEnvironmentByPriority,
     resolveGlobalEnvironmentByPriority,
@@ -2635,7 +2635,7 @@ suite('Interpreter Selection - late manager registration', () => {
     setup(() => {
         sandbox = sinon.createSandbox();
         resetSettingWarnings();
-        resetPendingConfiguredManagers();
+        resetFallbackSelections();
         pixiRegistered = false;
 
         mockVenvManager = {
@@ -2758,8 +2758,59 @@ suite('Interpreter Selection - late manager registration', () => {
             kind: 'registered',
             manager: otherManager as unknown as InternalEnvironmentManager,
         });
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await settle();
 
         assert.strictEqual(mockEnvManagers.setEnvironment.callCount, callsBefore, 'no re-run expected');
+    });
+
+    test('does not switch the environment when the manager registers after the timeout', async () => {
+        let now = 1_000_000;
+        sandbox.stub(Date, 'now').callsFake(() => now);
+        listen();
+        await run();
+        const callsBefore = mockEnvManagers.setEnvironment.callCount;
+
+        now += 30_001; // just past MANAGER_READY_TIMEOUT_MS
+        pixiRegistered = true;
+        fireManagerEvent({ kind: 'registered', manager: mockPixiManager });
+        await settle();
+
+        assert.strictEqual(
+            mockEnvManagers.setEnvironment.callCount,
+            callsBefore,
+            'a manager that registers long after startup must not switch the environment',
+        );
+    });
+
+    test('only re-selects the workspace folders that fell back for the registered manager', async () => {
+        const otherUri = Uri.file('/test/other');
+        (workspaceApis.getWorkspaceFolders as sinon.SinonStub).returns([
+            { uri: testUri, name: 'test', index: 0 },
+            { uri: otherUri, name: 'other', index: 1 },
+        ]);
+        // Only the first folder is configured for Pixi; the other one uses venv, which is registered.
+        (helpers.getUserConfiguredSetting as sinon.SinonStub).callsFake(
+            (section: string, key: string, scope?: Uri) => {
+                if (section === 'python-envs' && key === 'defaultEnvManager') {
+                    return scope?.toString() === otherUri.toString() ? VENV_MANAGER_ID : pixiManagerId;
+                }
+                return undefined;
+            },
+        );
+        listen();
+        await run();
+        const callsBefore = mockEnvManagers.setEnvironment.callCount;
+
+        pixiRegistered = true;
+        fireManagerEvent({ kind: 'registered', manager: mockPixiManager });
+        await settle();
+
+        const reselected = mockEnvManagers.setEnvironment
+            .getCalls()
+            .slice(callsBefore)
+            .map((c) => (c.args[0] as Uri).toString());
+        assert.deepStrictEqual(reselected, [testUri.toString()], 'only the fallen-back folder is re-selected');
+        assert.strictEqual(mockEnvManagers.setEnvironment.lastCall.args[1], pixiEnv);
+        assert.strictEqual(mockEnvManagers.setEnvironments.callCount, 1, 'global scope is not re-selected');
     });
 });

@@ -21,6 +21,7 @@ import {
     onDidChangeConfiguration,
 } from '../common/workspace.apis';
 import { getUserConfiguredSetting } from '../helpers';
+import { MANAGER_READY_TIMEOUT_MS } from './common/managerReady';
 import type { EnvironmentManagers } from './envManagers';
 import type {
     PythonProjectManager,
@@ -36,19 +37,25 @@ import { NativeEnvInfo, NativePythonFinder } from '../managers/common/nativePyth
 const DEFAULT_INTERPRETER_PATH_SETTING = 'python';
 
 /**
- * Manager ids named by a setting (`pythonProjects[]` or `defaultEnvManager`) that were not registered when the
- * priority chain ran. Managers contributed by other extensions (e.g. Pixi, Hatch) register from their own
- * `activate()`, which can run after startup selection has already fallen back to another environment. When one
- * of these managers registers, selection is applied again (see registerLateManagerRegistrationListener).
+ * Workspace folders (keyed by URI) whose selection fell back because a manager named by a setting
+ * (`pythonProjects[]` or `defaultEnvManager`) was not registered yet. Managers contributed by other extensions
+ * (e.g. Pixi, Hatch) register from their own `activate()`, which can run after startup selection. When one of the
+ * missing managers registers, only these folders are selected again (see registerLateManagerRegistrationListener).
  */
-const pendingConfiguredManagerIds = new Set<string>();
+const fallbackSelections = new Map<string, { missingManagerIds: string[]; fellBackAt: number }>();
 
 /** Serializes selection runs so a re-run triggered by a late registration cannot be overwritten by an older run. */
 let selectionQueue: Promise<void> = Promise.resolve();
 
-/** Test hook: forget managers recorded as missing by earlier selection runs. */
-export function resetPendingConfiguredManagers(): void {
-    pendingConfiguredManagerIds.clear();
+function enqueueSelection(run: () => Promise<void>): Promise<void> {
+    const result = selectionQueue.then(run);
+    selectionQueue = result.catch(() => undefined);
+    return result;
+}
+
+/** Test hook: forget folders recorded as fallen back by earlier selection runs. */
+export function resetFallbackSelections(): void {
+    fallbackSelections.clear();
 }
 
 /**
@@ -110,7 +117,6 @@ async function resolvePriorityChainCore(
                 configuredValue: projectManagerId,
             };
             errors.push(error);
-            pendingConfiguredManagerIds.add(projectManagerId);
             traceWarn(`${logPrefix} pythonProjects[] manager '${projectManagerId}' not found, trying next priority`);
         }
     }
@@ -129,7 +135,6 @@ async function resolvePriorityChainCore(
             configuredValue: userConfiguredManager,
         };
         errors.push(error);
-        pendingConfiguredManagerIds.add(userConfiguredManager);
         traceWarn(`${logPrefix} defaultEnvManager '${userConfiguredManager}' not found, trying next priority`);
     }
 
@@ -308,7 +313,7 @@ export function applyInitialEnvironmentSelection(
     globalScopeDeferredRef?: { value: 'deferred' | 'not_deferred' | 'unknown' },
     changeEvent?: ConfigurationChangeEvent,
 ): Promise<void> {
-    const run = selectionQueue.then(() =>
+    return enqueueSelection(() =>
         applyEnvironmentSelectionNow(
             envManagers,
             projectManager,
@@ -319,10 +324,12 @@ export function applyInitialEnvironmentSelection(
             changeEvent,
         ),
     );
-    selectionQueue = run.catch(() => undefined);
-    return run;
 }
 
+/**
+ * @param onlyFolders - When set, only these workspace folders (by URI string) are selected and the global scope is
+ *   left alone. Used to re-select folders that fell back because their configured manager registered late.
+ */
 async function applyEnvironmentSelectionNow(
     envManagers: EnvironmentManagers,
     projectManager: PythonProjectManager,
@@ -331,8 +338,9 @@ async function applyEnvironmentSelectionNow(
     activationToReadyDurationMs?: number,
     globalScopeDeferredRef?: { value: 'deferred' | 'not_deferred' | 'unknown' },
     changeEvent?: ConfigurationChangeEvent,
+    onlyFolders?: ReadonlySet<string>,
 ): Promise<void> {
-    const folders = getWorkspaceFolders() ?? [];
+    const folders = (getWorkspaceFolders() ?? []).filter((f) => !onlyFolders || onlyFolders.has(f.uri.toString()));
     traceInfo(
         `[interpreterSelection] Applying initial environment selection for ${folders.length} workspace folder(s)`,
     );
@@ -376,6 +384,15 @@ async function applyEnvironmentSelectionNow(
             await envManagers.setEnvironment(folder.uri, env, false, {
                 explicit: isExplicitSelection(result, env),
             });
+
+            const missingManagerIds = errors
+                .filter((e) => e.kind === 'managerNotRegistered')
+                .map((e) => e.configuredValue);
+            if (missingManagerIds.length > 0) {
+                fallbackSelections.set(folder.uri.toString(), { missingManagerIds, fellBackAt: Date.now() });
+            } else {
+                fallbackSelections.delete(folder.uri.toString());
+            }
 
             if (env) {
                 workspaceFolderResolved = true;
@@ -430,9 +447,10 @@ async function applyEnvironmentSelectionNow(
     // pythonProjects never applies to the global scope. Resolving it again when only that changed would replace
     // a user's global selection with the unchanged result of the other settings.
     const globalSettingsChanged =
-        !changeEvent ||
-        changeEvent.affectsConfiguration('python-envs.defaultEnvManager') ||
-        changeEvent.affectsConfiguration('python.defaultInterpreterPath');
+        !onlyFolders &&
+        (!changeEvent ||
+            changeEvent.affectsConfiguration('python-envs.defaultEnvManager') ||
+            changeEvent.affectsConfiguration('python.defaultInterpreterPath'));
 
     if (!globalSettingsChanged) {
         traceVerbose('[interpreterSelection] Settings for the global scope did not change, keeping its environment');
@@ -767,8 +785,16 @@ async function tryResolveInterpreterPath(
  *
  * Startup selection does not wait for managers contributed by other extensions, because there is no way to know
  * which extensions will register or when. Instead of blocking on them, selection falls back immediately and is
- * corrected here once the configured manager actually registers. Register this before startup selection runs so
- * that registrations which happen while selection is still in progress are not missed.
+ * corrected here once the configured manager actually registers:
+ * - Only the workspace folders that fell back for that manager are selected again; other folders and the global
+ *   scope are left alone.
+ * - The correction only applies within MANAGER_READY_TIMEOUT_MS of the fallback (the same window the API uses when
+ *   waiting for managers). A manager that shows up later, e.g. an extension installed mid-session, does not switch
+ *   the interpreter under a running session.
+ * - The re-selection is queued behind any selection that is still running, so it cannot be overwritten by it.
+ *
+ * Register this before startup selection runs so that registrations which happen while it is in progress are not
+ * missed.
  */
 export function registerLateManagerRegistrationListener(
     envManagers: EnvironmentManagers,
@@ -777,15 +803,45 @@ export function registerLateManagerRegistrationListener(
     api: PythonEnvironmentApi,
 ): Disposable {
     return envManagers.onDidChangeEnvironmentManager((e) => {
-        if (e.kind !== 'registered' || !pendingConfiguredManagerIds.delete(e.manager.id)) {
+        if (e.kind !== 'registered') {
             return;
         }
-        traceInfo(
-            `[interpreterSelection] Configured manager '${e.manager.id}' registered after it was skipped, re-applying environment selection`,
-        );
-        applyInitialEnvironmentSelection(envManagers, projectManager, nativeFinder, api).catch((err) =>
-            traceError(`[interpreterSelection] Re-applying selection for '${e.manager.id}' failed: ${err}`),
-        );
+        const managerId = e.manager.id;
+        // Queued, so a registration that happens during startup selection is handled once that run has recorded
+        // which folders fell back.
+        enqueueSelection(async () => {
+            const now = Date.now();
+            const folders = new Set<string>();
+            for (const [folder, fallback] of fallbackSelections) {
+                if (!fallback.missingManagerIds.includes(managerId)) {
+                    continue;
+                }
+                fallbackSelections.delete(folder);
+                if (now - fallback.fellBackAt <= MANAGER_READY_TIMEOUT_MS) {
+                    folders.add(folder);
+                } else {
+                    traceInfo(
+                        `[interpreterSelection] Manager '${managerId}' registered too long after ${folder} fell back, keeping its environment`,
+                    );
+                }
+            }
+            if (folders.size === 0) {
+                return;
+            }
+            traceInfo(
+                `[interpreterSelection] Configured manager '${managerId}' registered late, re-applying selection for ${folders.size} workspace folder(s)`,
+            );
+            await applyEnvironmentSelectionNow(
+                envManagers,
+                projectManager,
+                nativeFinder,
+                api,
+                undefined,
+                undefined,
+                undefined,
+                folders,
+            );
+        }).catch((err) => traceError(`[interpreterSelection] Re-applying selection for '${managerId}' failed: ${err}`));
     });
 }
 
