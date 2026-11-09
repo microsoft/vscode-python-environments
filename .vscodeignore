@@ -16,3 +16,4 @@ vsc-extension-quickstart.md
 .venv/
 **/__pycache__/
 examples/**
+build/releaseCompatibility/**

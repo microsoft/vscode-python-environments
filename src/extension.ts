@@ -127,7 +127,12 @@ import { registerPipenvFeatures } from './managers/pipenv/main';
 import { registerPoetryFeatures } from './managers/poetry/main';
 import { registerPyenvFeatures } from './managers/pyenv/main';
 
+let activationSubscriptions: ExtensionContext['subscriptions'] | undefined;
+let activationLoggingSubscriptions: ExtensionContext['subscriptions'] | undefined;
+let deactivationPromise: Promise<void> | undefined;
+
 export async function activate(context: ExtensionContext): Promise<PythonEnvironmentApi | undefined> {
+    activationSubscriptions = context.subscriptions;
     // Only skip activation if user explicitly set useEnvironmentsExtension to false.
     // When disabled, the main Python extension handles environments instead (legacy mode).
     const useEnvironmentsExtension = isEnvironmentsExtensionEnabled();
@@ -136,14 +141,15 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         traceWarn(
             'The Python environments extension has been disabled via a setting. If you would like to opt into using the extension, please add the following to your user settings (note that updating this setting requires a window reload afterwards):\n\n"python.useEnvironmentsExtension": true',
         );
-        await deactivate(context);
+        await deactivate();
         return;
     }
     const start = new StopWatch();
 
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
-    context.subscriptions.push(outputChannel, registerLogger(outputChannel));
+    activationLoggingSubscriptions = [outputChannel, registerLogger(outputChannel)];
+    context.subscriptions.push(...activationLoggingSubscriptions);
 
     // Track whether this is a Python workspace (drives the activity bar icon). Registered after the
     // `useEnvironmentsExtension` guard and the logger so failures are reported.
@@ -836,23 +842,46 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     return api;
 }
 
+/**
+ * Attempt every cleanup and report failures, rejecting with the first only after all settle.
+ * @param disposables The captured subscriptions to dispose.
+ */
 export async function disposeAll(disposables: IDisposable[]): Promise<void> {
-    await Promise.all(
-        disposables.map(async (d) => {
-            try {
-                return Promise.resolve(d.dispose());
-            } catch (_err) {
-                // do nothing
-            }
-            return Promise.resolve();
-        }),
-    );
+    const results = await Promise.allSettled(disposables.map(async (disposable) => disposable.dispose()));
+    const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    for (const failure of failures) {
+        traceError('Failed to dispose Python Environments subscription:', failure.reason);
+    }
+    if (failures.length > 0) {
+        throw failures[0].reason;
+    }
 }
 
-export async function deactivate(context: ExtensionContext) {
-    await disposeAll(context.subscriptions);
-    if (context.subscriptions?.length) {
-        context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
+/**
+ * Dispose subscriptions captured during activation, including after a partial startup.
+ * Supports VS Code's zero-argument shutdown callback and repeated calls.
+ */
+export function deactivate(): Promise<void> {
+    if (deactivationPromise) {
+        return deactivationPromise;
     }
-    traceInfo('Python Environments extension deactivated.');
+    const subscriptions = activationSubscriptions?.splice(0) ?? [];
+    const loggingSubscriptions = activationLoggingSubscriptions ?? [];
+    activationSubscriptions = undefined;
+    activationLoggingSubscriptions = undefined;
+    const resources = subscriptions.filter((disposable) => !loggingSubscriptions.includes(disposable));
+    deactivationPromise = Promise.resolve().then(async () => {
+        const results = await Promise.allSettled([disposeAll(resources)]);
+        if (results[0].status === 'fulfilled') {
+            traceInfo('Python Environments resource cleanup completed.');
+        }
+        results.push(...(await Promise.allSettled([disposeAll(loggingSubscriptions)])));
+        const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+        if (failure) {
+            throw failure.reason;
+        }
+    }).finally(() => {
+        deactivationPromise = undefined;
+    });
+    return deactivationPromise;
 }
