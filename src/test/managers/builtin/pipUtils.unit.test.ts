@@ -80,17 +80,16 @@ suite('Pip Utils - getProjectInstallable', () => {
             }
         });
 
-        test('propagates progress cancellation to each search and promptly rejects during file search', async () => {
+        test('propagates the progress token and promptly rejects cancellation during file search', async () => {
             const source = new CancellationTokenSource();
             let startedCount = 0;
-            const searchTokens: CancellationToken[] = [];
             let markSearchesStarted!: () => void;
             const searchesStarted = new Promise<void>((resolve) => {
                 markSearchesStarted = resolve;
             });
             findFilesStub.callsFake(
                 (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
-                    searchTokens.push(token);
+                    assert.strictEqual(token, source.token);
                     startedCount += 1;
                     if (startedCount === 4) {
                         markSearchesStarted();
@@ -128,7 +127,6 @@ suite('Pip Utils - getProjectInstallable', () => {
                     }),
                 ]);
                 assert.strictEqual(findFilesStub.callCount, 4);
-                assert.ok(searchTokens.every((token) => token.isCancellationRequested));
             } finally {
                 clearTimeout(timeoutHandle);
                 source.dispose();
@@ -143,7 +141,7 @@ suite('Pip Utils - getProjectInstallable', () => {
             mockApi.getPythonProject = getPythonProject;
             findFilesStub.callsFake(
                 (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
-                    assert.ok(token, 'each search should get a token');
+                    assert.strictEqual(token, source.token);
                     return new Promise<Uri[]>((resolve) => resolutions.push(resolve));
                 },
             );
@@ -207,9 +205,6 @@ suite('Pip Utils - getProjectInstallable', () => {
 
             let cancelled = false;
             let subscriptionCount = 0;
-            // Subscriptions 1-4 tie the four file searches to this token, 5 waits for the searches,
-            // and 6 waits for the TOML read.
-            const tomlReadSubscription = 6;
             let markPostReadCheck!: () => void;
             const postReadCheck = new Promise<void>((resolve) => {
                 markPostReadCheck = resolve;
@@ -223,7 +218,7 @@ suite('Pip Utils - getProjectInstallable', () => {
                 },
                 onCancellationRequested: (listener: () => unknown) => {
                     subscriptionCount += 1;
-                    if (subscriptionCount === tomlReadSubscription) {
+                    if (subscriptionCount === 2) {
                         queueMicrotask(() => {
                             cancelled = true;
                             listener();
@@ -242,7 +237,7 @@ suite('Pip Utils - getProjectInstallable', () => {
                     CancellationError,
                 );
                 await postReadCheck;
-                assert.strictEqual(subscriptionCount, tomlReadSubscription);
+                assert.strictEqual(subscriptionCount, 2);
                 assert.ok(withProgressStub.notCalled);
             } finally {
                 await fse.remove(temp);
@@ -268,17 +263,16 @@ suite('Pip Utils - getProjectInstallable', () => {
             }
         });
 
-        test('headless search propagates in-flight cancellation of the caller token to each search', async () => {
+        test('headless search propagates in-flight cancellation and passes the caller token unchanged', async () => {
             const source = new CancellationTokenSource();
             let startedCount = 0;
-            const searchTokens: CancellationToken[] = [];
             let markSearchesStarted!: () => void;
             const searchesStarted = new Promise<void>((resolve) => {
                 markSearchesStarted = resolve;
             });
             findFilesStub.callsFake(
                 (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
-                    searchTokens.push(token);
+                    assert.strictEqual(token, source.token);
                     startedCount += 1;
                     if (startedCount === 4) {
                         markSearchesStarted();
@@ -299,7 +293,6 @@ suite('Pip Utils - getProjectInstallable', () => {
                 source.cancel();
                 await assert.rejects(pending, CancellationError);
                 assert.strictEqual(findFilesStub.callCount, 4);
-                assert.ok(searchTokens.every((token) => token.isCancellationRequested));
                 assert.ok(withProgressStub.notCalled);
             } finally {
                 source.dispose();
@@ -1539,28 +1532,38 @@ suite('Pip Utils - dependency file search bounds', () => {
         sinon.restore();
     });
 
-    test('caps each search and stops it at a time limit', async () => {
+    test('caps each search', async () => {
+        await getProjectInstallable(mockApi as PythonEnvironmentApi, [project], { runHeadless: true });
+
+        assert.strictEqual(findFilesStub.callCount, 4);
+        for (const call of findFilesStub.getCalls()) {
+            const [include, , maxResults] = call.args;
+            assert.ok(Number.isInteger(maxResults) && maxResults > 0, `${include} should have a result cap`);
+        }
+    });
+
+    test('keeps the dependency files of a search that runs for minutes', async () => {
         const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-        const finish: Array<() => void> = [];
-        findFilesStub.callsFake(() => new Promise<Uri[]>((resolve) => finish.push(() => resolve([]))));
+        const requirement = Uri.file(path.join(project.uri.fsPath, 'requirements.txt'));
+        // Like VS Code, a cancelled search returns an empty list, not the matches found so far.
+        findFilesStub.callsFake(
+            (include: string, _exclude: string, _maxResults: number, token?: CancellationToken) =>
+                new Promise<Uri[]>((resolve) => {
+                    token?.onCancellationRequested(() => resolve([]));
+                    setTimeout(() => resolve(include === '**/*requirements*.txt' ? [requirement] : []), 10 * 60_000);
+                }),
+        );
         try {
             const pending = getProjectInstallable(mockApi as PythonEnvironmentApi, [project], { runHeadless: true });
-            await new Promise((resolve) => setImmediate(resolve));
 
-            assert.strictEqual(findFilesStub.callCount, 4);
-            for (const call of findFilesStub.getCalls()) {
-                const [include, , maxResults, token] = call.args;
-                assert.ok(Number.isInteger(maxResults) && maxResults > 0, `${include} should have a result cap`);
-                assert.ok(token && !token.isCancellationRequested, `${include} should get a live token`);
-            }
             await clock.tickAsync(10 * 60_000);
-            for (const call of findFilesStub.getCalls()) {
-                assert.ok(call.args[3].isCancellationRequested, `${call.args[0]} should stop at its time limit`);
-            }
-            finish.forEach((done) => done());
-            assert.deepStrictEqual((await pending).installables, []);
+
+            const result = await pending;
+            assert.deepStrictEqual(
+                result.installables.map((item) => item.uri?.fsPath),
+                [requirement.fsPath],
+            );
         } finally {
-            finish.forEach((done) => done());
             clock.restore();
         }
     });

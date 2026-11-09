@@ -1,14 +1,7 @@
-import { CancellationToken, CancellationTokenSource, GlobPattern, RelativePattern, Uri, WorkspaceFolder } from 'vscode';
+import { CancellationToken, GlobPattern, RelativePattern, Uri, WorkspaceFolder } from 'vscode';
 import { traceLog, traceWarn } from './logging';
 import { getUserHomeDir, isSameOrParentPath } from './utils/pathUtils';
 import { findFiles, getWorkspaceFolders } from './workspace.apis';
-
-/**
- * Time limit for one workspace file search. `findFiles` runs ripgrep without ignore files and
- * follows symlinks, so a search of a very large folder can take minutes; an ordinary repository
- * takes seconds.
- */
-export const WORKSPACE_SEARCH_TIMEOUT_MS = 30_000;
 
 export interface WorkspaceSearchOptions {
     /** Names the feature in log messages. */
@@ -17,7 +10,7 @@ export interface WorkspaceSearchOptions {
     readonly exclude: string;
     /** The most matches to return; the search stops once it has this many. */
     readonly maxResults: number;
-    /** Cancels the search before its time limit. */
+    /** Passed to `findFiles` unchanged. */
     readonly token?: CancellationToken;
 }
 
@@ -31,15 +24,19 @@ function containsHomeFolder(folder: WorkspaceFolder): boolean {
 }
 
 /**
- * Runs `findFiles` with a result cap and a time limit. A workspace folder that is the user's home
- * folder, or contains it, is not searched: a search there walks the whole profile (AppData, caches,
- * virtual environments) and can run for minutes. The other folders are still searched.
+ * Runs `findFiles` with a result cap. A workspace folder that is the user's home folder, or
+ * contains it, is not searched: a search there walks the whole profile (AppData, caches, virtual
+ * environments) and can run for minutes. The other folders are still searched.
+ *
+ * There is no time limit: VS Code resolves a cancelled `findFiles` to an empty list, not to the
+ * matches found so far, so a limit would drop every match. A caller that can wait long passes a
+ * token the user can cancel.
  */
 export async function findFilesInWorkspace(options: WorkspaceSearchOptions): Promise<Uri[]> {
     const folders = getWorkspaceFolders() ?? [];
     const homeFolders = folders.filter(containsHomeFolder);
     if (homeFolders.length === 0) {
-        return searchWithTimeLimit(options, [options.include]);
+        return search(options, [options.include]);
     }
     for (const folder of homeFolders) {
         traceLog(
@@ -50,45 +47,20 @@ export async function findFilesInWorkspace(options: WorkspaceSearchOptions): Pro
     const includes = folders
         .filter((folder) => !homeFolders.includes(folder))
         .map((folder) => new RelativePattern(folder, options.include));
-    return includes.length > 0 ? searchWithTimeLimit(options, includes) : [];
+    return includes.length > 0 ? search(options, includes) : [];
 }
 
-async function searchWithTimeLimit(options: WorkspaceSearchOptions, includes: GlobPattern[]): Promise<Uri[]> {
-    const source = new CancellationTokenSource();
-    let timedOut = false;
-    const timer = setTimeout(() => {
-        timedOut = true;
-        source.cancel();
-    }, WORKSPACE_SEARCH_TIMEOUT_MS);
-    const stop = () => {
-        clearTimeout(timer);
-        source.cancel();
-    };
-    const subscription = options.token?.onCancellationRequested(stop);
-    if (options.token?.isCancellationRequested) {
-        stop();
-    }
-    try {
-        const resultSets = await Promise.all(
-            includes.map((include) => findFiles(include, options.exclude, options.maxResults, source.token)),
+async function search(options: WorkspaceSearchOptions, includes: GlobPattern[]): Promise<Uri[]> {
+    const resultSets = await Promise.all(
+        includes.map((include) => findFiles(include, options.exclude, options.maxResults, options.token)),
+    );
+    // `?? []` keeps the callers' existing handling of a search that resolves to undefined.
+    const results = resultSets.flatMap((resultSet) => resultSet ?? []).slice(0, options.maxResults);
+    if (results.length >= options.maxResults) {
+        traceWarn(
+            `${options.label}: the search for ${options.include} stopped at ${options.maxResults} ` +
+                'results; matching files past that are left out.',
         );
-        // `?? []` keeps the callers' existing handling of a search that resolves to undefined.
-        const results = resultSets.flatMap((resultSet) => resultSet ?? []).slice(0, options.maxResults);
-        if (timedOut) {
-            traceWarn(
-                `${options.label}: the search for ${options.include} stopped at its ` +
-                    `${WORKSPACE_SEARCH_TIMEOUT_MS} ms time limit; matching files may be missing.`,
-            );
-        } else if (results.length >= options.maxResults) {
-            traceWarn(
-                `${options.label}: the search for ${options.include} stopped at ${options.maxResults} ` +
-                    'results; matching files past that are left out.',
-            );
-        }
-        return results;
-    } finally {
-        clearTimeout(timer);
-        subscription?.dispose();
-        source.dispose();
     }
+    return results;
 }

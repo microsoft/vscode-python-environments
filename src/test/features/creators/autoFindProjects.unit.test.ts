@@ -2,7 +2,7 @@ import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typmoq from 'typemoq';
-import { Uri, WorkspaceFolder } from 'vscode';
+import { CancellationToken, Uri, WorkspaceFolder } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../../api';
 import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../../common/constants';
 import { timeout } from '../../../common/utils/asyncUtils';
@@ -486,31 +486,42 @@ suite('Auto Find Project tests', () => {
             sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
         });
 
-        test('caps the marker search and stops it at a time limit', async () => {
+        test('caps the marker search', async () => {
+            findFilesStub.resolves([]);
+
+            await new AutoFindProjects(projectManager.object, envManagers.object).create();
+
+            assert.strictEqual(findFilesStub.callCount, 1);
+            const [include, exclude, maxResults] = findFilesStub.firstCall.args;
+            assert.strictEqual(include, '**/{pyproject.toml,setup.py}');
+            assert.strictEqual(exclude, '**/.venv/**');
+            assert.ok(Number.isInteger(maxResults) && maxResults > 0, 'the search should have a result cap');
+        });
+
+        test('offers the projects of a marker search that runs for minutes', async () => {
             const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-            let finish: (() => void) | undefined;
+            const marker = Uri.file(path.join(path.parse(process.cwd()).root, 'work', 'app', 'pyproject.toml'));
+            // Like VS Code, a cancelled search returns an empty list, not the matches found so far.
             findFilesStub.callsFake(
-                () =>
+                (_include: string, _exclude: string, _maxResults: number, token?: CancellationToken) =>
                     new Promise<Uri[]>((resolve) => {
-                        finish = () => resolve([]);
+                        token?.onCancellationRequested(() => resolve([]));
+                        setTimeout(() => resolve([marker]), 10 * 60_000);
                     }),
             );
+            projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
             try {
                 const pending = new AutoFindProjects(projectManager.object, envManagers.object).create();
-                await new Promise((resolve) => setImmediate(resolve));
 
-                assert.strictEqual(findFilesStub.callCount, 1);
-                const [include, exclude, maxResults, token] = findFilesStub.firstCall.args;
-                assert.strictEqual(include, '**/{pyproject.toml,setup.py}');
-                assert.strictEqual(exclude, '**/.venv/**');
-                assert.ok(Number.isInteger(maxResults) && maxResults > 0, 'the search should have a result cap');
-                assert.ok(token && !token.isCancellationRequested, 'the search should get a live token');
                 await clock.tickAsync(10 * 60_000);
-                assert.ok(token.isCancellationRequested, 'the search should stop at its time limit');
-                finish?.();
-                assert.strictEqual(await pending, undefined);
+
+                const result = await pending;
+                assert.ok(Array.isArray(result), 'the found project should be offered');
+                assert.deepStrictEqual(
+                    result.map((project) => project.uri.fsPath),
+                    [path.dirname(marker.fsPath)],
+                );
             } finally {
-                finish?.();
                 clock.restore();
             }
         });

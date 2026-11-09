@@ -6,7 +6,7 @@ import * as logging from '../../common/logging';
 import * as pathUtils from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import * as wapi from '../../common/workspace.apis';
-import { findFilesInWorkspace, WORKSPACE_SEARCH_TIMEOUT_MS } from '../../common/workspaceSearch';
+import { findFilesInWorkspace } from '../../common/workspaceSearch';
 
 suite('findFilesInWorkspace', () => {
     const root = path.parse(process.cwd()).root;
@@ -22,12 +22,16 @@ suite('findFilesInWorkspace', () => {
         return { uri: Uri.file(fsPath), name: path.basename(fsPath), index };
     }
 
-    /** Makes findFiles return a search that only ends when its token is cancelled. */
-    function searchUntilCancelled(): void {
-        findFilesStub.callsFake(
-            (_include, _exclude, _maxResults, token: CancellationToken) =>
-                new Promise<Uri[]>((resolve) => token.onCancellationRequested(() => resolve([]))),
-        );
+    /**
+     * Makes a findFiles fake that returns `uris` after `delayMs`. Like VS Code, it returns an empty
+     * list as soon as its token is cancelled, not the matches found so far.
+     */
+    function resolvesUnlessCancelled(delayMs: number, uris: Uri[]) {
+        return (_include: unknown, _exclude: unknown, _maxResults: unknown, token?: CancellationToken) =>
+            new Promise<Uri[]>((resolve) => {
+                token?.onCancellationRequested(() => resolve([]));
+                setTimeout(() => resolve(uris), delayMs);
+            });
     }
 
     setup(() => {
@@ -42,20 +46,25 @@ suite('findFilesInWorkspace', () => {
         sinon.restore();
     });
 
-    test('runs one search with the given pattern, cap and a live token when no folder is the home folder', async () => {
+    test('runs one search with the given pattern, cap and token when no folder is the home folder', async () => {
         const marker = Uri.file(path.join(work, 'pyproject.toml'));
         findFilesStub.resolves([marker]);
+        const source = new CancellationTokenSource();
 
-        const result = await findFilesInWorkspace(options);
+        try {
+            const result = await findFilesInWorkspace({ ...options, token: source.token });
 
-        assert.deepStrictEqual(result, [marker]);
-        assert.strictEqual(findFilesStub.callCount, 1);
-        const [include, exclude, maxResults, token] = findFilesStub.firstCall.args;
-        assert.strictEqual(include, options.include);
-        assert.strictEqual(exclude, options.exclude);
-        assert.strictEqual(maxResults, options.maxResults);
-        assert.ok(token, 'the search should get a token');
-        assert.ok(traceLogStub.notCalled);
+            assert.deepStrictEqual(result, [marker]);
+            assert.strictEqual(findFilesStub.callCount, 1);
+            const [include, exclude, maxResults, token] = findFilesStub.firstCall.args;
+            assert.strictEqual(include, options.include);
+            assert.strictEqual(exclude, options.exclude);
+            assert.strictEqual(maxResults, options.maxResults);
+            assert.strictEqual(token, source.token);
+            assert.ok(traceLogStub.notCalled);
+        } finally {
+            source.dispose();
+        }
     });
 
     [
@@ -112,43 +121,35 @@ suite('findFilesInWorkspace', () => {
         assert.ok(traceWarnStub.calledOnce, 'reaching the cap should be logged');
     });
 
-    test('cancels the search at the time limit and logs it', async () => {
+    test('returns every match of a search that runs for minutes', async () => {
         const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
         try {
-            searchUntilCancelled();
+            const marker = Uri.file(path.join(work, 'pyproject.toml'));
+            findFilesStub.callsFake(resolvesUnlessCancelled(10 * 60_000, [marker]));
             const pending = findFilesInWorkspace(options);
-            const token: CancellationToken = findFilesStub.firstCall.args[3];
 
-            await clock.tickAsync(WORKSPACE_SEARCH_TIMEOUT_MS - 1);
-            assert.strictEqual(token.isCancellationRequested, false);
-            await clock.tickAsync(1);
+            await clock.tickAsync(10 * 60_000);
 
-            assert.strictEqual(token.isCancellationRequested, true);
-            assert.deepStrictEqual(await pending, []);
-            assert.ok(traceWarnStub.calledOnce, 'the time limit should be logged');
+            assert.deepStrictEqual(await pending, [marker]);
+            assert.ok(traceWarnStub.notCalled);
         } finally {
             clock.restore();
         }
     });
 
-    test('cancels the search with the caller token and clears the time limit', async () => {
-        const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    test('passes the caller token to each search', async () => {
         const source = new CancellationTokenSource();
         try {
-            searchUntilCancelled();
-            const pending = findFilesInWorkspace({ ...options, token: source.token });
-            const token: CancellationToken = findFilesStub.firstCall.args[3];
-            assert.notStrictEqual(token, source.token, 'the time limit needs its own token');
+            getWorkspaceFoldersStub.returns([folder(home, 0), folder(work, 1), folder(path.join(root, 'other'), 2)]);
 
-            source.cancel();
+            await findFilesInWorkspace({ ...options, token: source.token });
 
-            assert.strictEqual(token.isCancellationRequested, true);
-            assert.deepStrictEqual(await pending, []);
-            assert.strictEqual(clock.countTimers(), 0);
-            assert.ok(traceWarnStub.notCalled, 'a caller cancel is not a time limit');
+            assert.strictEqual(findFilesStub.callCount, 2);
+            for (const call of findFilesStub.getCalls()) {
+                assert.strictEqual(call.args[3], source.token);
+            }
         } finally {
             source.dispose();
-            clock.restore();
         }
     });
 

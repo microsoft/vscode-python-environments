@@ -424,8 +424,9 @@ export async function getWorkspacePackagesToInstall(
 
 /**
  * The most files one dependency search returns. Quick Create installs from every match under the
- * project, so the cap sits far above what large monorepos hold; the time limit and the home folder
- * check in `findFilesInWorkspace` bound how long the search runs.
+ * project, so the cap sits far above what large monorepos hold. The home folder check in
+ * `findFilesInWorkspace` bounds the walk, and the progress notification or the caller's token can
+ * stop it.
  */
 const MAX_DEPENDENCY_FILES = 10_000;
 
