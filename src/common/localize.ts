@@ -290,6 +290,11 @@ export namespace ProjectCreatorString {
     );
 
     export const noProjectsFound = l10n.t('No projects found');
+    export const noProjectsFoundInHomeFolder = (folders: string) =>
+        l10n.t(
+            'No projects found. Auto Find does not search {0}, because it is your home folder or contains it. Open your project folder instead.',
+            folders,
+        );
 }
 
 export namespace EnvViewStrings {

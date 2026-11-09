@@ -50,6 +50,15 @@ export async function findFilesInWorkspace(options: WorkspaceSearchOptions): Pro
 }
 
 /**
+ * Returns the workspace folders that `findFilesInWorkspace` never searches whole, because each is
+ * the user's home folder or contains it. A caller that finds nothing names them in its message, so
+ * the user learns the folder was skipped rather than searched.
+ */
+export function getHomeWorkspaceFolders(): WorkspaceFolder[] {
+    return (getWorkspaceFolders() ?? []).filter((folder) => containsHomeFolder(folder.uri));
+}
+
+/**
  * Returns the folders to search in place of one workspace folder: the folder itself, or, when it
  * is the home folder or contains it, the needed folders inside it that do not contain home.
  */

@@ -8,7 +8,7 @@ import * as logging from '../../common/logging';
 import * as pathUtils from '../../common/utils/pathUtils';
 import { isWindows } from '../../common/utils/platformUtils';
 import * as wapi from '../../common/workspace.apis';
-import { findFilesInWorkspace } from '../../common/workspaceSearch';
+import { findFilesInWorkspace, getHomeWorkspaceFolders } from '../../common/workspaceSearch';
 
 suite('findFilesInWorkspace', () => {
     const root = path.parse(process.cwd()).root;
@@ -90,6 +90,23 @@ suite('findFilesInWorkspace', () => {
             assert.ok(message.includes(Uri.file(fsPath).fsPath), message);
             assert.ok(message.includes('home folder'), message);
         });
+    });
+
+    test('names the workspace folders it does not search whole', () => {
+        getWorkspaceFoldersStub.returns([folder(home, 0), folder(work, 1), folder(path.dirname(home), 2)]);
+
+        const skipped = getHomeWorkspaceFolders();
+
+        assert.deepStrictEqual(
+            skipped.map((workspaceFolder) => workspaceFolder.uri.fsPath),
+            [Uri.file(home).fsPath, Uri.file(path.dirname(home)).fsPath],
+        );
+    });
+
+    test('names no folder when no workspace folder is open', () => {
+        getWorkspaceFoldersStub.returns(undefined);
+
+        assert.deepStrictEqual(getHomeWorkspaceFolders(), []);
     });
 
     test('searches a folder inside the home folder', async () => {

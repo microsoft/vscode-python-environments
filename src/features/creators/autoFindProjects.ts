@@ -5,7 +5,7 @@ import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo, traceWarn } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { getWorkspaceFolders } from '../../common/workspace.apis';
-import { findFilesInWorkspace } from '../../common/workspaceSearch';
+import { findFilesInWorkspace, getHomeWorkspaceFolders } from '../../common/workspaceSearch';
 import type { EnvironmentManagers } from '../envManagers';
 import {
     PythonProjectManager,
@@ -40,6 +40,18 @@ function getUniqueUri(uris: Uri[]): {
             uri: Uri.file(dir),
         }))
         .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Returns the message for a search that found no project. When the search skipped a workspace
+ * folder because it is the home folder, the message names the folder and says to open the project
+ * folder, because no project there was looked for.
+ */
+function noProjectsFoundMessage(): string {
+    const skipped = getHomeWorkspaceFolders().map((folder) => folder.uri.fsPath);
+    return skipped.length > 0
+        ? ProjectCreatorString.noProjectsFoundInHomeFolder(skipped.join(', '))
+        : ProjectCreatorString.noProjectsFound;
 }
 
 async function pickProjects(uris: Uri[]): Promise<Uri[] | undefined> {
@@ -120,8 +132,9 @@ export class AutoFindProjects implements PythonProjectCreator {
                 ),
         );
         if (!files || files.length === 0) {
+            const message = noProjectsFoundMessage();
             setImmediate(() => {
-                showErrorMessage('No projects found');
+                showErrorMessage(message);
             });
             return;
         }

@@ -526,7 +526,7 @@ suite('Auto Find Project tests', () => {
             }
         });
 
-        test('does not search a workspace folder that is the home folder', async () => {
+        test('does not search a workspace folder that is the home folder and tells the user why', async () => {
             getWorkspaceFoldersStub.returns([{ uri: Uri.file(home), name: 'tester', index: 0 }]);
             const shown = createDeferred();
             showErrorMessageStub.callsFake(() => shown.resolve());
@@ -536,7 +536,24 @@ suite('Auto Find Project tests', () => {
             assert.strictEqual(result, undefined);
             assert.ok(findFilesStub.notCalled, 'the home folder should not be searched');
             await Promise.race([shown.promise, timeout(100)]);
-            assert.ok(showErrorMessageStub.calledOnce, 'No projects found should be shown');
+            sinon.assert.calledOnceWithExactly(
+                showErrorMessageStub,
+                `No projects found. Auto Find does not search ${Uri.file(home).fsPath}, because it is your ` +
+                    'home folder or contains it. Open your project folder instead.',
+            );
+        });
+
+        test('shows the plain message when it searched every workspace folder', async () => {
+            const app = path.join(path.parse(process.cwd()).root, 'work', 'app');
+            getWorkspaceFoldersStub.returns([{ uri: Uri.file(app), name: 'app', index: 0 }]);
+            findFilesStub.resolves([]);
+            const shown = createDeferred();
+            showErrorMessageStub.callsFake(() => shown.resolve());
+
+            await new AutoFindProjects(projectManager.object, envManagers.object).create();
+
+            await Promise.race([shown.promise, timeout(100)]);
+            sinon.assert.calledOnceWithExactly(showErrorMessageStub, 'No projects found');
         });
     });
 });
