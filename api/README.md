@@ -49,10 +49,10 @@ accepts `1.40.0`, `1.40.1`, and `1.41.0` (including odd-minor preview-channel bu
 but rejects `1.40.0-rc.1`. A newer prerelease such as `1.41.0-rc.1` meets that floor.
 Build metadata does not affect ordering.
 
-The minimum is fixed for an already-published npm release. New npm releases use the
-latest stable extension as their baseline, which can raise the minimum even when
-their API changes would otherwise work on an older extension. Pin an older npm
-package if your extension must retain support for an older runtime.
+The minimum is fixed for an already-published npm release. New npm releases select
+a supported stable extension as their baseline; it need not be the newest stable
+release. A newer extension release alone does not raise this minimum. If an npm
+update raises the floor beyond your supported runtime, pin an older npm package.
 
 Acquire the API through this helper: type-only imports and direct access to the
 extension's exports bypass the check. The floor does not replace feature detection

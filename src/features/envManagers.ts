@@ -195,6 +195,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
     private readonly packageManagerEventSubscriptions = new Map<InternalPackageManager, Disposable>();
     private readonly projectPackageManagers: ProjectScopedPackageManagerCache;
     private readonly subscriptions: Disposable[] = [];
+    private inlineScriptRouting: InlineScriptRoutingRegistry | undefined;
 
     /**
      * The last environment announced as "active" for each scope.
@@ -260,7 +261,7 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
 
     constructor(
         private readonly pm: PythonProjectManager,
-        private readonly inlineScriptRouting?: InlineScriptRoutingRegistry,
+        inlineScriptRouting?: InlineScriptRoutingRegistry,
     ) {
         this.projectPackageManagers = new ProjectScopedPackageManagerCache(
             (manager) => this.subscribeToPackageManagerEvents(manager),
@@ -275,22 +276,44 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
                 this.subscriptions.push(subscription);
             }
         }
-        if (this.inlineScriptRouting) {
-            this.subscriptions.push(
-                this.inlineScriptRouting.onDidChangeRouteability((e) => {
-                    void this.handleInlineScriptRouteabilityChange(e).catch((error) =>
-                        traceError('Failed to refresh inline-script routing:', error),
-                    );
-                }),
-                this.inlineScriptRouting.onDidChangeAvailability((uri) => {
-                    if (this.getEnvironmentManager(uri)?.id === INLINE_SCRIPT_MANAGER_ID) {
-                        void this.refreshEnvironment(uri, true).catch((error) =>
-                            traceError('Failed to refresh inline-script availability:', error),
-                        );
-                    }
-                }),
-            );
+        if (inlineScriptRouting) {
+            this.attachInlineScriptRouting(inlineScriptRouting);
         }
+    }
+
+    /**
+     * Attaches PEP 723 routing after the rollout setting becomes available.
+     * A manager collection accepts at most one routing registry per activation.
+     */
+    public attachInlineScriptRouting(routing: InlineScriptRoutingRegistry): Disposable {
+        if (this.inlineScriptRouting) {
+            throw new Error('Inline-script routing is already attached.');
+        }
+
+        this.inlineScriptRouting = routing;
+        const listeners = Disposable.from(
+            routing.onDidChangeRouteability((e) => {
+                void this.handleInlineScriptRouteabilityChange(e).catch((error) =>
+                    traceError('Failed to refresh inline-script routing:', error),
+                );
+            }),
+            routing.onDidChangeAvailability((uri) => {
+                if (this.getEnvironmentManager(uri)?.id === INLINE_SCRIPT_MANAGER_ID) {
+                    void this.refreshEnvironment(uri, true).catch((error) =>
+                        traceError('Failed to refresh inline-script availability:', error),
+                    );
+                }
+            }),
+        );
+        const registration = new Disposable(() => {
+            listeners.dispose();
+            if (this.inlineScriptRouting === routing) {
+                this.inlineScriptRouting = undefined;
+                this._inlineRoutingOverrides.clear();
+            }
+        });
+        this.subscriptions.push(registration);
+        return registration;
     }
 
     public registerEnvironmentManager(manager: EnvironmentManager, options?: { extensionId?: string }): Disposable {

@@ -8,6 +8,7 @@ import * as path from 'path';
 // (e.g. /Users/runner/work/<repo>/<repo>/.vscode-test/user-data) overflows.
 const userDataDir = path.join(os.tmpdir(), 'vsct-ud');
 const inlineScriptsEnabledUserDataDir = path.join(os.tmpdir(), 'vsct-is-ud');
+const inlineScriptsExperimentUserDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vsct-is-exp-'));
 const diagnosticsDir = process.env.VSCODE_TEST_DIAGNOSTICS_DIR;
 const diagnosticArgs = diagnosticsDir
     ? [`--logsPath=${path.join(diagnosticsDir, 'vscode')}`, '--verbose']
@@ -19,20 +20,25 @@ const diagnosticMocha = diagnosticsDir
 // Seed explicit user values so tests are deterministic even when VS Code applies
 // experimentation defaults. The environments extension must activate, while the
 // inline-script preview stays off unless a dedicated test host opts in.
-function writeUserSettings(targetUserDataDir, inlineScriptsEnabled) {
+function writeUserSettings(targetUserDataDir, settings) {
     const userDir = path.join(targetUserDataDir, 'User');
     fs.mkdirSync(userDir, { recursive: true });
     fs.writeFileSync(
         path.join(userDir, 'settings.json'),
         JSON.stringify({
             'python.useEnvironmentsExtension': true,
-            'python-envs.inlineScripts.enabled': inlineScriptsEnabled,
+            ...settings,
         }) + '\n',
     );
 }
 
-writeUserSettings(userDataDir, false);
-writeUserSettings(inlineScriptsEnabledUserDataDir, true);
+writeUserSettings(userDataDir, { 'python-envs.inlineScripts.enabled': false });
+writeUserSettings(inlineScriptsEnabledUserDataDir, { 'python-envs.inlineScripts.enabled': true });
+writeUserSettings(inlineScriptsExperimentUserDataDir, {
+    'experiments.override./pythonenvs/config.python-envs.inlineScripts.enabled': true,
+    // Keep the override late enough to reproduce activation before VS Code applies the experimental default.
+    'experiments.overrideDelay': 30_000,
+});
 
 export default defineConfig([
     {
@@ -72,6 +78,24 @@ export default defineConfig([
         launchArgs: [
             ...diagnosticArgs,
             `--user-data-dir=${inlineScriptsEnabledUserDataDir}`,
+            '--disable-workspace-trust',
+        ],
+    },
+    {
+        label: 'smokeTestsInlineScriptsExperimentEnabled',
+        files: 'out/test/smoke/inlineScriptsExperimentEnabled.smoke.test.js',
+        mocha: {
+            ...diagnosticMocha,
+            ui: 'tdd',
+            timeout: 120000,
+        },
+        env: {
+            VSC_PYTHON_SMOKE_TEST: '1',
+            VSC_PYTHON_INLINE_SCRIPTS_EXPERIMENT_SMOKE_TEST: '1',
+        },
+        launchArgs: [
+            ...diagnosticArgs,
+            `--user-data-dir=${inlineScriptsExperimentUserDataDir}`,
             '--disable-workspace-trust',
         ],
     },

@@ -7,6 +7,7 @@ import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import { showErrorMessage } from '../../common/window.apis';
 import { installExtension } from '../../common/workbenchCommands';
+import type { InternalEnvironmentManager, InternalPackageManager } from '../../managers/common/registeredManagers';
 import type { EnvironmentManagers } from '../envManagers';
 import type { PythonProjectManager } from '../projectManager';
 import { getDefaultEnvManagerSetting, getDefaultPkgManagerSetting } from '../settings/settingHelpers';
@@ -146,8 +147,11 @@ async function promptInstallExtensionIfMissing(managerId: string): Promise<void>
 class ManagerReadyImpl implements ManagerReady {
     private readonly envManagers: Map<string, Deferred<void>> = new Map();
     private readonly pkgManagers: Map<string, Deferred<void>> = new Map();
+    private readonly envManagerInstances = new Map<string, InternalEnvironmentManager>();
+    private readonly pkgManagerInstances = new Map<string, InternalPackageManager>();
     private readonly checked: Set<string> = new Set();
     private readonly disposables: Disposable[] = [];
+    private disposed = false;
 
     constructor(
         em: EnvironmentManagers,
@@ -155,6 +159,16 @@ class ManagerReadyImpl implements ManagerReady {
     ) {
         this.disposables.push(
             em.onDidChangeEnvironmentManager((e) => {
+                if (e.kind === 'unregistered') {
+                    if (this.envManagerInstances.get(e.manager.id) !== e.manager) {
+                        return;
+                    }
+                    this.envManagerInstances.delete(e.manager.id);
+                    this.envManagers.delete(e.manager.id);
+                    this.checked.delete(e.manager.id);
+                    return;
+                }
+                this.envManagerInstances.set(e.manager.id, e.manager);
                 if (this.envManagers.has(e.manager.id)) {
                     this.envManagers.get(e.manager.id)?.resolve();
                 } else {
@@ -164,6 +178,16 @@ class ManagerReadyImpl implements ManagerReady {
                 }
             }),
             em.onDidChangePackageManager((e) => {
+                if (e.kind === 'unregistered') {
+                    if (this.pkgManagerInstances.get(e.manager.id) !== e.manager) {
+                        return;
+                    }
+                    this.pkgManagerInstances.delete(e.manager.id);
+                    this.pkgManagers.delete(e.manager.id);
+                    this.checked.delete(e.manager.id);
+                    return;
+                }
+                this.pkgManagerInstances.set(e.manager.id, e.manager);
                 if (this.pkgManagers.has(e.manager.id)) {
                     this.pkgManagers.get(e.manager.id)?.resolve();
                 } else {
@@ -188,6 +212,9 @@ class ManagerReadyImpl implements ManagerReady {
         const extId = getExtensionId(managerId);
         if (extId) {
             setImmediate(async () => {
+                if (this.disposed) {
+                    return;
+                }
                 const ext = getExtension(extId);
                 if (ext && !ext.isActive) {
                     traceInfo(`Extension for manager ${managerId} is not active: Activating...`);
@@ -203,12 +230,20 @@ class ManagerReadyImpl implements ManagerReady {
     }
 
     public dispose(): void {
+        this.disposed = true;
         this.disposables.forEach((d) => d.dispose());
+        this.envManagers.forEach((deferred) => deferred.resolve());
+        this.pkgManagers.forEach((deferred) => deferred.resolve());
         this.envManagers.clear();
         this.pkgManagers.clear();
+        this.envManagerInstances.clear();
+        this.pkgManagerInstances.clear();
     }
 
     private _waitForEnvManager(managerId: string): Promise<void> {
+        if (this.disposed) {
+            return Promise.resolve();
+        }
         if (this.envManagers.has(managerId)) {
             return this.envManagers.get(managerId)!.promise;
         }
@@ -258,6 +293,9 @@ class ManagerReadyImpl implements ManagerReady {
     }
 
     private _waitForPkgManager(managerId: string): Promise<void> {
+        if (this.disposed) {
+            return Promise.resolve();
+        }
         if (this.pkgManagers.has(managerId)) {
             return this.pkgManagers.get(managerId)!.promise;
         }

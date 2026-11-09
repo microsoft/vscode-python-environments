@@ -347,7 +347,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private readonly pendingLastUsedTouches = new Set<Promise<unknown>>();
     private readonly subscriptions: Disposable[] = [];
     private readonly associationStore: InlineScriptAssociationStore;
-    private readonly persistedAssociationsLoaded: Promise<void>;
+    private persistedAssociationsLoaded: Promise<void> = Promise.resolve();
     private selectionQueue: Promise<void> = Promise.resolve();
     private cacheMaintenanceQueue: Promise<void> = Promise.resolve();
     private cacheMaintenanceBarrier: Deferred<void> | undefined;
@@ -356,6 +356,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private ttlEviction: Promise<void> | undefined;
     private cacheMutationRevision = 0;
     private disposed = false;
+    private started = false;
 
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     public readonly onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> =
@@ -412,8 +413,23 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
         public readonly log: LogOutputChannel,
         workspaceState: Memento,
         private readonly routingRegistry: InlineScriptRoutingRegistry = new InlineScriptRoutingRegistry(),
+        deferStartup = false,
     ) {
         this.associationStore = new InlineScriptAssociationStore(workspaceState);
+        if (!deferStartup) {
+            this.start();
+        }
+    }
+
+    /**
+     * Starts persisted-association and file-event processing after feature registration commits.
+     * Calling this more than once has no effect.
+     */
+    public start(): void {
+        if (this.started || this.disposed) {
+            return;
+        }
+        this.started = true;
         this.subscriptions.push(
             this.routingRegistry.onDidChangeMetadata((event) => {
                 void this.handleSavedMetadataChange(event).catch((error) => {
@@ -2745,6 +2761,9 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
     private loadPersistedAssociations(): Promise<void> {
         return this.enqueuePersistence(async (state) => {
             const rawAssociations = await state.get<unknown>();
+            if (this.disposed) {
+                return;
+            }
             const parsed = this.parsePersistedAssociations(rawAssociations);
             this.applyPersistedAssociations(parsed?.records ?? {});
         });
@@ -2755,7 +2774,7 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
             return;
         }
         const metadata = await readInlineScriptMetadataFromFile(uri);
-        if (metadata && !this.routingRegistry.getMetadata(scriptPath)) {
+        if (!this.disposed && metadata && !this.routingRegistry.getMetadata(scriptPath)) {
             this.routingRegistry.setMetadata(uri, metadata);
         }
     }
@@ -2768,9 +2787,15 @@ export class InlineScriptEnvManager implements EnvironmentManager, Disposable {
 
     private initializePersistedAssociations(): Promise<void> {
         return this.persistedAssociationsLoaded.then(async () => {
+            if (this.disposed) {
+                return;
+            }
             await Promise.all(
                 [...this.fsPathToPersistedAssociation.keys()].map(async (scriptPath) => {
                     await this.seedRoutingMetadataFromSavedFile(Uri.file(scriptPath), scriptPath);
+                    if (this.disposed) {
+                        return;
+                    }
                     const uri = this.routingRegistry.getUri(scriptPath);
                     const metadata = this.routingRegistry.getMetadata(scriptPath);
                     if (uri && metadata) {

@@ -587,13 +587,32 @@ async function toAbsoluteInterpreterPath(interpreterPath: string, scope: Uri | u
     if (path.isAbsolute(interpreterPath)) {
         return interpreterPath;
     }
-    if (!/[\\/]/.test(interpreterPath)) {
+    const isBareCommand = !/[\\/]/.test(interpreterPath);
+    if (isBareCommand) {
         const onPath = await findCommandOnPath(interpreterPath);
         if (onPath) {
             return onPath;
         }
     }
     if (!scope) {
+        return interpreterPath;
+    }
+    if (isBareCommand) {
+        // Keep bare commands intact when they are absent from the extension host's PATH.
+        // The native finder can resolve them using its own environment (for example, the
+        // integrated terminal's shell environment).
+        const workspaceCandidate = path.resolve(
+            getWorkspaceFolder(scope)?.uri.fsPath ?? scope.fsPath,
+            interpreterPath,
+        );
+        try {
+            if ((await fs.stat(workspaceCandidate)).isDirectory()) {
+                return workspaceCandidate;
+            }
+        } catch {
+            // A missing bare name may still be resolvable by the native finder (for example, by
+            // an integrated-terminal environment manager), so pass it through unchanged.
+        }
         return interpreterPath;
     }
     const workspaceFolder = getWorkspaceFolder(scope);
@@ -666,6 +685,7 @@ async function tryResolveInterpreterPath(
             }
 
             if (manager && resolvedEnv) {
+                const isBareCommand = !/[\\/]/.test(interpreterPath);
                 // Create a wrapper environment that uses the user's specified path, named like the
                 // resolved environment so the status bar and views show a normal interpreter label.
                 const newEnv: PythonEnvironment = {
@@ -677,11 +697,11 @@ async function tryResolveInterpreterPath(
                     displayName: resolvedEnv.displayName,
                     version: resolved.version ?? '',
                     displayPath: interpreterPath,
-                    environmentPath: Uri.file(interpreterPath),
+                    environmentPath: isBareCommand ? resolvedEnv.environmentPath : Uri.file(interpreterPath),
                     sysPrefix: resolved.prefix ?? '',
                     execInfo: {
                         run: {
-                            executable: interpreterPath,
+                            executable: isBareCommand ? resolved.executable : interpreterPath,
                         },
                     },
                 };
