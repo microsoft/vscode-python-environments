@@ -1533,14 +1533,18 @@ suite('Pip Utils - dependency file search bounds', () => {
         sinon.restore();
     });
 
-    test('caps each search', async () => {
+    test('caps each search at 10,000 files', async () => {
         await getProjectInstallable(mockApi as PythonEnvironmentApi, [project], { runHeadless: true });
 
-        assert.strictEqual(findFilesStub.callCount, 4);
-        for (const call of findFilesStub.getCalls()) {
-            const [include, , maxResults] = call.args;
-            assert.ok(Number.isInteger(maxResults) && maxResults > 0, `${include} should have a result cap`);
-        }
+        assert.deepStrictEqual(
+            findFilesStub.getCalls().map((call) => [call.args[0], call.args[2]]),
+            [
+                ['**/*requirements*.txt', 10_000],
+                ['*requirements*.txt', 10_000],
+                ['**/requirements/*.txt', 10_000],
+                ['**/pyproject.toml', 10_000],
+            ],
+        );
     });
 
     test('keeps the dependency files of a search that runs for minutes', async () => {

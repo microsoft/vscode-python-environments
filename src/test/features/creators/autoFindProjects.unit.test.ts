@@ -486,7 +486,7 @@ suite('Auto Find Project tests', () => {
             sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
         });
 
-        test('caps the marker search', async () => {
+        test('caps the marker search at 1,000 files', async () => {
             findFilesStub.resolves([]);
 
             await new AutoFindProjects(projectManager.object, envManagers.object).create();
@@ -495,7 +495,7 @@ suite('Auto Find Project tests', () => {
             const [include, exclude, maxResults] = findFilesStub.firstCall.args;
             assert.strictEqual(include, '**/{pyproject.toml,setup.py}');
             assert.strictEqual(exclude, '**/.venv/**');
-            assert.ok(Number.isInteger(maxResults) && maxResults > 0, 'the search should have a result cap');
+            assert.strictEqual(maxResults, 1_000);
         });
 
         test('offers the projects of a marker search that runs for minutes', async () => {
