@@ -22,7 +22,8 @@ import {
     showQuickPickWithButtons,
     showWarningMessage,
 } from '../../common/window.apis';
-import { asRelativePath, findFiles, getOpenTextDocuments } from '../../common/workspace.apis';
+import { asRelativePath, getOpenTextDocuments } from '../../common/workspace.apis';
+import { findFilesInWorkspace, getHomeWorkspaceFolders } from '../../common/workspaceSearch';
 import type { EnvironmentManagers } from '../envManagers';
 import { registerInlineScriptCodeLens } from './codeLens';
 import { promptUpdateExtensionsForInlineScripts } from './extensionVersionCheck';
@@ -277,6 +278,22 @@ interface InlineScriptQuickPickItem extends QuickPickItem {
     readonly configured: boolean;
 }
 
+/**
+ * Returns the message for a workspace search that found no Python file. When the search skipped a
+ * workspace folder because it is the home folder, the message names the folder and says to open
+ * the folder that holds the scripts, because no script there was looked for.
+ */
+function noPythonFilesMessage(): string {
+    const skipped = getHomeWorkspaceFolders().map((folder) => folder.uri.fsPath);
+    if (skipped.length === 0) {
+        return l10n.t('No Python files were found in the workspace.');
+    }
+    return l10n.t(
+        'No Python files were found in the workspace. {0} is not searched, because it is your home folder or contains it. Open the folder that holds your scripts instead.',
+        skipped.join(', '),
+    );
+}
+
 export async function setUpInlineScriptEnvironmentsInWorkspace(
     em: EnvironmentManagers,
     routing: InlineScriptRoutingRegistry,
@@ -285,13 +302,14 @@ export async function setUpInlineScriptEnvironmentsInWorkspace(
         showErrorMessage(l10n.t('The inline script environment manager is not available yet. Try again shortly.'));
         return;
     }
-    const files = await findFiles(
-        '**/*.{py,Py,pY,PY}',
-        '{**/.venv/**,**/node_modules/**}',
-        MAX_INLINE_SCRIPT_FILES,
-    );
-    if (!files || files.length === 0) {
-        showInformationMessage(l10n.t('No Python files were found in the workspace.'));
+    const files = await findFilesInWorkspace({
+        label: 'Inline script setup',
+        include: '**/*.{py,Py,pY,PY}',
+        exclude: '{**/.venv/**,**/node_modules/**}',
+        maxResults: MAX_INLINE_SCRIPT_FILES,
+    });
+    if (files.length === 0) {
+        showInformationMessage(noPythonFilesMessage());
         return;
     }
     const candidates = await filterInlineScriptFiles(files);
