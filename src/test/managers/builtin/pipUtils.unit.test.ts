@@ -1,11 +1,12 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { CancellationError, CancellationToken, CancellationTokenSource, LogOutputChannel, Progress, ProgressLocation, ProgressOptions, Uri } from 'vscode';
+import { CancellationError, CancellationToken, CancellationTokenSource, LogOutputChannel, Progress, ProgressLocation, ProgressOptions, RelativePattern, Uri, WorkspaceFolder } from 'vscode';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
 import { PackageManagement } from '../../../common/localize';
+import * as pathUtils from '../../../common/utils/pathUtils';
 import { normalizePath } from '../../../common/utils/pathUtils';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
@@ -22,6 +23,7 @@ suite('Pip Utils - getProjectInstallable', () => {
 
     setup(() => {
         findFilesStub = sinon.stub(wapi, 'findFiles');
+        sinon.stub(wapi, 'getWorkspaceFolders').returns(undefined);
         // Stub withProgress to immediately execute the callback
         withProgressStub = sinon.stub(winapi, 'withProgress');
         withProgressStub.callsFake(
@@ -78,16 +80,17 @@ suite('Pip Utils - getProjectInstallable', () => {
             }
         });
 
-        test('propagates the progress token and promptly rejects cancellation during file search', async () => {
+        test('propagates progress cancellation to each search and promptly rejects during file search', async () => {
             const source = new CancellationTokenSource();
             let startedCount = 0;
+            const searchTokens: CancellationToken[] = [];
             let markSearchesStarted!: () => void;
             const searchesStarted = new Promise<void>((resolve) => {
                 markSearchesStarted = resolve;
             });
             findFilesStub.callsFake(
                 (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
-                    assert.strictEqual(token, source.token);
+                    searchTokens.push(token);
                     startedCount += 1;
                     if (startedCount === 4) {
                         markSearchesStarted();
@@ -125,6 +128,7 @@ suite('Pip Utils - getProjectInstallable', () => {
                     }),
                 ]);
                 assert.strictEqual(findFilesStub.callCount, 4);
+                assert.ok(searchTokens.every((token) => token.isCancellationRequested));
             } finally {
                 clearTimeout(timeoutHandle);
                 source.dispose();
@@ -139,7 +143,7 @@ suite('Pip Utils - getProjectInstallable', () => {
             mockApi.getPythonProject = getPythonProject;
             findFilesStub.callsFake(
                 (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
-                    assert.strictEqual(token, source.token);
+                    assert.ok(token, 'each search should get a token');
                     return new Promise<Uri[]>((resolve) => resolutions.push(resolve));
                 },
             );
@@ -203,6 +207,9 @@ suite('Pip Utils - getProjectInstallable', () => {
 
             let cancelled = false;
             let subscriptionCount = 0;
+            // Subscriptions 1-4 tie the four file searches to this token, 5 waits for the searches,
+            // and 6 waits for the TOML read.
+            const tomlReadSubscription = 6;
             let markPostReadCheck!: () => void;
             const postReadCheck = new Promise<void>((resolve) => {
                 markPostReadCheck = resolve;
@@ -216,7 +223,7 @@ suite('Pip Utils - getProjectInstallable', () => {
                 },
                 onCancellationRequested: (listener: () => unknown) => {
                     subscriptionCount += 1;
-                    if (subscriptionCount === 2) {
+                    if (subscriptionCount === tomlReadSubscription) {
                         queueMicrotask(() => {
                             cancelled = true;
                             listener();
@@ -235,7 +242,7 @@ suite('Pip Utils - getProjectInstallable', () => {
                     CancellationError,
                 );
                 await postReadCheck;
-                assert.strictEqual(subscriptionCount, 2);
+                assert.strictEqual(subscriptionCount, tomlReadSubscription);
                 assert.ok(withProgressStub.notCalled);
             } finally {
                 await fse.remove(temp);
@@ -261,16 +268,17 @@ suite('Pip Utils - getProjectInstallable', () => {
             }
         });
 
-        test('headless search propagates in-flight cancellation and passes the caller token unchanged', async () => {
+        test('headless search propagates in-flight cancellation of the caller token to each search', async () => {
             const source = new CancellationTokenSource();
             let startedCount = 0;
+            const searchTokens: CancellationToken[] = [];
             let markSearchesStarted!: () => void;
             const searchesStarted = new Promise<void>((resolve) => {
                 markSearchesStarted = resolve;
             });
             findFilesStub.callsFake(
                 (_pattern: string, _exclude: string, _maxResults: number | undefined, token: CancellationToken) => {
-                    assert.strictEqual(token, source.token);
+                    searchTokens.push(token);
                     startedCount += 1;
                     if (startedCount === 4) {
                         markSearchesStarted();
@@ -291,6 +299,7 @@ suite('Pip Utils - getProjectInstallable', () => {
                 source.cancel();
                 await assert.rejects(pending, CancellationError);
                 assert.strictEqual(findFilesStub.callCount, 4);
+                assert.ok(searchTokens.every((token) => token.isCancellationRequested));
                 assert.ok(withProgressStub.notCalled);
             } finally {
                 source.dispose();
@@ -781,6 +790,7 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
 
     setup(async () => {
         findFilesStub = sinon.stub(wapi, 'findFiles').resolves([]);
+        sinon.stub(wapi, 'getWorkspaceFolders').returns(undefined);
         withProgressStub = sinon.stub(winapi, 'withProgress');
         withProgressStub.callsFake(
             async (
@@ -1503,5 +1513,90 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects)).installables;
 
         assert.strictEqual(result.filter((item) => item.args?.[0] === '-e').length, 2);
+    });
+});
+
+suite('Pip Utils - dependency file search bounds', () => {
+    const root = path.parse(process.cwd()).root;
+    const home = path.join(root, 'home', 'tester');
+    const project = { name: 'app', uri: Uri.file(path.join(home, 'code', 'app')) };
+    let findFilesStub: sinon.SinonStub;
+    let getWorkspaceFoldersStub: sinon.SinonStub;
+    let mockApi: { getPythonProject: (uri: Uri) => PythonProject | undefined };
+
+    function folder(fsPath: string, index = 0): WorkspaceFolder {
+        return { uri: Uri.file(fsPath), name: path.basename(fsPath), index };
+    }
+
+    setup(() => {
+        findFilesStub = sinon.stub(wapi, 'findFiles').resolves([]);
+        getWorkspaceFoldersStub = sinon.stub(wapi, 'getWorkspaceFolders').returns([folder(project.uri.fsPath)]);
+        sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
+        mockApi = { getPythonProject: () => project };
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('caps each search and stops it at a time limit', async () => {
+        const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+        const finish: Array<() => void> = [];
+        findFilesStub.callsFake(() => new Promise<Uri[]>((resolve) => finish.push(() => resolve([]))));
+        try {
+            const pending = getProjectInstallable(mockApi as PythonEnvironmentApi, [project], { runHeadless: true });
+            await new Promise((resolve) => setImmediate(resolve));
+
+            assert.strictEqual(findFilesStub.callCount, 4);
+            for (const call of findFilesStub.getCalls()) {
+                const [include, , maxResults, token] = call.args;
+                assert.ok(Number.isInteger(maxResults) && maxResults > 0, `${include} should have a result cap`);
+                assert.ok(token && !token.isCancellationRequested, `${include} should get a live token`);
+            }
+            await clock.tickAsync(10 * 60_000);
+            for (const call of findFilesStub.getCalls()) {
+                assert.ok(call.args[3].isCancellationRequested, `${call.args[0]} should stop at its time limit`);
+            }
+            finish.forEach((done) => done());
+            assert.deepStrictEqual((await pending).installables, []);
+        } finally {
+            finish.forEach((done) => done());
+            clock.restore();
+        }
+    });
+
+    test('does not search a workspace folder that is the home folder', async () => {
+        getWorkspaceFoldersStub.returns([folder(home)]);
+
+        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [project], { runHeadless: true });
+
+        assert.ok(findFilesStub.notCalled, 'the home folder should not be searched');
+        assert.deepStrictEqual(result.installables, []);
+    });
+
+    test('still searches the other workspace folders when one is the home folder', async () => {
+        const service = path.join(root, 'work', 'service');
+        const serviceProject = { name: 'service', uri: Uri.file(service) };
+        const requirement = Uri.file(path.join(service, 'requirements.txt'));
+        getWorkspaceFoldersStub.returns([folder(home, 0), folder(service, 1)]);
+        mockApi.getPythonProject = () => serviceProject;
+        findFilesStub.callsFake((include: RelativePattern) =>
+            Promise.resolve(include.pattern === '*requirements*.txt' ? [requirement] : []),
+        );
+
+        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [serviceProject], {
+            runHeadless: true,
+        });
+
+        assert.strictEqual(findFilesStub.callCount, 4);
+        for (const call of findFilesStub.getCalls()) {
+            const include = call.args[0];
+            assert.ok(include instanceof RelativePattern, 'each search should be scoped to one folder');
+            assert.strictEqual(normalizePath(include.baseUri.fsPath), normalizePath(service));
+        }
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.uri?.fsPath),
+            [requirement.fsPath],
+        );
     });
 });

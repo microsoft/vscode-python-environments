@@ -18,7 +18,7 @@ import { PackageManagement, Pickers, VenvManagerStrings } from '../../common/loc
 import { traceInfo, traceWarn } from '../../common/logging';
 import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
 import { showErrorMessage, showQuickPickWithButtons, showTextDocument, withProgress } from '../../common/window.apis';
-import { findFiles } from '../../common/workspace.apis';
+import { findFilesInWorkspace } from '../../common/workspaceSearch';
 import { throwIfCancelled, waitForToolRead } from '../../internal/pythonToolSupport';
 import { ListCommand } from '../base/commands/index';
 import { selectFromCommonPackagesToInstall, selectFromInstallableToInstall } from '../common/pickers';
@@ -422,6 +422,13 @@ export async function getWorkspacePackagesToInstall(
     return selectWorkspaceOrCommon(installableResult, common, !!options.showSkipOption, installed ?? []);
 }
 
+/**
+ * The most files one dependency search returns. Quick Create installs from every match under the
+ * project, so the cap sits far above what large monorepos hold; the time limit and the home folder
+ * check in `findFilesInWorkspace` bound how long the search runs.
+ */
+const MAX_DEPENDENCY_FILES = 10_000;
+
 export async function getProjectInstallable(
     api: PythonEnvironmentApi,
     projects?: PythonProject[],
@@ -453,13 +460,22 @@ export async function getProjectInstallable(
         const shouldYieldForSearchCancellation = (index: number) =>
             index > 0 && index % cancellationBatchSize === 0;
 
+        const searchDependencyFiles = (include: string) =>
+            findFilesInWorkspace({
+                label: 'Dependency search',
+                include,
+                exclude,
+                maxResults: MAX_DEPENDENCY_FILES,
+                token: cancellationToken,
+            });
+
         throwIfSearchCancelled();
         const resultSets = await waitForSearch(
             Promise.all([
-                findFiles('**/*requirements*.txt', exclude, undefined, cancellationToken),
-                findFiles('*requirements*.txt', exclude, undefined, cancellationToken),
-                findFiles('**/requirements/*.txt', exclude, undefined, cancellationToken),
-                findFiles('**/pyproject.toml', exclude, undefined, cancellationToken),
+                searchDependencyFiles('**/*requirements*.txt'),
+                searchDependencyFiles('*requirements*.txt'),
+                searchDependencyFiles('**/requirements/*.txt'),
+                searchDependencyFiles('**/pyproject.toml'),
             ]),
         );
         await yieldForSearchCancellation();
