@@ -1,7 +1,18 @@
 import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { CancellationError, CancellationToken, CancellationTokenSource, LogOutputChannel, Progress, ProgressLocation, ProgressOptions, RelativePattern, Uri, WorkspaceFolder } from 'vscode';
+import {
+    CancellationError,
+    CancellationToken,
+    CancellationTokenSource,
+    LogOutputChannel,
+    Progress,
+    ProgressLocation,
+    ProgressOptions,
+    RelativePattern,
+    Uri,
+    WorkspaceFolder,
+} from 'vscode';
 import * as fse from 'fs-extra';
 import * as os from 'os';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
@@ -324,9 +335,7 @@ suite('Pip Utils - getProjectInstallable', () => {
             const workspacePath = Uri.file('/test/path/root').fsPath;
             findFilesStub.callsFake((pattern: string) =>
                 Promise.resolve(
-                    pattern === '*requirements*.txt'
-                        ? [Uri.file(path.join(workspacePath, 'requirements.txt'))]
-                        : [],
+                    pattern === '*requirements*.txt' ? [Uri.file(path.join(workspacePath, 'requirements.txt'))] : [],
                 ),
             );
 
@@ -365,9 +374,11 @@ suite('Pip Utils - getProjectInstallable', () => {
                     return Promise.resolve([]);
                 });
                 const picker = sinon.stub(winapi, 'showQuickPickWithButtons');
-                picker.onFirstCall().callsFake(async (items) =>
-                    items.find((item) => item.label === PackageManagement.workspaceDependencies),
-                );
+                picker
+                    .onFirstCall()
+                    .callsFake(async (items) =>
+                        items.find((item) => item.label === PackageManagement.workspaceDependencies),
+                    );
                 picker.onSecondCall().callsFake(async (items) => {
                     const requirement = items.find((item) => (item as { args?: string[] }).args?.[0] === '-r');
                     assert.ok(requirement);
@@ -395,13 +406,13 @@ suite('Pip Utils - getProjectInstallable', () => {
                 await fse.writeFile(invalidToml, '[project]\nname = "unterminated\n');
                 mockApi.getPythonProject = () => ({ name: 'workspace', uri: Uri.file(tempRoot) });
                 findFilesStub.callsFake((pattern: string) =>
-                    pattern === '**/pyproject.toml'
-                        ? Promise.resolve([Uri.file(invalidToml)])
-                        : Promise.resolve([]),
+                    pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(invalidToml)]) : Promise.resolve([]),
                 );
-                sinon.stub(winapi, 'showQuickPickWithButtons').callsFake(async (items) =>
-                    items.find((item) => item.label === PackageManagement.workspaceDependencies),
-                );
+                sinon
+                    .stub(winapi, 'showQuickPickWithButtons')
+                    .callsFake(async (items) =>
+                        items.find((item) => item.label === PackageManagement.workspaceDependencies),
+                    );
                 const showError = sinon.stub(winapi, 'showErrorMessage');
                 showError.callsFake(async (...args: unknown[]) => args[3] as never);
 
@@ -426,9 +437,7 @@ suite('Pip Utils - getProjectInstallable', () => {
             const workspacePath = Uri.file('/test/path/root').fsPath;
             findFilesStub.callsFake((pattern: string) =>
                 Promise.resolve(
-                    pattern === '*requirements*.txt'
-                        ? [Uri.file(path.join(workspacePath, 'requirements.txt'))]
-                        : [],
+                    pattern === '*requirements*.txt' ? [Uri.file(path.join(workspacePath, 'requirements.txt'))] : [],
                 ),
             );
             sinon.stub(helpers, 'shouldUseUv').resolves(false);
@@ -585,17 +594,29 @@ suite('Pip Utils - getProjectInstallable', () => {
             const siblingRequirement = Uri.file(path.join(temp, 'sibling', 'requirements.txt'));
             const siblingToml = Uri.file(path.join(temp, 'sibling', 'pyproject.toml'));
             const invalidSiblingSyntax = Uri.file(path.join(temp, 'sibling-two', 'pyproject.toml'));
-            await fse.outputFile(siblingToml.fsPath, '[project]\nname = "sibling"\n[build-system]\nbuild-backend = "missing"\n');
+            await fse.outputFile(
+                siblingToml.fsPath,
+                '[project]\nname = "sibling"\n[build-system]\nbuild-backend = "missing"\n',
+            );
             await fse.outputFile(invalidSiblingSyntax.fsPath, '[invalid syntax');
             mockApi.getPythonProject = () => project;
-            findFilesStub.resolves([rootRequirement, ownRequirement, siblingRequirement, siblingToml, invalidSiblingSyntax]);
+            findFilesStub.resolves([
+                rootRequirement,
+                ownRequirement,
+                siblingRequirement,
+                siblingToml,
+                invalidSiblingSyntax,
+            ]);
             const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [project], {
                 runHeadless: true,
                 token: source.token,
                 preferredRoot: nested,
                 deduplicateProjectPackages: true,
             });
-            assert.deepStrictEqual(result.installables.map((item) => item.uri?.fsPath), [ownRequirement.fsPath]);
+            assert.deepStrictEqual(
+                result.installables.map((item) => item.uri?.fsPath),
+                [ownRequirement.fsPath],
+            );
             assert.strictEqual(result.validationErrors[0], undefined);
             assert.ok(withProgressStub.notCalled);
         } finally {
@@ -671,15 +692,8 @@ suite('Pip Utils - getProjectInstallable', () => {
     test('preserves complete depth-then-path order across multiple merge rounds', async () => {
         const workspacePath = Uri.file('/test/path/root').fsPath;
         const dependencyPaths = Array.from({ length: 129 }, (_, index) => {
-            const directories = Array.from(
-                { length: index % 5 },
-                (_value, level) => `group-${(index + level) % 11}`,
-            );
-            return path.join(
-                workspacePath,
-                ...directories,
-                `requirements-${index.toString().padStart(3, '0')}.txt`,
-            );
+            const directories = Array.from({ length: index % 5 }, (_value, level) => `group-${(index + level) % 11}`);
+            return path.join(workspacePath, ...directories, `requirements-${index.toString().padStart(3, '0')}.txt`);
         });
         findFilesStub.callsFake((pattern: string) =>
             Promise.resolve(pattern === '**/*requirements*.txt' ? [...dependencyPaths].reverse().map(Uri.file) : []),
@@ -709,11 +723,7 @@ suite('Pip Utils - getProjectInstallable', () => {
         const workspacePath = Uri.file('/test/path/root').fsPath;
         const dependencyFiles = Array.from({ length: 129 }, (_, index) =>
             Uri.file(
-                path.join(
-                    workspacePath,
-                    `group-${index % 7}`,
-                    `requirements-${index.toString().padStart(3, '0')}.txt`,
-                ),
+                path.join(workspacePath, `group-${index % 7}`, `requirements-${index.toString().padStart(3, '0')}.txt`),
             ),
         );
         findFilesStub.callsFake((pattern: string) =>
@@ -851,10 +861,9 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(missingToml)]) : Promise.resolve([]),
         );
 
-        const result = await getProjectInstallable(
-            mockApi as PythonEnvironmentApi,
-            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
-        );
+        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [
+            { name: 'myapp', uri: Uri.file(projectRoot) },
+        ]);
 
         assert.strictEqual(result.installables.length, 0);
         assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, Uri.file(missingToml).fsPath);
@@ -879,10 +888,9 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(invalidToml)]) : Promise.resolve([]),
         );
 
-        const result = await getProjectInstallable(
-            mockApi as PythonEnvironmentApi,
-            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
-        );
+        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [
+            { name: 'myapp', uri: Uri.file(projectRoot) },
+        ]);
 
         assert.deepStrictEqual(result.installables[0]?.args, ['-e', projectRoot]);
         assert.match(result.validationErrors[0]?.message ?? '', /dependencies.*array of strings/i);
@@ -906,10 +914,9 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(invalidToml)]) : Promise.resolve([]),
         );
 
-        const result = await getProjectInstallable(
-            mockApi as PythonEnvironmentApi,
-            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
-        );
+        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [
+            { name: 'myapp', uri: Uri.file(projectRoot) },
+        ]);
 
         assert.deepStrictEqual(result.installables[0]?.args, ['-e', projectRoot]);
         assert.match(result.validationErrors[0]?.message ?? '', /optional-dependencies.*table/i);
@@ -918,23 +925,17 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
     test('reports invalid optional dependency group names before installation', async () => {
         const invalidToml = await writeTomlContent(
             '',
-            [
-                '[project]',
-                'name = "myapp"',
-                '',
-                '[project.optional-dependencies]',
-                '"bad extra" = ["pytest"]',
-                '',
-            ].join('\n'),
+            ['[project]', 'name = "myapp"', '', '[project.optional-dependencies]', '"bad extra" = ["pytest"]', ''].join(
+                '\n',
+            ),
         );
         findFilesStub.callsFake((pattern: string) =>
             pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(invalidToml)]) : Promise.resolve([]),
         );
 
-        const result = await getProjectInstallable(
-            mockApi as PythonEnvironmentApi,
-            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
-        );
+        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [
+            { name: 'myapp', uri: Uri.file(projectRoot) },
+        ]);
 
         assert.deepStrictEqual(result.installables[0]?.args, ['-e', `${projectRoot}[bad extra]`]);
         assert.match(result.validationErrors[0]?.message ?? '', /invalid optional dependency group name/i);
@@ -946,10 +947,9 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             pattern === '**/pyproject.toml' ? Promise.resolve([Uri.file(validToml)]) : Promise.resolve([]),
         );
 
-        const result = await getProjectInstallable(
-            mockApi as PythonEnvironmentApi,
-            [{ name: 'myapp', uri: Uri.file(projectRoot) }],
-        );
+        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [
+            { name: 'myapp', uri: Uri.file(projectRoot) },
+        ]);
 
         assert.deepStrictEqual(result.installables[0]?.args, ['-e', projectRoot]);
         assert.deepStrictEqual(result.validationErrors, []);
@@ -970,7 +970,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             automaticOptions(path.join(projectRoot, 'main')),
         );
 
-        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [path.join(projectRoot, 'main')]);
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.args?.[1]),
+            [path.join(projectRoot, 'main')],
+        );
         assert.deepStrictEqual(result.validationErrors, []);
     });
 
@@ -1011,7 +1014,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             automaticOptions(path.join(projectRoot, 'main')),
         );
 
-        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [path.join(projectRoot, 'main')]);
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.args?.[1]),
+            [path.join(projectRoot, 'main')],
+        );
         assert.deepStrictEqual(result.validationErrors, []);
     });
 
@@ -1062,7 +1068,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             automaticOptions(path.join(projectRoot, 'main')),
         );
 
-        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [path.join(projectRoot, 'main')]);
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.args?.[1]),
+            [path.join(projectRoot, 'main')],
+        );
         assert.deepStrictEqual(result.validationErrors, []);
     });
 
@@ -1081,9 +1090,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             automaticOptions(path.join(projectRoot, 'main')),
         );
 
-        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
-            path.join(projectRoot, 'main', 'pkg'),
-        ]);
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.args?.[1]),
+            [path.join(projectRoot, 'main', 'pkg')],
+        );
         assert.deepStrictEqual(result.validationErrors, []);
     });
 
@@ -1127,9 +1137,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             automaticOptions(path.join(projectRoot, 'main', 'pkg')),
         );
 
-        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
-            path.join(projectRoot, 'main', 'pkg'),
-        ]);
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.args?.[1]),
+            [path.join(projectRoot, 'main', 'pkg')],
+        );
         assert.deepStrictEqual(result.validationErrors, []);
     });
 
@@ -1161,9 +1172,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             automaticOptions(path.join(projectRoot, 'main', 'pkg')),
         );
 
-        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
-            path.join(projectRoot, 'main', 'pkg'),
-        ]);
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.args?.[1]),
+            [path.join(projectRoot, 'main', 'pkg')],
+        );
         assert.deepStrictEqual(result.validationErrors, []);
     });
 
@@ -1194,9 +1206,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             automaticOptions(path.join(projectRoot, 'main')),
         );
 
-        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
-            path.join(projectRoot, 'main', 'pkg'),
-        ]);
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.args?.[1]),
+            [path.join(projectRoot, 'main', 'pkg')],
+        );
         assert.strictEqual(result.validationErrors[0]?.fileUri.fsPath, owningToml);
     });
 
@@ -1227,9 +1240,10 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
             automaticOptions(path.join(projectRoot, 'main')),
         );
 
-        assert.deepStrictEqual(result.installables.map((item) => item.args?.[1]), [
-            path.join(projectRoot, 'main', 'pkg'),
-        ]);
+        assert.deepStrictEqual(
+            result.installables.map((item) => item.args?.[1]),
+            [path.join(projectRoot, 'main', 'pkg')],
+        );
         assert.deepStrictEqual(result.validationErrors, []);
     });
 
@@ -1247,9 +1261,8 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         });
 
         const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
-        const result = (
-            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
-        ).installables;
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions()))
+            .installables;
 
         const editable = result.filter((r) => r.args?.[0] === '-e');
         assert.strictEqual(editable.length, 0, 'Quick Create should not choose an arbitrary worktree');
@@ -1267,16 +1280,11 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         });
 
         const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
-        const result = (
-            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
-        ).installables;
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions()))
+            .installables;
 
         const editable = result.filter((r) => r.args?.[0] === '-e');
-        assert.strictEqual(
-            editable.length,
-            0,
-            '"My_App" and "my-app" normalize to the same ambiguous package name',
-        );
+        assert.strictEqual(editable.length, 0, '"My_App" and "my-app" normalize to the same ambiguous package name');
     });
 
     test('uses the candidate containing the creation root', async () => {
@@ -1303,7 +1311,11 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         const editable = result.installables.filter((item) => item.args?.[0] === '-e');
         assert.strictEqual(editable.length, 1);
         assert.strictEqual(editable[0].args?.[1], path.join(projectRoot, 'z-valid'));
-        assert.strictEqual(result.validationErrors[0], undefined, 'ignored duplicates should not surface validation errors');
+        assert.strictEqual(
+            result.validationErrors[0],
+            undefined,
+            'ignored duplicates should not surface validation errors',
+        );
     });
 
     test('reports validation from the preferred candidate instead of substituting another worktree', async () => {
@@ -1395,9 +1407,8 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         });
 
         const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
-        const result = (
-            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
-        ).installables;
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions()))
+            .installables;
 
         const editable = result.filter((item) => item.args?.[0] === '-e');
         assert.strictEqual(editable.length, 1);
@@ -1441,9 +1452,8 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         });
 
         const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
-        const result = (
-            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
-        ).installables;
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions()))
+            .installables;
 
         const editableDirs = result.filter((r) => r.args?.[0] === '-e').map((r) => r.args?.[1]);
         assert.strictEqual(editableDirs.length, 2, 'Distinct package names should both be kept');
@@ -1470,9 +1480,8 @@ suite('Pip Utils - getProjectInstallable duplicate pyproject.toml handling', () 
         });
 
         const projects = [{ name: 'myapp', uri: Uri.file(projectRoot) }];
-        const result = (
-            await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions())
-        ).installables;
+        const result = (await getProjectInstallable(mockApi as PythonEnvironmentApi, projects, automaticOptions()))
+            .installables;
 
         const reqs = result.filter((r) => r.args?.[0] === '-r');
         assert.strictEqual(reqs.length, 2, 'Both requirements.txt files should be preserved');

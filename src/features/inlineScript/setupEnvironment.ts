@@ -439,10 +439,7 @@ export function registerInlineScriptUx(em: EnvironmentManagers, routing: InlineS
         disposables.push(codeLens.disposable);
         disposables.push(registerInlineScriptSetupCodeAction(routing, SETUP_INLINE_SCRIPT_ENV_COMMAND));
         disposables.push(
-            registerCommand(
-                SETUP_INLINE_SCRIPT_ENV_COMMAND,
-                setupInlineScriptEnvironmentHandler(em, routing),
-            ),
+            registerCommand(SETUP_INLINE_SCRIPT_ENV_COMMAND, setupInlineScriptEnvironmentHandler(em, routing)),
         );
         disposables.push(
             registerCommand(SETUP_INLINE_SCRIPT_ENVS_COMMAND, () =>

@@ -7,10 +7,7 @@ import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '
 import { getWorkspaceFolders } from '../../common/workspace.apis';
 import { findFilesInWorkspace, getHomeWorkspaceFolders } from '../../common/workspaceSearch';
 import type { EnvironmentManagers } from '../envManagers';
-import {
-    PythonProjectManager,
-    PythonProjectsImpl,
-} from '../projectManager';
+import { PythonProjectManager, PythonProjectsImpl } from '../projectManager';
 import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
 
 /**
@@ -117,7 +114,7 @@ export class AutoFindProjects implements PythonProjectCreator {
             maxResults: MAX_PROJECT_MARKERS,
         });
         // Exclude markers inside selected environments (e.g. installed packages in a custom-named venv).
-        const folders = found && found.length > 0 ? getWorkspaceFolders() ?? [] : [];
+        const folders = found && found.length > 0 ? (getWorkspaceFolders() ?? []) : [];
         const prefixes = await this.getSelectedEnvironmentPrefixes(folders);
         const files = found?.filter(
             (uri) =>

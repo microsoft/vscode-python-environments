@@ -458,7 +458,8 @@ suite('setupInlineScriptEnvironmentHandler', () => {
         return env;
     }
 
-    test('saves a dirty document before setup, because setup reads the block from disk', async () => {        openDirtyDocument();
+    test('saves a dirty document before setup, because setup reads the block from disk', async () => {
+        openDirtyDocument();
         expectEnvironmentCreated();
 
         await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
@@ -516,7 +517,8 @@ suite('setupInlineScriptEnvironmentHandler', () => {
         sinon.assert.calledOnce(errorStub);
     });
 
-    test('does not report a failing companion-extension prompt as a setup failure', async () => {        expectEnvironmentCreated();
+    test('does not report a failing companion-extension prompt as a setup failure', async () => {
+        expectEnvironmentCreated();
         promptStub.rejects(new Error('boom'));
 
         await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);

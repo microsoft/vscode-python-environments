@@ -55,9 +55,7 @@ export namespace InlineScriptStrings {
 
     export function environmentReady(version: string | undefined): string {
         const shown = version?.trim();
-        return shown
-            ? l10n.t('Script environment ready (Python {0})', shown)
-            : l10n.t('Script environment ready');
+        return shown ? l10n.t('Script environment ready (Python {0})', shown) : l10n.t('Script environment ready');
     }
 
     export const unterminatedBlock = l10n.t(
@@ -73,10 +71,7 @@ export namespace InlineScriptStrings {
                 "Lines inside a '# /// script' block must be exactly '#' or start with '# '. This line is blank; use '#' for a blank metadata line.",
             );
         }
-        return l10n.t(
-            "Lines inside a '# /// script' block must be exactly '#' or start with '# '. Found: {0}",
-            found,
-        );
+        return l10n.t("Lines inside a '# /// script' block must be exactly '#' or start with '# '. Found: {0}", found);
     }
     export function invalidBlockMarker(marker: string): string {
         return l10n.t(
@@ -326,14 +321,16 @@ export namespace PythonInstallStrings {
     export const fetchingVersions = l10n.t('Finding available Python versions...');
     export const selectVersion = l10n.t('Select Python version to install');
     export const installed = l10n.t('installed');
-    export const installFailed = l10n.t('Python installation did not complete. See the Python Environments output for details.');
+    export const installFailed = l10n.t(
+        'Python installation did not complete. See the Python Environments output for details.',
+    );
     export const managerUnusable = l10n.t(
         'Python Install Manager is unavailable or could not be verified. Check its installation and configuration, then try again. uv was not started.',
     );
     export const catalogueFailed = l10n.t(
         'Could not find Python versions using Python Install Manager. Check its configured source or network access and try again. uv was not started.',
     );
-    export const noCompatiblePython = l10n.t('No compatible Python was found in the selected installer\'s catalogue.');
+    export const noCompatiblePython = l10n.t("No compatible Python was found in the selected installer's catalogue.");
     export const verificationFailed = l10n.t(
         'A usable Python interpreter matching the request could not be verified. See the Python Environments output.',
     );
@@ -349,7 +346,7 @@ export namespace PythonInstallStrings {
     export function installPrompt(version: string, requirement?: string): string {
         return requirement
             ? l10n.t(
-                  'No installed Python satisfies this script\'s requirement ({0}). Install Python {1} using Python Install Manager? An older Python Install Manager runtime in the same version family may be updated, affecting environments that use it. Newer runtimes will not be downgraded.',
+                  "No installed Python satisfies this script's requirement ({0}). Install Python {1} using Python Install Manager? An older Python Install Manager runtime in the same version family may be updated, affecting environments that use it. Newer runtimes will not be downgraded.",
                   requirement,
                   version,
               )

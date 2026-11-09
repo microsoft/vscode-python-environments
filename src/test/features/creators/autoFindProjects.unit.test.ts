@@ -289,7 +289,10 @@ suite('Auto Find Project tests', () => {
             return { uri: Uri.file(fsPath), name: path.basename(fsPath), index };
         }
 
-        function setupEnvironments(prefixes: Map<string, string | undefined | Error>, managerId = VENV_MANAGER_ID): void {
+        function setupEnvironments(
+            prefixes: Map<string, string | undefined | Error>,
+            managerId = VENV_MANAGER_ID,
+        ): void {
             getWorkspaceFoldersStub.returns(Array.from(prefixes.keys()).map((p, i) => folder(p, i)));
             envManagers
                 .setup((em) => em.getEnvironment(typmoq.It.isAny()))
@@ -356,7 +359,12 @@ suite('Auto Find Project tests', () => {
         });
 
         test('Keeps workspace projects when a selected prefix contains or equals the workspace', async () => {
-            setupEnvironments(new Map([[root, broadPrefix], [root2, root2]]));
+            setupEnvironments(
+                new Map([
+                    [root, broadPrefix],
+                    [root2, root2],
+                ]),
+            );
             findFilesStub.resolves([
                 Uri.file(path.join(root, 'app', 'pyproject.toml')),
                 Uri.file(path.join(root2, 'setup.py')),
@@ -370,7 +378,12 @@ suite('Auto Find Project tests', () => {
         test('Keeps a nested workspace root selected as the parent workspace environment prefix', async () => {
             const nested = path.join(root, 'nested');
             const nestedEnv = path.join(nested, 'custom-env');
-            setupEnvironments(new Map([[root, nested], [nested, nestedEnv]]));
+            setupEnvironments(
+                new Map([
+                    [root, nested],
+                    [nested, nestedEnv],
+                ]),
+            );
             findFilesStub.resolves([
                 Uri.file(path.join(root, 'app', 'setup.py')),
                 Uri.file(path.join(nested, 'pyproject.toml')),
@@ -385,7 +398,12 @@ suite('Auto Find Project tests', () => {
         test('Still excludes packages outside a nested workspace under the selected prefix', async () => {
             const envPrefix = path.join(root, 'custom-env');
             const nested = path.join(envPrefix, 'docs');
-            setupEnvironments(new Map([[root, envPrefix], [nested, undefined]]));
+            setupEnvironments(
+                new Map([
+                    [root, envPrefix],
+                    [nested, undefined],
+                ]),
+            );
             findFilesStub.resolves([
                 Uri.file(path.join(nested, 'pyproject.toml')),
                 Uri.file(path.join(envPrefix, 'lib', 'site-packages', 'pkg', 'setup.py')),
@@ -422,7 +440,12 @@ suite('Auto Find Project tests', () => {
 
         test('Excludes a selected environment inside a different workspace folder', async () => {
             const envPrefix = path.join(root2, 'shared-env');
-            setupEnvironments(new Map([[root, envPrefix], [root2, undefined]]));
+            setupEnvironments(
+                new Map([
+                    [root, envPrefix],
+                    [root2, undefined],
+                ]),
+            );
             findFilesStub.resolves([
                 Uri.file(path.join(root, 'app', 'pyproject.toml')),
                 Uri.file(path.join(root2, 'other', 'pyproject.toml')),

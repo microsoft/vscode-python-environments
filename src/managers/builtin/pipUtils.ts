@@ -64,9 +64,7 @@ export function validatePyprojectToml(toml: PyprojectToml): string | undefined {
             return l10n.t('Missing required field "requires" in [build-system] section of pyproject.toml.');
         }
         if (!isStringArray(buildSystemValue.requires)) {
-            return l10n.t(
-                'The "requires" field in [build-system] must be an array of strings in pyproject.toml.',
-            );
+            return l10n.t('The "requires" field in [build-system] must be an array of strings in pyproject.toml.');
         }
     }
 
@@ -311,13 +309,10 @@ async function selectWorkspaceOrCommon(
                     return undefined;
                 }
 
-                const shouldProceed = await shouldProceedAfterPyprojectValidation(
-                    installableResult.validationErrors,
-                    {
-                        allPyprojectTomlsSelected: installable.length === 0,
-                        selectedPyprojectTomls: selectedInstallables.selectedUris,
-                    },
-                );
+                const shouldProceed = await shouldProceedAfterPyprojectValidation(installableResult.validationErrors, {
+                    allPyprojectTomlsSelected: installable.length === 0,
+                    selectedPyprojectTomls: selectedInstallables.selectedUris,
+                });
                 if (!shouldProceed) {
                     return undefined;
                 }
@@ -458,8 +453,7 @@ export async function getProjectInstallable(
             throwIfSearchCancelled();
         };
         const cancellationBatchSize = 64;
-        const shouldYieldForSearchCancellation = (index: number) =>
-            index > 0 && index % cancellationBatchSize === 0;
+        const shouldYieldForSearchCancellation = (index: number) => index > 0 && index % cancellationBatchSize === 0;
 
         // Only files under one of `projects` are kept below, so in a home folder workspace the
         // search can stay inside the project folders.
@@ -532,9 +526,7 @@ export async function getProjectInstallable(
                 continue;
             }
             const relative = path.relative(projectRoot, uri.fsPath);
-            const depth = relative
-                ? relative.split(path.sep).filter((segment) => segment.length > 0).length
-                : 0;
+            const depth = relative ? relative.split(path.sep).filter((segment) => segment.length > 0).length : 0;
             sortKeys.set(uri.fsPath, {
                 depth,
                 normalizedPath: normalizePath(uri.fsPath),
@@ -635,8 +627,7 @@ export async function getProjectInstallable(
         await yieldForSearchCancellation();
 
         const shouldSkipDisjointToml = (uri: Uri): boolean =>
-            !!options?.deduplicateProjectPackages &&
-            !isTomlRelevantToPreferredRoot(uri, options.preferredRoot);
+            !!options?.deduplicateProjectPackages && !isTomlRelevantToPreferredRoot(uri, options.preferredRoot);
 
         const selectedTomls = new Map<string, Uri>();
         const ambiguousProjectNames = new Set<string>();
@@ -693,13 +684,10 @@ export async function getProjectInstallable(
                         const relative = path.relative(projectDir, preferredRoot);
                         const containsPreferredRoot =
                             relative === '' ||
-                            (relative !== '..' &&
-                                !relative.startsWith(`..${path.sep}`) &&
-                                !path.isAbsolute(relative));
+                            (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
                         if (
                             containsPreferredRoot &&
-                            (!preferredCandidate ||
-                                projectDir.length > path.dirname(preferredCandidate.fsPath).length)
+                            (!preferredCandidate || projectDir.length > path.dirname(preferredCandidate.fsPath).length)
                         ) {
                             preferredCandidate = candidate;
                         }
@@ -811,9 +799,7 @@ function validationMatchesSelectedToml(
     selectedPyprojectTomls: readonly Uri[] | undefined,
 ): boolean {
     const validationPath = normalizePath(path.resolve(validationError.fileUri.fsPath));
-    return (selectedPyprojectTomls ?? []).some(
-        (uri) => normalizePath(path.resolve(uri.fsPath)) === validationPath,
-    );
+    return (selectedPyprojectTomls ?? []).some((uri) => normalizePath(path.resolve(uri.fsPath)) === validationPath);
 }
 
 /**
@@ -826,9 +812,7 @@ export async function shouldProceedAfterPyprojectValidation(
 ): Promise<boolean> {
     const validationError = options?.allPyprojectTomlsSelected
         ? validationErrors[0]
-        : validationErrors.find((error) =>
-              validationMatchesSelectedToml(error, options?.selectedPyprojectTomls),
-          );
+        : validationErrors.find((error) => validationMatchesSelectedToml(error, options?.selectedPyprojectTomls));
     if (!validationError) {
         return true;
     }
