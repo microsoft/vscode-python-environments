@@ -7,6 +7,7 @@ import { PythonEnvironment, PythonProject } from '../../../api';
 import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../../common/constants';
 import { timeout } from '../../../common/utils/asyncUtils';
 import { createDeferred } from '../../../common/utils/deferred';
+import * as pathUtils from '../../../common/utils/pathUtils';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
 import { AutoFindProjects } from '../../../features/creators/autoFindProjects';
@@ -475,6 +476,56 @@ suite('Auto Find Project tests', () => {
             assert.ok(showWarningMessageStub.notCalled, 'Already registered warning should not be shown');
             assert.ok(showQuickPickWithButtonsStub.notCalled, 'Picker should not be shown');
             projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.never());
+        });
+    });
+
+    suite('Search bounds', () => {
+        const home = path.join(path.parse(process.cwd()).root, 'home', 'tester');
+
+        setup(() => {
+            sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
+        });
+
+        test('caps the marker search and stops it at a time limit', async () => {
+            const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            let finish: (() => void) | undefined;
+            findFilesStub.callsFake(
+                () =>
+                    new Promise<Uri[]>((resolve) => {
+                        finish = () => resolve([]);
+                    }),
+            );
+            try {
+                const pending = new AutoFindProjects(projectManager.object, envManagers.object).create();
+                await new Promise((resolve) => setImmediate(resolve));
+
+                assert.strictEqual(findFilesStub.callCount, 1);
+                const [include, exclude, maxResults, token] = findFilesStub.firstCall.args;
+                assert.strictEqual(include, '**/{pyproject.toml,setup.py}');
+                assert.strictEqual(exclude, '**/.venv/**');
+                assert.ok(Number.isInteger(maxResults) && maxResults > 0, 'the search should have a result cap');
+                assert.ok(token && !token.isCancellationRequested, 'the search should get a live token');
+                await clock.tickAsync(10 * 60_000);
+                assert.ok(token.isCancellationRequested, 'the search should stop at its time limit');
+                finish?.();
+                assert.strictEqual(await pending, undefined);
+            } finally {
+                finish?.();
+                clock.restore();
+            }
+        });
+
+        test('does not search a workspace folder that is the home folder', async () => {
+            getWorkspaceFoldersStub.returns([{ uri: Uri.file(home), name: 'tester', index: 0 }]);
+            const shown = createDeferred();
+            showErrorMessageStub.callsFake(() => shown.resolve());
+
+            const result = await new AutoFindProjects(projectManager.object, envManagers.object).create();
+
+            assert.strictEqual(result, undefined);
+            assert.ok(findFilesStub.notCalled, 'the home folder should not be searched');
+            await Promise.race([shown.promise, timeout(100)]);
+            assert.ok(showErrorMessageStub.calledOnce, 'No projects found should be shown');
         });
     });
 });
