@@ -461,12 +461,16 @@ export async function getProjectInstallable(
         const shouldYieldForSearchCancellation = (index: number) =>
             index > 0 && index % cancellationBatchSize === 0;
 
+        // Only files under one of `projects` are kept below, so in a home folder workspace the
+        // search can stay inside the project folders.
+        const neededFolders = projects.map((project) => project.uri);
         const searchDependencyFiles = (include: string) =>
             findFilesInWorkspace({
                 label: 'Dependency search',
                 include,
                 exclude,
                 maxResults: MAX_DEPENDENCY_FILES,
+                neededFolders,
                 token: cancellationToken,
             });
 

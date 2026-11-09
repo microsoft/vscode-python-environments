@@ -1,4 +1,6 @@
 import assert from 'assert';
+import * as fse from 'fs-extra';
+import * as os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { CancellationToken, CancellationTokenSource, RelativePattern, Uri, WorkspaceFolder } from 'vscode';
@@ -17,6 +19,7 @@ suite('findFilesInWorkspace', () => {
     let getWorkspaceFoldersStub: sinon.SinonStub;
     let traceLogStub: sinon.SinonStub;
     let traceWarnStub: sinon.SinonStub;
+    let getUserHomeDirStub: sinon.SinonStub;
 
     function folder(fsPath: string, index = 0): WorkspaceFolder {
         return { uri: Uri.file(fsPath), name: path.basename(fsPath), index };
@@ -37,7 +40,7 @@ suite('findFilesInWorkspace', () => {
     setup(() => {
         findFilesStub = sinon.stub(wapi, 'findFiles').resolves([]);
         getWorkspaceFoldersStub = sinon.stub(wapi, 'getWorkspaceFolders').returns([folder(work)]);
-        sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
+        getUserHomeDirStub = sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
         traceLogStub = sinon.stub(logging, 'traceLog');
         traceWarnStub = sinon.stub(logging, 'traceWarn');
     });
@@ -163,5 +166,87 @@ suite('findFilesInWorkspace', () => {
         } finally {
             source.dispose();
         }
+    });
+
+    suite('needed folders inside a home folder workspace', () => {
+        let diskHome: string;
+        let app: string;
+
+        /** Returns the normalized base folder of each findFiles call. */
+        function searchedBases(): string[] {
+            return findFilesStub.getCalls().map((call) => {
+                const include = call.args[0];
+                assert.ok(include instanceof RelativePattern, 'each search should be scoped to one folder');
+                assert.strictEqual(include.pattern, options.include);
+                return pathUtils.normalizePath(include.baseUri.fsPath);
+            });
+        }
+
+        setup(async () => {
+            diskHome = await fse.mkdtemp(path.join(os.tmpdir(), 'workspace-search-home-'));
+            app = path.join(diskHome, 'code', 'app');
+            await fse.ensureDir(path.join(app, 'sub'));
+            getUserHomeDirStub.returns(diskHome);
+            getWorkspaceFoldersStub.returns([folder(diskHome)]);
+        });
+
+        teardown(async () => {
+            await fse.remove(diskHome);
+        });
+
+        test('searches only the needed folders inside it and logs why', async () => {
+            const marker = Uri.file(path.join(app, 'pyproject.toml'));
+            findFilesStub.resolves([marker]);
+
+            const result = await findFilesInWorkspace({ ...options, neededFolders: [Uri.file(app)] });
+
+            assert.deepStrictEqual(result, [marker]);
+            assert.deepStrictEqual(searchedBases(), [pathUtils.normalizePath(app)]);
+            assert.strictEqual(traceLogStub.callCount, 1);
+            const message = String(traceLogStub.firstCall.args[0]);
+            assert.ok(message.includes(Uri.file(diskHome).fsPath), message);
+            assert.ok(message.includes(Uri.file(app).fsPath), message);
+        });
+
+        test('does not search a needed folder that is the home folder or contains it', async () => {
+            const result = await findFilesInWorkspace({
+                ...options,
+                neededFolders: [Uri.file(diskHome), Uri.file(path.dirname(diskHome))],
+            });
+
+            assert.deepStrictEqual(result, []);
+            assert.ok(findFilesStub.notCalled);
+        });
+
+        test('does not search a needed path that is a file or does not exist', async () => {
+            const script = path.join(diskHome, 'script.py');
+            await fse.outputFile(script, 'print(1)\n');
+
+            await findFilesInWorkspace({
+                ...options,
+                neededFolders: [Uri.file(script), Uri.file(path.join(diskHome, 'missing'))],
+            });
+
+            assert.ok(findFilesStub.notCalled);
+        });
+
+        test('searches a folder once when it sits inside another needed folder or two home folders', async () => {
+            getWorkspaceFoldersStub.returns([folder(path.dirname(diskHome), 0), folder(diskHome, 1)]);
+
+            await findFilesInWorkspace({
+                ...options,
+                neededFolders: [Uri.file(path.join(app, 'sub')), Uri.file(app), Uri.file(app)],
+            });
+
+            assert.deepStrictEqual(searchedBases(), [pathUtils.normalizePath(app)]);
+        });
+
+        test('searches the other workspace folders whole', async () => {
+            getWorkspaceFoldersStub.returns([folder(diskHome, 0), folder(work, 1)]);
+
+            await findFilesInWorkspace({ ...options, neededFolders: [Uri.file(path.join(work, 'service'))] });
+
+            assert.deepStrictEqual(searchedBases(), [pathUtils.normalizePath(work)]);
+        });
     });
 });

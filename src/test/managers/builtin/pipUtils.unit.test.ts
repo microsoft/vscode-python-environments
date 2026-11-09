@@ -1515,6 +1515,7 @@ suite('Pip Utils - dependency file search bounds', () => {
     const project = { name: 'app', uri: Uri.file(path.join(home, 'code', 'app')) };
     let findFilesStub: sinon.SinonStub;
     let getWorkspaceFoldersStub: sinon.SinonStub;
+    let getUserHomeDirStub: sinon.SinonStub;
     let mockApi: { getPythonProject: (uri: Uri) => PythonProject | undefined };
 
     function folder(fsPath: string, index = 0): WorkspaceFolder {
@@ -1524,7 +1525,7 @@ suite('Pip Utils - dependency file search bounds', () => {
     setup(() => {
         findFilesStub = sinon.stub(wapi, 'findFiles').resolves([]);
         getWorkspaceFoldersStub = sinon.stub(wapi, 'getWorkspaceFolders').returns([folder(project.uri.fsPath)]);
-        sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
+        getUserHomeDirStub = sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
         mockApi = { getPythonProject: () => project };
     });
 
@@ -1568,13 +1569,57 @@ suite('Pip Utils - dependency file search bounds', () => {
         }
     });
 
-    test('does not search a workspace folder that is the home folder', async () => {
-        getWorkspaceFoldersStub.returns([folder(home)]);
+    suite('in a home folder workspace', () => {
+        let diskHome: string;
+        let diskProject: { name: string; uri: Uri };
 
-        const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [project], { runHeadless: true });
+        setup(async () => {
+            diskHome = await fse.mkdtemp(path.join(os.tmpdir(), 'piputils-home-'));
+            diskProject = { name: 'app', uri: Uri.file(path.join(diskHome, 'code', 'app')) };
+            await fse.ensureDir(diskProject.uri.fsPath);
+            getUserHomeDirStub.returns(diskHome);
+            getWorkspaceFoldersStub.returns([folder(diskHome)]);
+        });
 
-        assert.ok(findFilesStub.notCalled, 'the home folder should not be searched');
-        assert.deepStrictEqual(result.installables, []);
+        teardown(async () => {
+            await fse.remove(diskHome);
+        });
+
+        test('searches the project folder and keeps its dependency files', async () => {
+            const requirement = Uri.file(path.join(diskProject.uri.fsPath, 'requirements.txt'));
+            mockApi.getPythonProject = () => diskProject;
+            findFilesStub.callsFake((include: RelativePattern) =>
+                Promise.resolve(include.pattern === '**/*requirements*.txt' ? [requirement] : []),
+            );
+
+            const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [diskProject], {
+                runHeadless: true,
+                preferredRoot: diskProject.uri,
+            });
+
+            assert.strictEqual(findFilesStub.callCount, 4);
+            for (const call of findFilesStub.getCalls()) {
+                const include = call.args[0];
+                assert.ok(include instanceof RelativePattern, 'each search should be scoped to the project');
+                assert.strictEqual(normalizePath(include.baseUri.fsPath), normalizePath(diskProject.uri.fsPath));
+            }
+            assert.deepStrictEqual(
+                result.installables.map((item) => item.uri?.fsPath),
+                [requirement.fsPath],
+            );
+        });
+
+        test('does not search a project that is the home folder', async () => {
+            const homeProject = { name: 'home', uri: Uri.file(diskHome) };
+            mockApi.getPythonProject = () => homeProject;
+
+            const result = await getProjectInstallable(mockApi as PythonEnvironmentApi, [homeProject], {
+                runHeadless: true,
+            });
+
+            assert.ok(findFilesStub.notCalled, 'the home folder should not be searched');
+            assert.deepStrictEqual(result.installables, []);
+        });
     });
 
     test('still searches the other workspace folders when one is the home folder', async () => {
