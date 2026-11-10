@@ -158,6 +158,27 @@ export function hasAutoRunCommand(
     return commands.some((cmd) => isOurAutoRunCommand(cmd, mainBatchFile, regMainBatchFile));
 }
 
+/**
+ * Merges our invocation command into an existing AutoRun string without overwriting user content.
+ * If our command is already present, returns the existing string unchanged (idempotent).
+ */
+export function mergeAutoRunCommand(
+    existingAutoRun: string | undefined,
+    mainBatchFile: string,
+    regMainBatchFile?: string,
+): string {
+    const ourCommand = getAutoRunCallCommand(mainBatchFile);
+    if (!existingAutoRun || existingAutoRun.trim().length === 0) {
+        return ourCommand;
+    }
+
+    if (hasAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile)) {
+        return existingAutoRun.trim();
+    }
+
+    return `${existingAutoRun.trim()} & ${ourCommand}`;
+}
+
 async function checkRegistryAutoRun(mainBatchFile: string, regMainBatchFile: string): Promise<boolean> {
     if (!isWindows()) {
         return false;
