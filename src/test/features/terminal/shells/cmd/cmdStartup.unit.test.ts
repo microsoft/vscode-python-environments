@@ -3,6 +3,7 @@ import {
     getAutoRunCallCommand,
     hasAutoRunCommand,
     mergeAutoRunCommand,
+    removeAutoRunCommand,
     splitAutoRunCommands,
 } from '../../../../../features/terminal/shells/cmd/cmdStartup';
 
@@ -93,6 +94,53 @@ suite('CMD AutoRun Startup Integration', () => {
             const existing = 'cmd1 & cmd2';
             const expected = `cmd1 & cmd2 & ${ourCommand}`;
             assert.strictEqual(mergeAutoRunCommand(existing, mainBatch), expected);
+        });
+    });
+
+    suite('removeAutoRunCommand', () => {
+        test('returns undefined when AutoRun is undefined, empty, or whitespace', () => {
+            assert.strictEqual(removeAutoRunCommand(undefined, mainBatch), undefined);
+            assert.strictEqual(removeAutoRunCommand('', mainBatch), undefined);
+            assert.strictEqual(removeAutoRunCommand('   ', mainBatch), undefined);
+        });
+
+        test('returns undefined when AutoRun contains only our command', () => {
+            assert.strictEqual(removeAutoRunCommand(ourCommand, mainBatch), undefined);
+            assert.strictEqual(removeAutoRunCommand(regOurCommand, mainBatch, regBatch), undefined);
+        });
+
+        test('preserves user content when AutoRun does not contain our command', () => {
+            const existing = '"C:\\tools\\init.cmd"';
+            assert.strictEqual(removeAutoRunCommand(existing, mainBatch), existing);
+
+            const multi = 'cmd1 & cmd2';
+            assert.strictEqual(removeAutoRunCommand(multi, mainBatch), multi);
+        });
+
+        test('removes our command when user content is followed by ours', () => {
+            const existing = `"C:\\tools\\init.cmd" & ${ourCommand}`;
+            assert.strictEqual(removeAutoRunCommand(existing, mainBatch), '"C:\\tools\\init.cmd"');
+        });
+
+        test('removes our command when our command is followed by user content', () => {
+            const existing = `${ourCommand} & "C:\\tools\\init.cmd"`;
+            assert.strictEqual(removeAutoRunCommand(existing, mainBatch), '"C:\\tools\\init.cmd"');
+        });
+
+        test('removes our command when our command is sandwiched in the middle', () => {
+            const existing = `cmd1 & ${ourCommand} & cmd2`;
+            assert.strictEqual(removeAutoRunCommand(existing, mainBatch), 'cmd1 & cmd2');
+        });
+
+        test('removes regMainBatchFile variant when sandwiched in the middle', () => {
+            const existing = `cmd1 & ${regOurCommand} & cmd2`;
+            assert.strictEqual(removeAutoRunCommand(existing, mainBatch, regBatch), 'cmd1 & cmd2');
+        });
+
+        test('preserves complex user commands with quotes and parameters', () => {
+            const existing = `"C:\\My Tools\\init.cmd" /arg1 & ${ourCommand} & doskey /macrofile="C:\\My Macros\\m.txt"`;
+            const expected = '"C:\\My Tools\\init.cmd" /arg1 & doskey /macrofile="C:\\My Macros\\m.txt"';
+            assert.strictEqual(removeAutoRunCommand(existing, mainBatch), expected);
         });
     });
 });
