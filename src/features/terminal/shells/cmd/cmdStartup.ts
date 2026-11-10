@@ -321,9 +321,6 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
             traceInfo(`SHELL: Created new CMD activation file at: ${cmdFiles.startupFile}\r\n${activationContent}`);
         }
 
-        // Step 2: Get existing AutoRun content
-        const existingAutoRun = await getExistingAutoRun();
-
         // Step 3: Create or update the main batch file
         if (await fs.pathExists(cmdFiles.mainBatchFile)) {
             const content = await fs.readFile(cmdFiles.mainBatchFile, 'utf8');
