@@ -240,19 +240,26 @@ async function getExistingAutoRun(): Promise<string | undefined> {
     return undefined;
 }
 
-async function setupRegistryAutoRun(mainBatchFile: string): Promise<boolean> {
+async function setupRegistryAutoRun(mainBatchFile: string, regMainBatchFile?: string): Promise<boolean> {
     if (!isWindows()) {
         return false;
     }
 
     try {
-        // Set the registry key to call our main batch file
+        const existingAutoRun = await getExistingAutoRun();
+        if (hasAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile)) {
+            traceInfo(`SHELL: CMD AutoRun registry key already contains our main batch file`);
+            return true;
+        }
+
+        const newAutoRun = mergeAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile);
+        const escaped = newAutoRun.replace(/"/g, '\\"');
         await execCommand(
-            `reg add "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun /t REG_SZ /d "if exist \\"${mainBatchFile}\\" call \\"${mainBatchFile}\\"" /f`,
+            `reg add "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun /t REG_SZ /d "${escaped}" /f`,
         );
 
         traceInfo(
-            `Set CMD AutoRun registry key [HKCU\\Software\\Microsoft\\Command Processor] to call: ${mainBatchFile}`,
+            `Set CMD AutoRun registry key [HKCU\\Software\\Microsoft\\Command Processor] to call: ${newAutoRun}`,
         );
         return true;
     } catch (err) {
@@ -342,13 +349,8 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
         }
 
         // Step 4: Setup registry AutoRun to call our main batch file
-        if (existingAutoRun?.includes(cmdFiles.regMainBatchFile) || existingAutoRun?.includes(cmdFiles.mainBatchFile)) {
-            traceInfo(`SHELL: CMD AutoRun registry key already contains our main batch file`);
-        } else {
-            const registrySetup = await setupRegistryAutoRun(cmdFiles.mainBatchFile);
-            return registrySetup;
-        }
-        return true;
+        const registrySetup = await setupRegistryAutoRun(cmdFiles.mainBatchFile, cmdFiles.regMainBatchFile);
+        return registrySetup;
     } catch (err) {
         traceVerbose(`Failed to setup CMD startup`, err);
         return false;
