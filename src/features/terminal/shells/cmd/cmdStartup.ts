@@ -179,6 +179,30 @@ export function mergeAutoRunCommand(
     return `${existingAutoRun.trim()} & ${ourCommand}`;
 }
 
+/**
+ * Removes only our startup batch invocation from an existing AutoRun string,
+ * preserving any user or other third-party commands.
+ * Returns undefined if no commands remain (meaning the key should be deleted/cleared).
+ */
+export function removeAutoRunCommand(
+    existingAutoRun: string | undefined,
+    mainBatchFile: string,
+    regMainBatchFile?: string,
+): string | undefined {
+    if (!existingAutoRun || existingAutoRun.trim().length === 0) {
+        return undefined;
+    }
+
+    const commands = splitAutoRunCommands(existingAutoRun);
+    const remaining = commands.filter((cmd) => !isOurAutoRunCommand(cmd, mainBatchFile, regMainBatchFile));
+
+    if (remaining.length === 0) {
+        return undefined;
+    }
+
+    return remaining.join(' & ');
+}
+
 async function checkRegistryAutoRun(mainBatchFile: string, regMainBatchFile: string): Promise<boolean> {
     if (!isWindows()) {
         return false;
