@@ -357,23 +357,53 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
     }
 }
 
-async function removeCmdStartup(startupFile: string, key: string): Promise<boolean> {
-    // Note: We deliberately DO NOT remove the main batch file or registry AutoRun setting
-    // This allows other components to continue using the AutoRun functionality
-    if (await fs.pathExists(startupFile)) {
+async function removeRegistryAutoRun(mainBatchFile: string, regMainBatchFile?: string): Promise<boolean> {
+    if (!isWindows()) {
+        return false;
+    }
+
+    try {
+        const existingAutoRun = await getExistingAutoRun();
+        if (!existingAutoRun || !hasAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile)) {
+            return true;
+        }
+
+        const updatedAutoRun = removeAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile);
+        if (updatedAutoRun && updatedAutoRun.length > 0) {
+            const escaped = updatedAutoRun.replace(/"/g, '\\"');
+            await execCommand(
+                `reg add "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun /t REG_SZ /d "${escaped}" /f`,
+            );
+            traceInfo(`Restored CMD AutoRun registry key to: ${updatedAutoRun}`);
+        } else {
+            await execCommand('reg delete "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun /f');
+            traceInfo('Removed CMD AutoRun registry key');
+        }
+        return true;
+    } catch (err) {
+        traceError('Failed to remove CMD AutoRun registry key [HKCU\\Software\\Microsoft\\Command Processor]', err);
+        return false;
+    }
+}
+
+async function removeCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boolean> {
+    if (await fs.pathExists(cmdFiles.startupFile)) {
         try {
-            const content = await fs.readFile(startupFile, 'utf8');
+            const content = await fs.readFile(cmdFiles.startupFile, 'utf8');
             if (hasStartupCode(content, regionStart, regionEnd, [key])) {
-                await fs.writeFile(startupFile, removeStartupCode(content, regionStart, regionEnd));
-                traceInfo(`Removed activation from CMD activation file at: ${startupFile}`);
+                await fs.writeFile(cmdFiles.startupFile, removeStartupCode(content, regionStart, regionEnd));
+                traceInfo(`Removed activation from CMD activation file at: ${cmdFiles.startupFile}`);
             } else {
-                traceInfo(`CMD activation file at ${startupFile} does not contain activation code`);
+                traceInfo(`CMD activation file at ${cmdFiles.startupFile} does not contain activation code`);
             }
         } catch (err) {
             traceVerbose(`Failed to remove CMD activation file content`, err);
             return false;
         }
     }
+
+    await removeRegistryAutoRun(cmdFiles.mainBatchFile, cmdFiles.regMainBatchFile);
+
     return true;
 }
 
@@ -423,8 +453,8 @@ export class CmdStartupProvider implements ShellStartupScriptProvider {
         }
 
         try {
-            const { startupFile } = await getCmdFilePaths();
-            const success = await removeCmdStartup(startupFile, CMD_ENV_KEY);
+            const cmdFiles = await getCmdFilePaths();
+            const success = await removeCmdStartup(cmdFiles, CMD_ENV_KEY);
             return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to remove CMD startup', err);
