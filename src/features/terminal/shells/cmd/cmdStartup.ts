@@ -129,6 +129,35 @@ export function splitAutoRunCommands(autoRun: string): string[] {
     return commands;
 }
 
+/**
+ * Returns the invocation string used in CMD AutoRun to call our startup batch file.
+ */
+export function getAutoRunCallCommand(mainBatchFile: string): string {
+    return `if exist "${mainBatchFile}" call "${mainBatchFile}"`;
+}
+
+function isOurAutoRunCommand(command: string, mainBatchFile: string, regMainBatchFile?: string): boolean {
+    return (
+        command.includes(mainBatchFile) ||
+        (regMainBatchFile !== undefined && regMainBatchFile.length > 0 && command.includes(regMainBatchFile))
+    );
+}
+
+/**
+ * Checks whether an AutoRun string already contains our startup batch invocation.
+ */
+export function hasAutoRunCommand(
+    autoRun: string | undefined,
+    mainBatchFile: string,
+    regMainBatchFile?: string,
+): boolean {
+    if (!autoRun) {
+        return false;
+    }
+    const commands = splitAutoRunCommands(autoRun);
+    return commands.some((cmd) => isOurAutoRunCommand(cmd, mainBatchFile, regMainBatchFile));
+}
+
 async function checkRegistryAutoRun(mainBatchFile: string, regMainBatchFile: string): Promise<boolean> {
     if (!isWindows()) {
         return false;
