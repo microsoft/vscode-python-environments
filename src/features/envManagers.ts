@@ -1262,16 +1262,8 @@ export class PythonEnvironmentManagers implements EnvironmentManagers {
             ? this._environmentManagers.get(cachedEnv.envId.managerId)
             : undefined;
 
-        // Only an explicit global selection overrides the configured default here; project/file
-        // routing is unchanged. Use its selecting manager, not the cached descriptor's owner:
-        // a manager may return another manager's fallback environment. Without an explicit record
-        // or a registered selecting manager, fall through to configured/cached routing below.
-        const globalSelection = context === undefined ? this._explicitSelections.get('global') : undefined;
-        if (globalSelection) {
-            const globalManager = this._environmentManagers.get(globalSelection.managerId);
-            if (globalManager) {
-                return globalManager;
-            }
+        if (context === undefined && cachedManager && this._explicitSelections.has('global')) {
+            return cachedManager;
         }
 
         const defaultEnvManagerId = getDefaultEnvManagerSetting(this.pm, context);

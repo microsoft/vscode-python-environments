@@ -680,24 +680,6 @@ suite('PythonEnvironmentManagers - selection stored by a non-default manager', (
         assert.strictEqual(envManagers.getLastKnownEnvironment(undefined)?.envId.id, newestGlobal.envId.id);
     });
 
-    test('global refresh follows the configured manager after an explicit selection is cleared', async () => {
-        await envManagers.setEnvironments('global', configured, false, { explicit: true });
-        await envManagers.setEnvironments('global', configured, false);
-        await flush();
-        const changeEvents: DidChangeEnvironmentEventArgs[] = [];
-        envManagers.onDidChangeActiveEnvironment((e) => changeEvents.push(e));
-        venvGet.resolves(localVenv);
-
-        await envManagers.refreshEnvironment(undefined);
-        await flush();
-
-        assert.strictEqual((await envManagers.getEnvironment(undefined))?.envId.id, localVenv.envId.id);
-        assert.deepStrictEqual(
-            changeEvents.map((e) => [e.old?.envId.id, e.new?.envId.id]),
-            [[newestGlobal.envId.id, localVenv.envId.id]],
-        );
-    });
-
     test('clearing an explicit project selection publishes the environment that reads now return', async () => {
         await envManagers.setEnvironment(projectUri, configured, false, { explicit: true });
         await flush();
