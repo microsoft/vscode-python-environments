@@ -93,6 +93,42 @@ function getMainBatchFileContent(startupFile: string): string {
     return content.join(lineSep);
 }
 
+/**
+ * Splits a CMD AutoRun string into individual commands delimited by '&' or '&&',
+ * properly respecting double-quoted segments.
+ */
+export function splitAutoRunCommands(autoRun: string): string[] {
+    const commands: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < autoRun.length; i++) {
+        const char = autoRun[i];
+        if (char === '"') {
+            inQuotes = !inQuotes;
+            current += char;
+        } else if (char === '&' && !inQuotes) {
+            if (i + 1 < autoRun.length && autoRun[i + 1] === '&') {
+                i++;
+            }
+            const trimmed = current.trim();
+            if (trimmed.length > 0) {
+                commands.push(trimmed);
+            }
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+
+    const trimmed = current.trim();
+    if (trimmed.length > 0) {
+        commands.push(trimmed);
+    }
+
+    return commands;
+}
+
 async function checkRegistryAutoRun(mainBatchFile: string, regMainBatchFile: string): Promise<boolean> {
     if (!isWindows()) {
         return false;
