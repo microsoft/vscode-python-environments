@@ -209,8 +209,28 @@ suite('Workspace Python context', () => {
             fireDelete('/ws/main.py'); // a prefix of the found marker's path, but neither it nor a parent folder
             await settle();
             assert.strictEqual(findFilesStub.callCount, 1);
-            assert.strictEqual(statStub.callCount, 0);
+            const inspected = new Set(statStub.getCalls().map((c) => c.args[0].toString()));
+            assert.deepStrictEqual(
+                [...inspected],
+                [marker('/ws/main.pyi').toString()],
+                'only the found marker is re-checked',
+            );
             assert.deepStrictEqual(contextValues(), [true]);
+        });
+
+        test('a found marker removed without a delete event is caught by a later delete', async () => {
+            findFilesStub.resolves([marker('/ws/scripts/main.py')]);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            // Deleting `scripts` is not reported, because the folder name does not match the glob.
+            statStub.rejects(Object.assign(new Error('gone'), { code: 'FileNotFound' }));
+            findFilesStub.resolves([]);
+            fireDelete('/ws/other.py');
+            await settle(); // re-checks the found marker
+            await settle(); // rescans
+            assert.strictEqual(findFilesStub.callCount, 2);
+            assert.strictEqual(traceErrorStub.callCount, 0);
+            assert.deepStrictEqual(contextValues(), [true, false]);
         });
 
         test('deleting the folder containing the found marker turns the context off', async () => {
@@ -341,6 +361,20 @@ suite('Workspace Python context', () => {
             assert.strictEqual(findFilesStub.callCount, 2);
             await settle();
             assert.strictEqual(findFilesStub.callCount, 2);
+        });
+
+        test('a burst of deletes re-checks the found marker once', async () => {
+            findFilesStub.resolves([marker('/ws/main.py')]);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            for (let i = 0; i < 1000; i++) {
+                fireDelete(`/ws/pkg/mod${i}.py`);
+            }
+            await settle();
+            await settle();
+            assert.strictEqual(statStub.callCount, 1);
+            assert.strictEqual(findFilesStub.callCount, 1);
+            assert.deepStrictEqual(contextValues(), [true]);
         });
 
         test('deletes are ignored while the workspace has no Python', async () => {
@@ -577,6 +611,7 @@ suite('Workspace Python context', () => {
             findFilesStub.resolves([marker('/ws/main.py')]);
             registerWorkspacePythonContext(disposables);
             await flush();
+            fireDelete('/ws/other.py');
             fireDelete('/ws/main.py');
             disposables.forEach((d) => d.dispose());
             assert.strictEqual(clock.countTimers(), 0);
@@ -710,6 +745,18 @@ suite('Workspace Python context', () => {
             await settle();
             assert.strictEqual(traceErrorStub.callCount, 1);
             assert.deepStrictEqual(contextValues(), [false, true]);
+        });
+
+        test('a marker deleted before it is inspected is ignored', async () => {
+            statStub.rejects(Object.assign(new Error('gone'), { code: 'FileNotFound' }));
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            fireCreate('/ws/tmp.py');
+            await flush();
+            await settle();
+            assert.strictEqual(traceErrorStub.callCount, 0);
+            assert.strictEqual(findFilesStub.callCount, 1);
+            assert.deepStrictEqual(contextValues(), [false]);
         });
     });
 });

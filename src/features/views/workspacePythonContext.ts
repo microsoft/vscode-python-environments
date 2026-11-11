@@ -2,6 +2,7 @@ import { CancellationTokenSource, Disposable, FileType, Uri } from 'vscode';
 import { executeCommand } from '../../common/command.api';
 import { traceError } from '../../common/logging';
 import { createSimpleDebounce } from '../../common/utils/debounce';
+import { isFileNotFoundError } from '../../common/utils/filesystem';
 import { stat } from '../../common/workspace.fs.apis';
 import {
     createFileSystemWatcher,
@@ -49,12 +50,15 @@ function isRemovedBy(uri: string, deleted: string): boolean {
  * Every `findFiles` call is a full workspace search, and a branch switch can create or delete
  * thousands of marker files at once, so events never scan directly:
  * - a created marker that is a file, or an opened Python document, proves the answer is `true`;
- * - one marker known to exist is remembered, so deleting any other marker cannot change the answer;
+ * - one marker known to exist is remembered, so deleting any other marker only re-checks that it still exists;
  * - deleting that marker, or a folder containing it, and workspace folder changes share one debounced rescan;
  * - only one scan runs at a time, and it is rerun if the marker it found was deleted during the search.
  *
  * Scans are not timed out: creates and opened Python documents override a slow scan, and workspace
  * folder changes cancel it.
+ *
+ * The watcher does not report markers removed with a folder whose name does not match the glob, so
+ * the context can stay `true` until a later marker delete re-checks the remembered marker.
  */
 export function registerWorkspacePythonContext(disposables: Disposable[]): void {
     let hasPython: boolean | undefined;
@@ -117,6 +121,26 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
             debouncedRescan.trigger();
         }
     };
+
+    // The watcher misses some deletes, such as markers removed with their folder, so the witness is re-checked.
+    const verifyWitness = async (): Promise<void> => {
+        const candidate = witness;
+        if (disposed || candidate === undefined) {
+            return;
+        }
+        let exists = false;
+        try {
+            exists = ((await stat(Uri.parse(candidate))).type & FileType.File) === FileType.File;
+        } catch {
+            // Treated as missing; the rescan finds the marker if it still exists.
+        }
+        if (!exists && !disposed && witness === candidate) {
+            witness = undefined;
+            scheduleRescan();
+        }
+    };
+
+    const debouncedVerifyWitness = createSimpleDebounce(RESCAN_DEBOUNCE_MS, () => void verifyWitness());
 
     const scan = async (): Promise<void> => {
         if (disposed) {
@@ -199,12 +223,17 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
                 }
             },
             (ex) => {
-                if (pendingChecks.get(key) === checkId) {
-                    pendingChecks.delete(key);
-                    traceError('Failed to inspect a created Python marker', ex);
-                    // A search still finds the marker if it is a file.
-                    scheduleRescan();
+                if (pendingChecks.get(key) !== checkId) {
+                    return;
                 }
+                pendingChecks.delete(key);
+                // A short-lived file, such as a temporary one, cannot change the answer.
+                if (isFileNotFoundError(ex)) {
+                    return;
+                }
+                traceError('Failed to inspect a created Python marker', ex);
+                // A search still finds the marker if it is a file.
+                scheduleRescan();
             },
         );
     };
@@ -215,8 +244,9 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
         }
         const key = uri.toString();
         pendingChecks.delete(key);
-        // While the witness exists, deleting another marker cannot change the answer.
+        // While the witness exists, deleting another marker cannot change the answer, so only check that it does.
         if (witness !== undefined && !isRemovedBy(witness, key)) {
+            debouncedVerifyWitness.trigger();
             return;
         }
         witness = undefined;
@@ -250,6 +280,7 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
             disposed = true;
             pendingChecks.clear();
             debouncedRescan.dispose();
+            debouncedVerifyWitness.dispose();
             running?.cancel();
         }),
     );
