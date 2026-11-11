@@ -112,16 +112,17 @@ suite('Workspace Python context', () => {
             assert.deepStrictEqual(contextValues(), [true]);
         });
 
-        test('an open Python document enables the context even if the initial search times out', async () => {
+        test('does not time out the initial search before establishing the context', async () => {
             const pending = makeDeferred<any[]>();
-            openDocsStub.returns([{ languageId: 'python' }]);
             findFilesStub.returns(pending.promise);
             registerWorkspacePythonContext(disposables);
             await clock.tickAsync(SCAN_TIMEOUT_MS);
-            assert.deepStrictEqual(contextValues(), [true]);
-            assert.strictEqual(tokenOfScan(0).isCancellationRequested, true);
-            pending.resolve([]);
+            assert.deepStrictEqual(contextValues(), []);
+            assert.strictEqual(tokenOfScan(0).isCancellationRequested, false);
+            pending.resolve([marker('/ws/main.py')]);
             await flush();
+            assert.deepStrictEqual(contextValues(), [true]);
+            assert.strictEqual(tokenOfScan(0).isCancellationRequested, false);
         });
 
         test('searches for a single hit, excluding dependency folders', async () => {
@@ -203,6 +204,23 @@ suite('Workspace Python context', () => {
             await settle();
             assert.strictEqual(findFilesStub.callCount, 1);
             assert.deepStrictEqual(contextValues(), [true]);
+        });
+
+        test('deleting a marker rescans when Python is known but no marker is tracked', async () => {
+            const initial = makeDeferred<any[]>();
+            findFilesStub.onFirstCall().returns(initial.promise);
+            findFilesStub.onSecondCall().resolves([]);
+            registerWorkspacePythonContext(disposables);
+            fireDocOpened('python');
+            await flush();
+            assert.deepStrictEqual(contextValues(), [true]);
+
+            initial.resolve([]);
+            await flush();
+            fireDelete('/ws/main.py');
+            await settle();
+            assert.strictEqual(findFilesStub.callCount, 2);
+            assert.deepStrictEqual(contextValues(), [true, false]);
         });
 
         test('distinguishes markers with the same path in different URI authorities', async () => {
@@ -432,6 +450,22 @@ suite('Workspace Python context', () => {
             registerWorkspacePythonContext(disposables);
             fireCreate('/ws/main.py');
             await flush();
+            fireDelete('/ws/main.py');
+            initial.resolve([]);
+            await flush();
+            assert.strictEqual(findFilesStub.callCount, 2);
+            assert.deepStrictEqual(contextValues(), [true, false]);
+        });
+
+        test('a delete while a cancelled scan finishes triggers a rescan without a known marker', async () => {
+            const initial = makeDeferred<any[]>();
+            findFilesStub.onFirstCall().returns(initial.promise);
+            findFilesStub.onSecondCall().resolves([]);
+            registerWorkspacePythonContext(disposables);
+            fireDocOpened('python');
+            await flush();
+            assert.strictEqual(tokenOfScan(0).isCancellationRequested, true);
+
             fireDelete('/ws/main.py');
             initial.resolve([]);
             await flush();

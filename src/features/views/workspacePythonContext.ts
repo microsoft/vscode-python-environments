@@ -16,7 +16,7 @@ export const PYTHON_WORKSPACE_KEY = 'python-envs.workspaceHasPython';
 
 /** How long deletes and workspace folder changes must settle before the workspace is scanned again. */
 export const RESCAN_DEBOUNCE_MS = 500;
-/** A slow workspace search must not block context updates indefinitely. */
+/** A slow rescan must not block context updates after the initial value is known. */
 export const SCAN_TIMEOUT_MS = 5000;
 
 /**
@@ -97,15 +97,26 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
         running = cts;
         let timedOut = false;
         deletedWhileScanning = new Set();
-        const timeout = setTimeout(() => {
-            timedOut = true;
-            traceVerbose(`Workspace Python marker search exceeded ${SCAN_TIMEOUT_MS} ms; keeping the current context`);
-            cts.cancel();
-        }, SCAN_TIMEOUT_MS);
-        const cancelTimeout = cts.token.onCancellationRequested(() => clearTimeout(timeout));
+        const timeout =
+            hasPython === undefined
+                ? undefined
+                : setTimeout(() => {
+                      timedOut = true;
+                      traceVerbose(
+                          `Workspace Python marker search exceeded ${SCAN_TIMEOUT_MS} ms; keeping the current context`,
+                      );
+                      cts.cancel();
+                  }, SCAN_TIMEOUT_MS);
+        const cancelTimeout = cts.token.onCancellationRequested(() => {
+            if (timeout !== undefined) {
+                clearTimeout(timeout);
+            }
+        });
         try {
             const result = await findPythonContent(cts.token);
-            clearTimeout(timeout);
+            if (timeout !== undefined) {
+                clearTimeout(timeout);
+            }
             // A cancelled scan was overtaken by `markHasPython` or by disposal, so its result is stale.
             if (!cts.token.isCancellationRequested) {
                 const foundMarker = result.marker ? getMarkerKey(result.marker) : undefined;
@@ -121,7 +132,9 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
                 traceError('Failed to update the Python workspace context', ex);
             }
         } finally {
-            clearTimeout(timeout);
+            if (timeout !== undefined) {
+                clearTimeout(timeout);
+            }
             cancelTimeout.dispose();
             cts.dispose();
             running = undefined;
@@ -129,6 +142,7 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
         }
         if (rescanAfterRunning && !disposed) {
             rescanAfterRunning = false;
+            rescanPending = false;
             await scan();
         }
     };
@@ -196,17 +210,18 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
         const key = getMarkerKey(uri);
         pendingCreates.delete(key);
         const deletedKnownMarker = key === knownMarker;
+        const markerIsUnknown = knownMarker === undefined && hasPython !== false;
         if (deletedKnownMarker) {
             knownMarker = undefined;
         }
         if (running) {
             deletedWhileScanning.add(key);
-            if (deletedKnownMarker) {
+            if (deletedKnownMarker || markerIsUnknown) {
                 rescanAfterRunning = true;
             }
             return;
         }
-        if (!deletedKnownMarker) {
+        if (!deletedKnownMarker && !markerIsUnknown) {
             return;
         }
         scheduleRescan();
