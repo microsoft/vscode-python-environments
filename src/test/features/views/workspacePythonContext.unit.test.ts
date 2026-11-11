@@ -11,7 +11,6 @@ import {
     PYTHON_WORKSPACE_KEY,
     registerWorkspacePythonContext,
     RESCAN_DEBOUNCE_MS,
-    SCAN_TIMEOUT_MS,
 } from '../../../features/views/workspacePythonContext';
 
 type Listener<T> = (e: T) => void;
@@ -112,17 +111,18 @@ suite('Workspace Python context', () => {
             assert.deepStrictEqual(contextValues(), [true]);
         });
 
-        test('does not time out the initial search before establishing the context', async () => {
+        test('publishes the initial search despite deletes of other markers', async () => {
             const pending = makeDeferred<any[]>();
-            findFilesStub.returns(pending.promise);
+            findFilesStub.onFirstCall().returns(pending.promise);
             registerWorkspacePythonContext(disposables);
-            await clock.tickAsync(SCAN_TIMEOUT_MS);
-            assert.deepStrictEqual(contextValues(), []);
-            assert.strictEqual(tokenOfScan(0).isCancellationRequested, false);
+            for (let i = 0; i < 10; i++) {
+                fireDelete(`/ws/tmp${i}.py`);
+                await clock.tickAsync(RESCAN_DEBOUNCE_MS);
+            }
             pending.resolve([marker('/ws/main.py')]);
-            await flush();
+            await settle();
             assert.deepStrictEqual(contextValues(), [true]);
-            assert.strictEqual(tokenOfScan(0).isCancellationRequested, false);
+            assert.strictEqual(findFilesStub.callCount, 1);
         });
 
         test('searches for a single hit, excluding dependency folders', async () => {
@@ -192,6 +192,33 @@ suite('Workspace Python context', () => {
             fireDelete('/ws/main.py');
             await flush();
             assert.strictEqual(findFilesStub.callCount, 1, 'the rescan should wait for the debounce');
+            await settle();
+            assert.deepStrictEqual(contextValues(), [true, false]);
+        });
+
+        test('deleting other markers does not search while the found marker remains', async () => {
+            findFilesStub.resolves([marker('/ws/main.pyi')]);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            for (let i = 0; i < 5; i++) {
+                fireCreate(`/ws/tmp${i}.py`);
+                await settle();
+                fireDelete(`/ws/tmp${i}.py`);
+                await settle();
+            }
+            fireDelete('/ws/main.py'); // a prefix of the found marker's path, but neither it nor a parent folder
+            await settle();
+            assert.strictEqual(findFilesStub.callCount, 1);
+            assert.strictEqual(statStub.callCount, 0);
+            assert.deepStrictEqual(contextValues(), [true]);
+        });
+
+        test('deleting the folder containing the found marker turns the context off', async () => {
+            findFilesStub.resolves([marker('/ws/tools.py/main.py')]);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            findFilesStub.resolves([]);
+            fireDelete('/ws/tools.py');
             await settle();
             assert.deepStrictEqual(contextValues(), [true, false]);
         });
@@ -356,7 +383,7 @@ suite('Workspace Python context', () => {
     });
 
     suite('overlapping scans', () => {
-        test('deletes during a scan rerun it once after it finishes, never concurrently', async () => {
+        test('a result deleted during its scan is rechecked once, never concurrently', async () => {
             let inFlight = 0;
             let maxInFlight = 0;
             const pending: { resolve: (value: any[]) => void }[] = [];
@@ -391,6 +418,35 @@ suite('Workspace Python context', () => {
             assert.strictEqual(findFilesStub.callCount, 3);
             assert.strictEqual(maxInFlight, 1);
             assert.deepStrictEqual(contextValues(), [true, false]);
+        });
+
+        test('an empty result is kept when other markers are deleted during its scan', async () => {
+            const rescan = makeDeferred<any[]>();
+            findFilesStub.onFirstCall().resolves([marker('/ws/main.py')]);
+            findFilesStub.onSecondCall().returns(rescan.promise);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            fireDelete('/ws/main.py');
+            await settle();
+            fireDelete('/ws/other.py');
+            rescan.resolve([]);
+            await settle();
+            assert.strictEqual(findFilesStub.callCount, 2);
+            assert.deepStrictEqual(contextValues(), [true, false]);
+        });
+
+        test('a slow search is never abandoned', async () => {
+            const slowScan = makeDeferred<any[]>();
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            findFilesStub.onSecondCall().returns(slowScan.promise);
+            fireFoldersChanged();
+            await settle();
+            await clock.tickAsync(60_000);
+            assert.strictEqual(tokenOfScan(1).isCancellationRequested, false);
+            slowScan.resolve([marker('/other/main.py')]);
+            await flush();
+            assert.deepStrictEqual(contextValues(), [false, true]);
         });
 
         test('a create during a scan wins over a stale empty result', async () => {
@@ -555,6 +611,54 @@ suite('Workspace Python context', () => {
         });
     });
 
+    suite('context updates', () => {
+        test('a slow update is never applied after a newer one', async () => {
+            const applied: boolean[] = [];
+            const firstUpdate = makeDeferred<void>();
+            let calls = 0;
+            executeCommandStub.callsFake(async (_command: string, _key: string, value: boolean) => {
+                if (++calls === 1) {
+                    await firstUpdate.promise;
+                }
+                applied.push(value);
+            });
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            fireCreate('/ws/main.py');
+            await flush();
+            firstUpdate.resolve();
+            await flush();
+            assert.deepStrictEqual(applied, [false, true]);
+        });
+
+        test('only the latest value is sent after a slow update', async () => {
+            const firstUpdate = makeDeferred<void>();
+            executeCommandStub.onFirstCall().returns(firstUpdate.promise);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            fireCreate('/ws/main.py');
+            await flush();
+            fireDelete('/ws/main.py');
+            await settle();
+            firstUpdate.resolve();
+            await flush();
+            assert.deepStrictEqual(contextValues(), [false]);
+        });
+
+        test('no update is sent after disposal', async () => {
+            const firstUpdate = makeDeferred<void>();
+            executeCommandStub.onFirstCall().returns(firstUpdate.promise);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            fireCreate('/ws/main.py');
+            await flush();
+            disposables.forEach((d) => d.dispose());
+            firstUpdate.resolve();
+            await flush();
+            assert.deepStrictEqual(contextValues(), [false]);
+        });
+    });
+
     suite('error handling', () => {
         test('a failing search is logged and does not reject', async () => {
             const error = new Error('search failed');
@@ -596,22 +700,16 @@ suite('Workspace Python context', () => {
             assert.deepStrictEqual(contextValues(), [true]);
         });
 
-        test('preserves the current context when a search times out', async () => {
-            const pending = makeDeferred<any[]>();
-            findFilesStub.onFirstCall().resolves([marker('/ws/main.py')]);
-            findFilesStub.onSecondCall().returns(pending.promise);
+        test('a marker that cannot be inspected is found by a rescan', async () => {
+            statStub.rejects(new Error('stat failed'));
             registerWorkspacePythonContext(disposables);
             await flush();
-
-            fireFoldersChanged();
-            await clock.tickAsync(RESCAN_DEBOUNCE_MS);
-            await clock.tickAsync(SCAN_TIMEOUT_MS);
+            findFilesStub.resolves([marker('/ws/main.py')]);
+            fireCreate('/ws/main.py');
             await flush();
-
-            assert.deepStrictEqual(contextValues(), [true]);
-            assert.strictEqual(tokenOfScan(1).isCancellationRequested, true);
-            pending.resolve([]);
-            await flush();
+            await settle();
+            assert.strictEqual(traceErrorStub.callCount, 1);
+            assert.deepStrictEqual(contextValues(), [false, true]);
         });
     });
 });

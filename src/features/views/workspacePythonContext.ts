@@ -1,6 +1,6 @@
-import { CancellationToken, CancellationTokenSource, Disposable, FileType, Uri } from 'vscode';
+import { CancellationTokenSource, Disposable, FileType, Uri } from 'vscode';
 import { executeCommand } from '../../common/command.api';
-import { traceError, traceVerbose } from '../../common/logging';
+import { traceError } from '../../common/logging';
 import { createSimpleDebounce } from '../../common/utils/debounce';
 import { stat } from '../../common/workspace.fs.apis';
 import {
@@ -15,8 +15,6 @@ export const PYTHON_WORKSPACE_KEY = 'python-envs.workspaceHasPython';
 
 /** How long deletes and workspace folder changes must settle before the workspace is scanned again. */
 export const RESCAN_DEBOUNCE_MS = 500;
-/** A slow rescan must not block context updates after the initial value is known. */
-export const SCAN_TIMEOUT_MS = 5000;
 
 /**
  * Files that identify a workspace as a Python one.
@@ -34,10 +32,14 @@ const EXCLUDE = '**/{node_modules,.git,site-packages}/**';
 // `createFileSystemWatcher` has no exclude option, so the same folders are filtered in the handlers.
 const EXCLUDE_RE = /[\\/](node_modules|\.git|site-packages)[\\/]/;
 
-async function findPythonContent(token: CancellationToken): Promise<boolean> {
-    const markers = await findFiles(MARKER_GLOB, EXCLUDE, 1, token);
-    // `findFiles` only searches workspace folders, so also cover a standalone Python file opened without a folder.
-    return markers.length > 0 || getOpenTextDocuments().some((doc) => doc.languageId === 'python');
+// `findFiles` only searches workspace folders, so also cover a standalone Python file opened without a folder.
+function hasOpenPythonDocument(): boolean {
+    return getOpenTextDocuments().some((doc) => doc.languageId === 'python');
+}
+
+/** Whether deleting `deleted` also removes `uri`, because it is the same file or one of its parent folders. */
+function isRemovedBy(uri: string, deleted: string): boolean {
+    return uri === deleted || uri.startsWith(`${deleted}/`);
 }
 
 /**
@@ -47,13 +49,24 @@ async function findPythonContent(token: CancellationToken): Promise<boolean> {
  * Every `findFiles` call is a full workspace search, and a branch switch can create or delete
  * thousands of marker files at once, so events never scan directly:
  * - a created marker that is a file, or an opened Python document, proves the answer is `true`;
- * - deletes and workspace folder changes can turn it `false`, so they share one debounced rescan;
- * - only one scan runs at a time, and a scan that may have missed a change is rerun once afterwards.
+ * - one marker known to exist is remembered, so deleting any other marker cannot change the answer;
+ * - deleting that marker, or a folder containing it, and workspace folder changes share one debounced rescan;
+ * - only one scan runs at a time, and it is rerun if the marker it found was deleted during the search.
+ *
+ * Scans are not timed out: creates and opened Python documents override a slow scan, and workspace
+ * folder changes cancel it.
  */
 export function registerWorkspacePythonContext(disposables: Disposable[]): void {
     let hasPython: boolean | undefined;
+    // The value VS Code last accepted, and whether an update is in flight.
+    let published: boolean | undefined;
+    let publishing = false;
+    // A marker file known to exist. While it does, the answer stays `true`.
+    let witness: string | undefined;
     let running: CancellationTokenSource | undefined;
-    // Set when something changed during the running scan, so its result may be stale.
+    // Markers deleted during the running scan, which may have returned one of them.
+    const deletedDuringScan = new Set<string>();
+    // Set when a rescan was requested while a scan was running.
     let rescanAfterRunning = false;
     // `SimpleDebounce` cannot be cancelled, so a pending rescan is dropped by clearing this flag.
     let rescanPending = false;
@@ -62,18 +75,32 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
     // Created markers whose `stat` is in flight, so a later delete or folder change can invalidate them.
     const pendingChecks = new Map<string, number>();
 
-    const setHasPython = async (value: boolean): Promise<void> => {
+    // Sends one update at a time, always with the latest value, so a slow update cannot overwrite a newer one.
+    const publish = async (): Promise<void> => {
+        publishing = true;
+        while (!disposed && hasPython !== undefined && hasPython !== published) {
+            const value = hasPython;
+            try {
+                await executeCommand('setContext', PYTHON_WORKSPACE_KEY, value);
+                published = value;
+            } catch (ex) {
+                traceError('Failed to update the Python workspace context', ex);
+                // Let the next update retry.
+                if (hasPython === value) {
+                    hasPython = undefined;
+                }
+            }
+        }
+        publishing = false;
+    };
+
+    const setHasPython = (value: boolean): void => {
         if (value === hasPython) {
             return;
         }
         hasPython = value;
-        try {
-            await executeCommand('setContext', PYTHON_WORKSPACE_KEY, value);
-        } catch (ex) {
-            if (hasPython === value) {
-                hasPython = undefined;
-            }
-            throw ex;
+        if (!publishing) {
+            void publish();
         }
     };
 
@@ -101,33 +128,31 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
         }
         const cts = new CancellationTokenSource();
         running = cts;
-        // Only the initial search must finish; later ones keep the current value if they are too slow.
-        const timeout =
-            hasPython === undefined
-                ? undefined
-                : setTimeout(() => {
-                      if (!cts.token.isCancellationRequested) {
-                          traceVerbose(
-                              `Workspace Python marker search exceeded ${SCAN_TIMEOUT_MS} ms; keeping the current context`,
-                          );
-                          cts.cancel();
-                      }
-                  }, SCAN_TIMEOUT_MS);
+        // The scan finds a new witness; until then, deletes are checked against its result instead.
+        witness = undefined;
+        let result: boolean | undefined;
         try {
-            const result = await findPythonContent(cts.token);
-            if (!cts.token.isCancellationRequested && !rescanAfterRunning) {
-                await setHasPython(result);
+            const [found] = await findFiles(MARKER_GLOB, EXCLUDE, 1, cts.token);
+            if (!cts.token.isCancellationRequested) {
+                const key = found?.toString();
+                if (key !== undefined && [...deletedDuringScan].some((deleted) => isRemovedBy(key, deleted))) {
+                    rescanAfterRunning = true;
+                } else {
+                    witness = key;
+                    result = key !== undefined || hasOpenPythonDocument();
+                }
             }
         } catch (ex) {
             if (!cts.token.isCancellationRequested) {
-                traceError('Failed to update the Python workspace context', ex);
+                traceError('Failed to search the workspace for Python files', ex);
             }
         } finally {
-            if (timeout !== undefined) {
-                clearTimeout(timeout);
-            }
             cts.dispose();
             running = undefined;
+            deletedDuringScan.clear();
+        }
+        if (result !== undefined) {
+            setHasPython(result);
         }
         if (rescanAfterRunning) {
             rescanAfterRunning = false;
@@ -143,7 +168,7 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
         running?.cancel();
         rescanPending = false;
         rescanAfterRunning = false;
-        setHasPython(true).catch((ex) => traceError('Failed to update the Python workspace context', ex));
+        setHasPython(true);
     };
 
     const onMarkerCreated = (uri: Uri): void => {
@@ -168,6 +193,8 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
                 }
                 pendingChecks.delete(key);
                 if ((fileStat.type & FileType.File) === FileType.File) {
+                    // Keep an existing witness, which is less likely to be a short-lived file.
+                    witness ??= key;
                     markHasPython();
                 }
             },
@@ -175,6 +202,8 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
                 if (pendingChecks.get(key) === checkId) {
                     pendingChecks.delete(key);
                     traceError('Failed to inspect a created Python marker', ex);
+                    // A search still finds the marker if it is a file.
+                    scheduleRescan();
                 }
             },
         );
@@ -184,10 +213,16 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
         if (disposed || EXCLUDE_RE.test(uri.fsPath)) {
             return;
         }
-        pendingChecks.delete(uri.toString());
-        if (running) {
-            // The running scan may already have listed the deleted file.
-            rescanAfterRunning = true;
+        const key = uri.toString();
+        pendingChecks.delete(key);
+        // While the witness exists, deleting another marker cannot change the answer.
+        if (witness !== undefined && !isRemovedBy(witness, key)) {
+            return;
+        }
+        witness = undefined;
+        if (running && !running.token.isCancellationRequested) {
+            // The running scan checks its result against this.
+            deletedDuringScan.add(key);
         } else if (hasPython !== false) {
             scheduleRescan();
         }
@@ -199,7 +234,8 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
         watcher.onDidCreate(onMarkerCreated),
         watcher.onDidDelete(onMarkerDeleted),
         onDidChangeWorkspaceFolders(() => {
-            // Pending checks and the running scan may belong to a removed folder.
+            // The witness, pending checks and running scan may belong to a removed folder.
+            witness = undefined;
             pendingChecks.clear();
             rescanAfterRunning = false;
             running?.cancel();
@@ -217,7 +253,7 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
             running?.cancel();
         }),
     );
-    if (getOpenTextDocuments().some((doc) => doc.languageId === 'python')) {
+    if (hasOpenPythonDocument()) {
         markHasPython();
     }
     void scan();
