@@ -758,5 +758,20 @@ suite('Workspace Python context', () => {
             assert.strictEqual(findFilesStub.callCount, 1);
             assert.deepStrictEqual(contextValues(), [false]);
         });
+
+        test('a found marker that cannot be re-checked is logged and searched for', async () => {
+            findFilesStub.resolves([marker('/ws/main.py')]);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            const error = new Error('stat failed');
+            statStub.rejects(error);
+            fireDelete('/ws/other.py');
+            await settle(); // re-checks the found marker
+            await settle(); // rescans
+            assert.ok(traceErrorStub.calledOnce);
+            assert.strictEqual(traceErrorStub.firstCall.args[1], error);
+            assert.strictEqual(findFilesStub.callCount, 2);
+            assert.deepStrictEqual(contextValues(), [true]);
+        });
     });
 });

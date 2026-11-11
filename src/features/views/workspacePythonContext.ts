@@ -72,7 +72,7 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
     const deletedDuringScan = new Set<string>();
     // Set when a rescan was requested while a scan was running.
     let rescanAfterRunning = false;
-    // `SimpleDebounce` cannot be cancelled, so a pending rescan is dropped by clearing this flag.
+    // `SimpleDebounce` has no `cancel()`, so a pending rescan is dropped by clearing this flag.
     let rescanPending = false;
     let disposed = false;
     let nextCheckId = 0;
@@ -131,7 +131,10 @@ export function registerWorkspacePythonContext(disposables: Disposable[]): void 
         let exists = false;
         try {
             exists = ((await stat(Uri.parse(candidate))).type & FileType.File) === FileType.File;
-        } catch {
+        } catch (ex) {
+            if (!isFileNotFoundError(ex)) {
+                traceError('Failed to inspect the found Python marker', ex);
+            }
             // Treated as missing; the rescan finds the marker if it still exists.
         }
         if (!exists && !disposed && witness === candidate) {
