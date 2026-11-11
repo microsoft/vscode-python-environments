@@ -196,42 +196,17 @@ suite('Workspace Python context', () => {
             assert.deepStrictEqual(contextValues(), [true, false]);
         });
 
-        test('deleting a file other than the last scan result does not rescan', async () => {
-            findFilesStub.resolves([marker('/ws/main.py')]);
+        test('a delete only invalidates the pending check for the same URI', async () => {
+            const pending = makeDeferred<any>();
+            statStub.returns(pending.promise);
+            const created = marker('/ws/main.py').with({ scheme: 'vscode-remote', authority: 'first' });
             registerWorkspacePythonContext(disposables);
             await flush();
-            fireDelete('/ws/unrelated.py');
-            await settle();
-            assert.strictEqual(findFilesStub.callCount, 1);
-            assert.deepStrictEqual(contextValues(), [true]);
-        });
-
-        test('deleting a marker rescans when Python is known but no marker is tracked', async () => {
-            const initial = makeDeferred<any[]>();
-            findFilesStub.onFirstCall().returns(initial.promise);
-            findFilesStub.onSecondCall().resolves([]);
-            registerWorkspacePythonContext(disposables);
-            fireDocOpened('python');
+            (watcher.onDidCreate.firstCall.args[0] as Listener<any>)(created);
+            (watcher.onDidDelete.firstCall.args[0] as Listener<any>)(created.with({ authority: 'second' }));
+            pending.resolve({ type: FileType.File, ctime: 0, mtime: 0, size: 0 });
             await flush();
-            assert.deepStrictEqual(contextValues(), [true]);
-
-            initial.resolve([]);
-            await flush();
-            fireDelete('/ws/main.py');
-            await settle();
-            assert.strictEqual(findFilesStub.callCount, 2);
-            assert.deepStrictEqual(contextValues(), [true, false]);
-        });
-
-        test('distinguishes markers with the same path in different URI authorities', async () => {
-            const first = marker('/ws/main.py').with({ scheme: 'vscode-remote', authority: 'first' });
-            const second = first.with({ authority: 'second' });
-            findFilesStub.resolves([first]);
-            registerWorkspacePythonContext(disposables);
-            await flush();
-            (watcher.onDidDelete.firstCall.args[0] as Listener<any>)(second);
-            await settle();
-            assert.strictEqual(findFilesStub.callCount, 1);
+            assert.deepStrictEqual(contextValues(), [false, true]);
         });
 
         test('changing workspace folders re-evaluates the context', async () => {
@@ -254,22 +229,6 @@ suite('Workspace Python context', () => {
             await settle();
             assert.deepStrictEqual(contextValues(), [false]);
             assert.strictEqual(findFilesStub.callCount, 2);
-        });
-
-        test('a new marker replaces one from a previous workspace', async () => {
-            findFilesStub.resolves([marker('/old/main.py')]);
-            registerWorkspacePythonContext(disposables);
-            await flush();
-            fireFoldersChanged();
-            fireCreate('/new/main.py');
-            await settle();
-            assert.strictEqual(findFilesStub.callCount, 1);
-
-            findFilesStub.resolves([]);
-            fireDelete('/new/main.py');
-            await settle();
-            assert.strictEqual(findFilesStub.callCount, 2);
-            assert.deepStrictEqual(contextValues(), [true, false]);
         });
 
         test('opening a Python document turns the context on without a rescan', async () => {
@@ -305,24 +264,6 @@ suite('Workspace Python context', () => {
     });
 
     suite('event bursts', () => {
-        test('creating and deleting transient markers preserves the scanned marker', async () => {
-            findFilesStub.resolves([marker('/ws/main.py')]);
-            registerWorkspacePythonContext(disposables);
-            await flush();
-            for (let i = 0; i < 5; i++) {
-                fireCreate(`/ws/temp${i}.py`);
-                await flush();
-                fireDelete(`/ws/temp${i}.py`);
-                await settle();
-            }
-            assert.strictEqual(findFilesStub.callCount, 1, 'transient markers should not trigger rescans');
-            findFilesStub.resolves([]);
-            fireDelete('/ws/main.py');
-            await settle();
-            assert.strictEqual(findFilesStub.callCount, 2);
-            assert.deepStrictEqual(contextValues(), [true, false]);
-        });
-
         test('a burst of creates does not scan the workspace', async () => {
             registerWorkspacePythonContext(disposables);
             await flush();
@@ -331,6 +272,31 @@ suite('Workspace Python context', () => {
             }
             await settle();
             assert.strictEqual(findFilesStub.callCount, 1, 'only the initial scan should have run');
+            assert.deepStrictEqual(contextValues(), [false, true]);
+        });
+
+        test('creates are not inspected while the workspace is known to have Python', async () => {
+            findFilesStub.resolves([marker('/ws/main.py')]);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            for (let i = 0; i < 1000; i++) {
+                fireCreate(`/ws/pkg/mod${i}.py`);
+            }
+            await settle();
+            assert.strictEqual(statStub.callCount, 0);
+            assert.strictEqual(findFilesStub.callCount, 1);
+        });
+
+        test('repeated create events for the same marker are inspected once', async () => {
+            const pending = makeDeferred<any>();
+            statStub.returns(pending.promise);
+            registerWorkspacePythonContext(disposables);
+            await flush();
+            fireCreate('/ws/main.py');
+            fireCreate('/ws/main.py');
+            assert.strictEqual(statStub.callCount, 1);
+            pending.resolve({ type: FileType.File, ctime: 0, mtime: 0, size: 0 });
+            await flush();
             assert.deepStrictEqual(contextValues(), [false, true]);
         });
 
@@ -371,7 +337,7 @@ suite('Workspace Python context', () => {
             assert.strictEqual(findFilesStub.callCount, 2);
         });
 
-        test('a create cancels a pending rescan and replaces the deleted marker', async () => {
+        test('a create cancels a pending rescan', async () => {
             findFilesStub.resolves([marker('/ws/main.py')]);
             registerWorkspacePythonContext(disposables);
             await flush();
@@ -417,7 +383,7 @@ suite('Workspace Python context', () => {
             assert.strictEqual(findFilesStub.callCount, 2, 'no second scan while one is running');
 
             pending[1].resolve([marker('/ws/pkg/mod0.py')]);
-            await flush();
+            await settle();
             assert.strictEqual(findFilesStub.callCount, 3, 'exactly one follow up scan');
             pending[2].resolve([]);
             await settle();
@@ -452,12 +418,12 @@ suite('Workspace Python context', () => {
             await flush();
             fireDelete('/ws/main.py');
             initial.resolve([]);
-            await flush();
+            await settle();
             assert.strictEqual(findFilesStub.callCount, 2);
             assert.deepStrictEqual(contextValues(), [true, false]);
         });
 
-        test('a delete while a cancelled scan finishes triggers a rescan without a known marker', async () => {
+        test('a delete while a cancelled scan finishes triggers a rescan', async () => {
             const initial = makeDeferred<any[]>();
             findFilesStub.onFirstCall().returns(initial.promise);
             findFilesStub.onSecondCall().resolves([]);
@@ -468,7 +434,7 @@ suite('Workspace Python context', () => {
 
             fireDelete('/ws/main.py');
             initial.resolve([]);
-            await flush();
+            await settle();
             assert.strictEqual(findFilesStub.callCount, 2);
             assert.deepStrictEqual(contextValues(), [true, false]);
         });
