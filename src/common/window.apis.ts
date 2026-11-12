@@ -32,6 +32,7 @@ import {
     window,
     WindowState,
 } from 'vscode';
+import { traceError } from './logging';
 import { createDeferred } from './utils/deferred';
 
 export function createStatusBarItem(id: string, alignment?: StatusBarAlignment, priority?: number): StatusBarItem {
@@ -152,6 +153,13 @@ export interface QuickPickButtonEvent<T extends QuickPickItem> {
     readonly button: QuickInputButton;
 }
 
+export interface QuickPickWithButtonsOptions<T extends QuickPickItem> extends QuickPickOptions {
+    showBackButton?: boolean;
+    buttons?: QuickInputButton[];
+    selected?: T[];
+    itemLoader?: (updateItems: (items: readonly T[]) => void) => Promise<void>;
+}
+
 export function showQuickPick<T extends QuickPickItem>(
     items: readonly T[] | Thenable<readonly T[]>,
     options?: QuickPickOptions,
@@ -175,7 +183,7 @@ export function withProgress<R>(
 
 export async function showQuickPickWithButtons<T extends QuickPickItem>(
     items: readonly T[],
-    options?: QuickPickOptions & { showBackButton?: boolean; buttons?: QuickInputButton[]; selected?: T[] },
+    options?: QuickPickWithButtonsOptions<T>,
     token?: CancellationToken,
     itemButtonHandler?: (e: QuickPickItemButtonEvent<T>) => void,
 ): Promise<T | T[] | undefined> {
@@ -191,6 +199,8 @@ export async function showQuickPickWithButtons<T extends QuickPickItem>(
     quickPick.placeholder = options?.placeHolder;
     quickPick.title = options?.title;
     quickPick.selectedItems = options?.selected ?? [];
+    const itemLoader = options?.itemLoader;
+    quickPick.busy = itemLoader !== undefined;
 
     if (options?.showBackButton) {
         quickPick.buttons = [QuickInputButtons.Back];
@@ -240,6 +250,35 @@ export async function showQuickPickWithButtons<T extends QuickPickItem>(
         );
     }
     quickPick.show();
+
+    if (itemLoader) {
+        void Promise.resolve()
+            .then(() =>
+                itemLoader((updatedItems) => {
+                    if (deferred.completed) {
+                        return;
+                    }
+                    const activeItems = quickPick.activeItems;
+                    const selectedItems = quickPick.selectedItems;
+                    quickPick.keepScrollPosition = true;
+                    quickPick.items = updatedItems;
+                    const retainedSelectedItems = selectedItems.filter((item) => updatedItems.includes(item));
+                    const retainedActiveItems = activeItems.filter((item) => updatedItems.includes(item));
+                    if (retainedSelectedItems.length > 0) {
+                        quickPick.selectedItems = retainedSelectedItems;
+                    }
+                    if (retainedActiveItems.length > 0) {
+                        quickPick.activeItems = retainedActiveItems;
+                    }
+                }),
+            )
+            .catch((ex) => traceError('Failed to update quick pick items', ex))
+            .finally(() => {
+                if (!deferred.completed) {
+                    quickPick.busy = false;
+                }
+            });
+    }
 
     try {
         return await deferred.promise;
