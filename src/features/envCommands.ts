@@ -49,6 +49,8 @@ import {
     pickWorkspaceFolder,
 } from '../common/pickers/managers';
 import { pickProject, pickProjectMany } from '../common/pickers/projects';
+import { isSameEnvironmentForProjectSelection as isSameEnvironment } from '../common/utils/environmentUtils';
+import { normalizePath } from '../common/utils/pathUtils';
 import { isWindows } from '../common/utils/platformUtils';
 import { handlePythonPath } from '../common/utils/pythonPath';
 import {
@@ -484,10 +486,24 @@ async function setEnvironmentCommandInternal(
             const view = context as PythonEnvTreeItem;
             const projects = wm.getProjects();
             if (projects.length > 0) {
-                const selected = await pickProjectMany(projects);
-                if (selected && selected.length > 0) {
-                    // Check if the selected environment is already the current one for each project
-                    await setEnvironmentForProjects(selected, context.environment, em);
+                const currentEnvironments = await Promise.all(
+                    projects.map((project) => em.getEnvironment(project.uri)),
+                );
+                const projectsUsingEnvironment = projects.filter((_, index) =>
+                    isSameEnvironment(currentEnvironments[index], view.environment),
+                );
+                const selected = await pickProjectMany(projects, {
+                    showPickerForSingleProject: true,
+                    selectedProjects: projectsUsingEnvironment,
+                });
+                if (selected !== undefined) {
+                    await applyProjectEnvironmentSelection(
+                        projects,
+                        projectsUsingEnvironment,
+                        selected,
+                        view.environment,
+                        em,
+                    );
                 }
             } else {
                 await em.setEnvironments('global', view.environment);
@@ -564,10 +580,10 @@ async function setEnvironmentForProjects(
     environment: PythonEnvironment,
     em: EnvironmentManagers,
 ) {
-    let alreadySet: PythonProject[] = [];
+    const alreadySet: PythonProject[] = [];
     for (const p of selectedProjects) {
         const currentEnv = await em.getEnvironment(p.uri);
-        if (currentEnv?.envId.id === environment.envId.id) {
+        if (isSameEnvironment(currentEnv, environment)) {
             alreadySet.push(p);
         }
     }
@@ -585,6 +601,49 @@ async function setEnvironmentForProjects(
         return;
     }
     await em.setEnvironments(uris, environment);
+}
+
+async function applyProjectEnvironmentSelection(
+    projects: readonly PythonProject[],
+    previouslySelected: readonly PythonProject[],
+    selected: readonly PythonProject[],
+    environment: PythonEnvironment,
+    em: EnvironmentManagers,
+): Promise<void> {
+    const selectedPaths = new Set(selected.map(getProjectPathKey));
+    const currentEnvironments = await Promise.all(projects.map((project) => em.getEnvironment(project.uri)));
+    const currentEnvironmentByProject = new Map(
+        projects.map((project, index) => [getProjectPathKey(project), currentEnvironments[index]]),
+    );
+    const resetCandidates = previouslySelected.filter(
+        (project) => !selectedPaths.has(getProjectPathKey(project)),
+    );
+    const projectsToSet = selected.filter(
+        (project) => !isSameEnvironment(currentEnvironmentByProject.get(getProjectPathKey(project)), environment),
+    );
+
+    if (projectsToSet.length > 0) {
+        await em.setEnvironments(
+            projectsToSet.map((project) => project.uri),
+            environment,
+        );
+    }
+    const resetEnvironments = await Promise.all(
+        resetCandidates.map((project) => em.getEnvironment(project.uri)),
+    );
+    const projectsToReset = resetCandidates.filter((_, index) =>
+        isSameEnvironment(resetEnvironments[index], environment),
+    );
+    if (projectsToReset.length > 0) {
+        await em.setEnvironments(
+            projectsToReset.map((project) => project.uri),
+            undefined,
+        );
+    }
+}
+
+function getProjectPathKey(project: PythonProject): string {
+    return normalizePath(path.resolve(project.uri.fsPath));
 }
 
 export async function setEnvManagerCommand(em: EnvironmentManagers, wm: PythonProjectManager): Promise<void> {
