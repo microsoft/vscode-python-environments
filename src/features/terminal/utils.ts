@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { Disposable, env, ExtensionTerminalOptions, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
+import { ConfigurationTarget, Disposable, env, ExtensionTerminalOptions, tasks, Terminal, TerminalOptions, Uri } from 'vscode';
 import {
     PythonEnvironment,
     PythonEnvironmentApi,
@@ -389,10 +389,12 @@ export type AutoActivationType = 'off' | 'command' | 'shellStartup';
  *
  * Priority order:
  * 1. python-envs.terminal.autoActivationType
- *    a. globalRemoteValue
- *    b. globalLocalValue
- *    c. globalValue
- * 2. python.terminal.activateEnvironment setting (if false, returns 'off')
+ *    a. workspaceFolderValue
+ *    b. workspaceValue
+ *    c. globalRemoteValue
+ *    d. globalLocalValue
+ *    e. globalValue
+ * 2. python.terminal.activateEnvironment setting (if false, returns 'off' & sets autoActivationType to 'off')
  * 3. Default to 'command' if no setting is found
  *
  * @returns {AutoActivationType} The determined auto-activation type
@@ -402,9 +404,15 @@ export function getAutoActivationType(): AutoActivationType {
     const pyEnvsActivationType = pyEnvsConfig.inspect<AutoActivationType>('terminal.autoActivationType');
 
     if (pyEnvsActivationType) {
-        // Priority order: globalRemoteValue > globalLocalValue > globalValue
+        // Priority order: workspaceFolderValue > workspaceValue > globalRemoteValue > globalLocalValue > globalValue
         const activationType = pyEnvsActivationType as Record<string, unknown>;
 
+        if (pyEnvsActivationType.workspaceFolderValue !== undefined) {
+            return pyEnvsActivationType.workspaceFolderValue;
+        }
+        if (pyEnvsActivationType.workspaceValue !== undefined) {
+            return pyEnvsActivationType.workspaceValue;
+        }
         if ('globalRemoteValue' in pyEnvsActivationType && activationType.globalRemoteValue !== undefined) {
             return activationType.globalRemoteValue as AutoActivationType;
         }
@@ -429,7 +437,19 @@ export function getAutoActivationType(): AutoActivationType {
 
 export async function setAutoActivationType(value: AutoActivationType): Promise<void> {
     const config = getConfiguration('python-envs');
-    return await config.update('terminal.autoActivationType', value, true);
+    const inspected = config.inspect<AutoActivationType>('terminal.autoActivationType');
+
+    // If a workspace-level override exists, update that scope instead of global,
+    // otherwise switching back (e.g. to 'command') would have no visible effect
+    // since the workspace value still takes priority on read.
+    if (inspected?.workspaceFolderValue !== undefined) {
+        return await config.update('terminal.autoActivationType', value, ConfigurationTarget.WorkspaceFolder);
+    }
+    if (inspected?.workspaceValue !== undefined) {
+        return await config.update('terminal.autoActivationType', value, ConfigurationTarget.Workspace);
+    }
+
+    return await config.update('terminal.autoActivationType', value, ConfigurationTarget.Global);
 }
 
 /**
