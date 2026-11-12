@@ -55,6 +55,8 @@ import type {
  */
 
 export class InternalEnvironmentManager implements EnvironmentManager {
+    private _version?: Promise<Pep440Version | undefined>;
+
     public constructor(
         public readonly id: string,
         private readonly manager: EnvironmentManager,
@@ -87,7 +89,8 @@ export class InternalEnvironmentManager implements EnvironmentManager {
     }
 
     public getVersion(): Promise<Pep440Version | undefined> {
-        return this.manager.getVersion ? this.manager.getVersion() : Promise.resolve(undefined);
+        this._version ??= this.manager.getVersion ? this.manager.getVersion() : Promise.resolve(undefined);
+        return this._version;
     }
 
     public get capabilities(): EnvironmentManager['capabilities'] {
@@ -240,6 +243,7 @@ function inferPackageManagementTrigger(
 }
 
 export class InternalPackageManager implements PackageManager {
+    private readonly _version = new Map<string, Promise<Pep440Version | undefined>>();
     private readonly relatedManagers: WeakSet<PackageManager>;
     private readonly packageChangeEventValue: Event<DidChangePackagesEventArgs> | undefined;
     private isDisposed = false;
@@ -386,7 +390,15 @@ export class InternalPackageManager implements PackageManager {
 
     getVersion(environment: PythonEnvironment): Promise<Pep440Version | undefined> {
         this.throwIfDisposed();
-        return this.manager.getVersion ? this.manager.getVersion(environment) : Promise.resolve(undefined);
+        const environmentId = environment.envId.id;
+        let version = this._version.get(environmentId);
+        if (!version) {
+            version = this.manager.getVersion
+                ? this.manager.getVersion(environment)
+                : Promise.resolve(undefined);
+            this._version.set(environmentId, version);
+        }
+        return version;
     }
 
     getPackageAvailableVersions(

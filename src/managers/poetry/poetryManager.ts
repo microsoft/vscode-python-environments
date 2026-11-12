@@ -48,6 +48,7 @@ import {
     setPoetryForWorkspaces,
 } from './poetryUtils';
 import { PoetryVersionCommand } from './commands/version';
+import { POETRY_MANAGER_ID } from '../../common/constants';
 
 export class PoetryManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
@@ -82,7 +83,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
     ) {
         this.name = 'poetry';
         this.displayName = 'Poetry';
-        this.preferredPackageManagerId = 'ms-python.python:poetry';
+        this.preferredPackageManagerId = POETRY_MANAGER_ID;
         this.tooltip = new MarkdownString(PoetryStrings.poetryManager, true);
     }
 
@@ -157,7 +158,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
             if (toolSource === 'none') {
                 result = 'tool_not_found';
                 if (this.projectManager) {
-                    await notifyMissingManagerIfDefault('ms-python.python:poetry', this.projectManager, this.api);
+                    await notifyMissingManagerIfDefault(POETRY_MANAGER_ID, this.projectManager, this.api);
                 }
             }
         } catch (ex) {
@@ -210,9 +211,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
         }
 
         if (scope === 'global') {
-            return this.collection.filter((env) => {
-                return env.group === POETRY_GLOBAL;
-            });
+            return [];
         }
 
         if (scope instanceof Uri) {
@@ -272,6 +271,7 @@ export class PoetryManager implements EnvironmentManager, Disposable {
 
     async set(scope: SetEnvironmentScope, environment?: PythonEnvironment | undefined): Promise<void> {
         if (scope === undefined) {
+            this.globalEnv = environment;
             await setPoetryForGlobal(environment?.environmentPath?.fsPath);
         } else if (scope instanceof Uri) {
             const folder = this.api.getPythonProject(scope);

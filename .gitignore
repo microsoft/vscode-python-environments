@@ -15,3 +15,7 @@ ai-artifacts/*
 
 # Code health analysis snapshots (generated, uploaded as artifacts)
 analysis-snapshot.json
+
+# Localization is generated from the dev handback during releases.
+/package.nls.*.json
+/l10n/

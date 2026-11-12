@@ -22,7 +22,7 @@ import * as helpers from '../../managers/builtin/helpers';
 import { PipPackageManager } from '../../managers/builtin/pipPackageManager';
 import { UvPackageManager } from '../../managers/builtin/uvPackageManager';
 import { BuiltInPackageManager } from '../../managers/builtin/builtInPackageManager';
-import { VenvManager } from '../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../managers/builtin/builtInEnvironmentManager';
 import * as packageChanges from '../../managers/common/packageChanges';
 import { InternalPackageManager } from '../../managers/common/registeredManagers';
 import { CondaPackageManager } from '../../managers/conda/condaPackageManager';
@@ -31,6 +31,7 @@ import { PoetryManager } from '../../managers/poetry/poetryManager';
 import { PoetryPackageManager } from '../../managers/poetry/poetryPackageManager';
 import * as poetryUtils from '../../managers/poetry/poetryUtils';
 import { createMockLogOutputChannel } from '../mocks/helper';
+import { VENV_MANAGER_ID } from '../../common/constants';
 
 interface SpawnRecord {
     executable: string;
@@ -57,7 +58,7 @@ suite('Public package API execution policy', () => {
         await fs.ensureDir(prefix);
         const executable = path.join(prefix, process.platform === 'win32' ? 'python.exe' : 'python');
         environment = {
-            envId: { id: 'test', managerId: 'ms-python.python:venv' },
+            envId: { id: 'test', managerId: VENV_MANAGER_ID },
             name: 'test',
             displayName: 'test',
             displayPath: executable,
@@ -83,6 +84,7 @@ suite('Public package API execution policy', () => {
         sinon.stub(poetryUtils, 'getPoetry').resolves(path.join(temp, 'poetry'));
         sinon.stub(workspaceFs, 'stat').resolves({ type: FileType.Directory, ctime: 0, mtime: 0, size: 0 });
         sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
+        sinon.stub(managerReady, 'waitForAllEnvManagers').resolves();
         sinon.stub(packageChanges, 'updatePackagesAndNotify').resolves([]);
         progress = sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) =>
             task({ report: () => {} }, source.token),
@@ -134,6 +136,7 @@ suite('Public package API execution policy', () => {
         type Args = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
         return new PythonEnvironmentApiImpl(
             {
+                managers: [],
                 onDidChangeActiveEnvironment: event(),
                 onDidChangePackageProviderPackages: event(),
                 getPackageManager: () => registeredManager,
@@ -163,10 +166,10 @@ suite('Public package API execution policy', () => {
             sinon.stub(helpers, 'getUvExecutable').resolves(path.join(temp, '.pyprojectx', 'main', 'uv'));
             return kind === 'uv'
                 ? new BuiltInPackageManager(
-                    new PipPackageManager(api, log, {} as VenvManager),
-                    new UvPackageManager(api, log, {} as VenvManager),
+                    new PipPackageManager(api, log, {} as BuiltInEnvironmentManager),
+                    new UvPackageManager(api, log, {} as BuiltInEnvironmentManager),
                 )
-                : new PipPackageManager(api, log, {} as VenvManager);
+                : new PipPackageManager(api, log, {} as BuiltInEnvironmentManager);
         }
 
         test(`${kind}: public progress tokens do not enable agent process policy`, async () => {

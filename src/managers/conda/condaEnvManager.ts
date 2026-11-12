@@ -70,6 +70,7 @@ import {
     setCondaForWorkspace,
     setCondaForWorkspaces,
 } from './condaUtils';
+import { CONDA_MANAGER_ID } from '../../common/constants';
 
 export class CondaEnvManager implements EnvironmentManager, Disposable {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
@@ -102,7 +103,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
     ) {
         this.name = 'conda';
         this.displayName = 'Conda';
-        this.preferredPackageManagerId = 'ms-python.python:conda';
+        this.preferredPackageManagerId = CONDA_MANAGER_ID;
         this.tooltip = new MarkdownString(CondaStrings.condaManager, true);
     }
 
@@ -251,7 +252,7 @@ export class CondaEnvManager implements EnvironmentManager, Disposable {
                 result = 'tool_not_found';
                 traceInfo('Conda not found, conda features will be inactive.');
                 if (this.projectManager) {
-                    await notifyMissingManagerIfDefault('ms-python.python:conda', this.projectManager, this.api);
+                    await notifyMissingManagerIfDefault(CONDA_MANAGER_ID, this.projectManager, this.api);
                 }
             } else if (condaTool) {
                 // Conda was found — populate sourcing information for activation/shell support.

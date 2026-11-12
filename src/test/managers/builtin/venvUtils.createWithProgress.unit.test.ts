@@ -17,6 +17,7 @@ import * as pipUtils from '../../../managers/builtin/pipUtils';
 import { PythonToolError, PythonToolOperation } from '../../../internal/pythonToolSupport';
 import { NativePythonEnvironmentKind, NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import * as managerUtils from '../../../managers/common/utils';
+import { SYSTEM_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID } from '../../../common/constants';
 
 suite('createWithProgress uv tracking', () => {
     let addUvEnvironmentStub: sinon.SinonStub;
@@ -35,7 +36,7 @@ suite('createWithProgress uv tracking', () => {
         await fs.outputFile(pythonPath, '');
 
         baseEnvironment = {
-            envId: { id: 'base', managerId: 'ms-python.python:system' },
+            envId: { id: 'base', managerId: SYSTEM_MANAGER_ID },
             name: 'base',
             displayName: 'base',
             displayPath: pythonPath,
@@ -46,7 +47,7 @@ suite('createWithProgress uv tracking', () => {
         };
         const createdEnvironment = {
             ...baseEnvironment,
-            envId: { id: 'created', managerId: 'ms-python.python:inline-script' },
+            envId: { id: 'created', managerId: INLINE_SCRIPT_MANAGER_ID },
         };
         api = {
             createPythonEnvironmentItem: sinon.stub().returns(createdEnvironment),
@@ -101,6 +102,62 @@ suite('createWithProgress uv tracking', () => {
             path.join(tempRoot, '.pyprojectx', 'main', 'uv'),
         );
     });
+
+    for (const toolExecution of [false, true]) {
+        test(`prepares shared execution options and preserves facade ownership (tool execution: ${toolExecution})`, async () => {
+            const source = new CancellationTokenSource();
+            const create = sinon.stub().resolves();
+            const selectBackend = sinon.stub().resolves({ usesUv: false, create });
+            const operation: PythonToolOperation | undefined = toolExecution
+                ? {
+                      token: source.token,
+                      managePackages: sinon.stub().resolves(),
+                      getGlobalEnvironments: async () => [baseEnvironment],
+                  }
+                : undefined;
+            try {
+                const result = await createWithProgress(
+                    nativeFinder,
+                    api,
+                    log,
+                    manager,
+                    baseEnvironment,
+                    Uri.file(tempRoot),
+                    envPath,
+                    undefined,
+                    true,
+                    { selectBackend, operation },
+                );
+
+                assert.ok(result?.environment);
+                sinon.assert.calledOnceWithExactly(
+                    selectBackend,
+                    baseEnvironment,
+                    Uri.file(tempRoot),
+                    operation?.token,
+                );
+                sinon.assert.calledOnceWithExactly(create, {
+                    executable: baseEnvironment.execInfo.run.executable,
+                    environmentPath: envPath,
+                    cwd: Uri.file(tempRoot).fsPath,
+                    log,
+                    token: operation?.token,
+                    timeout: toolExecution ? 300_000 : undefined,
+                    toolExecution,
+                });
+                sinon.assert.calledWithExactly(
+                    api.createPythonEnvironmentItem as sinon.SinonStub,
+                    sinon.match.object,
+                    manager,
+                );
+                sinon.assert.notCalled(builtinHelpers.shouldUseUv as sinon.SinonStub);
+                sinon.assert.notCalled(builtinHelpers.runUV as sinon.SinonStub);
+                sinon.assert.notCalled(addUvEnvironmentStub);
+            } finally {
+                source.dispose();
+            }
+        });
+    }
 
     test('skips workspace-scoped uv tracking when explicitly disabled', async () => {
         const result = await createWithProgress(
@@ -473,7 +530,7 @@ suite('getBaseInterpreterForVenv', () => {
 
     function makeBase(executable: string, sysPrefix: string): PythonEnvironment {
         return {
-            envId: { id: 'base', managerId: 'ms-python.python:system' },
+            envId: { id: 'base', managerId: SYSTEM_MANAGER_ID },
             name: 'base',
             displayName: 'base',
             displayPath: executable,

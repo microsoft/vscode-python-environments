@@ -6,6 +6,7 @@ import { traceError, traceVerbose } from '../../common/logging';
 import { showQuickPickWithButtons } from '../../common/window.apis';
 import type { EnvironmentManagers } from '../envManagers';
 import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
+import { VENV_MANAGER_ID } from '../../common/constants';
 
 /**
  * Prompts the user to choose whether to create a new virtual environment (venv) for a project, with a clearer return and early exit.
@@ -74,7 +75,7 @@ export async function promptForCopilotInstructions(): Promise<boolean | undefine
 export async function quickCreateNewVenv(envManagers: EnvironmentManagers, destFolder: string) {
     // get the environment manager for venv, should always exist
     const envManager: InternalEnvironmentManager | undefined = envManagers.managers.find(
-        (m) => m.id === 'ms-python.python:venv',
+        (m) => m.id === VENV_MANAGER_ID,
     );
     const destinationUri = Uri.parse(destFolder);
     if (envManager?.supportsQuickCreate) {

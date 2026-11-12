@@ -13,7 +13,7 @@ import { BuiltInPackageManager } from '../../../managers/builtin/builtInPackageM
 import * as helpers from '../../../managers/builtin/helpers';
 import { PipPackageManager } from '../../../managers/builtin/pipPackageManager';
 import { UvPackageManager } from '../../../managers/builtin/uvPackageManager';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
 import { createMockLogOutputChannel } from '../../mocks/helper';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 
@@ -35,7 +35,7 @@ suite('BuiltInPackageManager routing', () => {
         createPackageItem = sinon.stub().callsFake((info) => info);
         const api: Partial<PythonEnvironmentApi> = { createPackageItem };
         const log = createMockLogOutputChannel();
-        const venv = {} as VenvManager;
+        const venv = {} as BuiltInEnvironmentManager;
         uv = new UvPackageManager(api as PythonEnvironmentApi, log, venv);
         pip = new PipPackageManager(api as PythonEnvironmentApi, log, venv);
         manager = new BuiltInPackageManager(pip, uv);

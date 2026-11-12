@@ -2,7 +2,7 @@
     "name": "vscode-python-envs",
     "displayName": "Python Environments",
     "description": "Provides a unified python environment experience",
-    "version": "1.41.0",
+    "version": "1.43.0",
     "publisher": "ms-python",
     "engines": {
         "vscode": "^1.110.0-20260204"
@@ -93,8 +93,11 @@
                     "default": false,
                     "scope": "window",
                     "requiresReload": true,
+                    "experiment": {
+                        "mode": "startup",
+                        "name": "/pythonenvs/config.python-envs.inlineScripts.enabled"
+                    },
                     "tags": [
-                        "onExP",
                         "preview"
                     ]
                 },
@@ -155,6 +158,30 @@
                     "type": "boolean",
                     "description": "%python-envs.alwaysUseUv.description%",
                     "default": true,
+                    "scope": "machine"
+                },
+                "python-envs.globalPackageInstallationAction": {
+                    "type": "string",
+                    "description": "%python-envs.globalPackageInstallationAction.description%",
+                    "default": "ask",
+                    "enum": [
+                        "ask",
+                        "continueGlobally",
+                        "useExisting",
+                        "createNew"
+                    ],
+                    "enumItemLabels": [
+                        "%python-envs.globalPackageInstallationAction.ask.label%",
+                        "%python-envs.globalPackageInstallationAction.continueGlobally.label%",
+                        "%python-envs.globalPackageInstallationAction.useExisting.label%",
+                        "%python-envs.globalPackageInstallationAction.createNew.label%"
+                    ],
+                    "enumDescriptions": [
+                        "%python-envs.globalPackageInstallationAction.ask.description%",
+                        "%python-envs.globalPackageInstallationAction.continueGlobally.description%",
+                        "%python-envs.globalPackageInstallationAction.useExisting.description%",
+                        "%python-envs.globalPackageInstallationAction.createNew.description%"
+                    ],
                     "scope": "machine"
                 },
                 "python-envs.packageWatchers": {
@@ -745,7 +772,7 @@
         "pretest": "npm run compile-tests && npm run compile",
         "lint": "eslint --config=eslint.config.mjs src",
         "unittest": "mocha --config=./build/.mocha.unittests.json",
-        "smoke-test": "vscode-test --label smokeTests",
+        "smoke-test": "vscode-test --label smokeTests --label smokeTestsInlineScriptsEnabled --label smokeTestsInlineScriptsExperimentEnabled",
         "e2e-test": "vscode-test --label e2eTests --install-extensions ms-python.python",
         "integration-test": "vscode-test --label integrationTests --install-extensions ms-python.python",
         "integration-test-multiroot": "vscode-test --label integrationTestsMultiRoot --install-extensions ms-python.python",
@@ -782,6 +809,7 @@
         "@vscode/test-cli": "^0.0.10",
         "dotenv": "^16.4.5",
         "fs-extra": "^11.2.0",
+        "shell-quote": "^1.12.0",
         "stack-trace": "0.0.10",
         "vscode-jsonrpc": "^9.0.0-next.5",
         "which": "^4.0.0"

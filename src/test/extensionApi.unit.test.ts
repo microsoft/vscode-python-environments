@@ -15,6 +15,7 @@ import * as telemetry from '../common/telemetry/sender';
 import * as managerReady from '../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
 import type { PythonProjectManager } from '../features/projectManager';
+import { VENV_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import { createMockPythonEnvironment } from './mocks/pythonEnvironment';
 
@@ -35,6 +36,7 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
         const mockProjectCreators = {} as unknown as ApiArgs[2];
         const mockTerminalManager = {} as unknown as ApiArgs[3];
         const mockEnvVarManager = { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4];
+        const environmentManagerRegistration = createDeferred<void>();
 
         const api = new PythonEnvironmentApiImpl(
             mockEnvManagers,
@@ -42,8 +44,11 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
             mockProjectCreators,
             mockTerminalManager,
             mockEnvVarManager,
+            [],
+            environmentManagerRegistration.promise,
         );
         assert.strictEqual(api.__pythonTools.version, 1);
+        assert.strictEqual(api.__environmentManagerRegistration, environmentManagerRegistration.promise);
         assert.strictEqual(typeof api.getEnvironment, 'function');
 
         let firedEventPayload: unknown = null;
@@ -89,7 +94,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
     test('returns the last-known environment while a slower lookup continues in the background', async () => {
         const scope = Uri.file('/workspace/script.py');
         const lastKnown: PythonEnvironment = {
-            envId: { id: 'default', managerId: 'ms-python.python:venv' },
+            envId: { id: 'default', managerId: VENV_MANAGER_ID },
             name: 'default',
             displayName: 'default',
             displayPath: '/env/default',
@@ -116,7 +121,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
             ),
             getLastKnownEnvironment: sinon.stub().withArgs(scope).returns(lastKnown),
             getEnvironmentManager: sinon.stub().returns({
-                id: 'ms-python.python:venv',
+                id: VENV_MANAGER_ID,
                 getCapability: sinon.stub().resolves({ supported: true }),
                 getVersion: sinon.stub().resolves(undefined),
             }),
@@ -164,7 +169,7 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
             ),
             getLastKnownEnvironment: sinon.stub().returns(lastKnown),
             getEnvironmentManager: sinon.stub().returns({
-                id: 'ms-python.python:inline-script',
+                id: INLINE_SCRIPT_MANAGER_ID,
                 getCapability: sinon.stub().resolves({ supported: true }),
                 getVersion: sinon.stub().resolves(undefined),
             }),
@@ -189,8 +194,10 @@ suite('PythonEnvironmentApiImpl - getEnvironment timeout fallback', () => {
 });
 
 suite('PythonEnvironmentApiImpl - package resolution', () => {
+    let waitForEnvManagerId: sinon.SinonStub;
+
     setup(() => {
-        sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
+        waitForEnvManagerId = sinon.stub(managerReady, 'waitForEnvManagerId').resolves();
     });
 
     teardown(() => {
@@ -261,6 +268,7 @@ suite('PythonEnvironmentApiImpl - package resolution', () => {
 
         assert.ok(getPackageManager.calledWithExactly(environment));
         assert.ok(manage.calledOnceWithExactly(environment, { install: ['example'] }));
+        assert.ok(waitForEnvManagerId.calledOnceWithExactly(['environment-manager']));
     });
 
 });

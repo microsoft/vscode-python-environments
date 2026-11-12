@@ -12,6 +12,7 @@ import * as pythonInstaller from '../../../managers/builtin/pythonInstaller';
 import { SysPythonManager } from '../../../managers/builtin/sysPythonManager';
 import * as sysUtils from '../../../managers/builtin/utils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
+import { SYSTEM_MANAGER_ID } from '../../../common/constants';
 
 suite('SysPythonManager saved selections', () => {
     const projectUri = Uri.file(path.resolve('project'));
@@ -21,7 +22,7 @@ suite('SysPythonManager saved selections', () => {
 
     function makeEnv(executable: string): PythonEnvironment {
         return {
-            envId: { id: `system:${executable}`, managerId: 'ms-python.python:system' },
+            envId: { id: `system:${executable}`, managerId: SYSTEM_MANAGER_ID },
             name: 'Python 3.13.15 (uv)',
             displayName: 'Python 3.13.15 (uv)',
             displayPath: executable,
@@ -79,5 +80,15 @@ suite('SysPythonManager saved selections', () => {
         assert.strictEqual(created, listed);
         assert.strictEqual((await manager.getEnvironments('all')).length, 1);
         assert.strictEqual(added.length, 0);
+    });
+
+    test('create returns undefined when quickCreate is requested without prompting for version selection', async () => {
+        const selectAndInstallStub = sinon.stub(pythonInstaller, 'selectAndInstallPython');
+        const manager = createManager();
+
+        const created = await manager.create('global', { quickCreate: true });
+
+        assert.strictEqual(created, undefined);
+        assert.strictEqual(selectAndInstallStub.called, false);
     });
 });

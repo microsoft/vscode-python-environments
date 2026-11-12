@@ -90,6 +90,8 @@ function logCapabilityQueryError(error: unknown): void {
 
 export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     readonly __pythonTools: PythonToolsApi;
+    /** Private startup signal used by extension-host smoke tests; excluded from the published API. */
+    readonly __environmentManagerRegistration: Promise<void>;
     private readonly _onDidChangeEnvironments = new EventEmitter<DidChangeEnvironmentsEventArgs>();
     private readonly _onDidChangeEnvironment = new EventEmitter<DidChangeEnvironmentEventArgs>();
     private readonly _onDidChangePythonProjects = new EventEmitter<DidChangePythonProjectsEventArgs>();
@@ -106,8 +108,10 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         private readonly terminalManager: TerminalManager,
         private readonly envVarManager: EnvVarManager,
         private readonly disposables: Disposable[] = [],
+        environmentManagerRegistration: Promise<void> = Promise.resolve(),
     ) {
         this.__pythonTools = new PythonToolsApiImpl(envManagers, projectManager);
+        this.__environmentManagerRegistration = environmentManagerRegistration;
         this.previousProjects = this.projectManager.getProjects();
 
         this.disposables.push(
@@ -503,6 +507,7 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
     registerPackageManager(manager: PackageManager, options?: { extensionId?: string }): Disposable {
         return this.envManagers.registerPackageManager(manager, options);
     }
+
     async managePackages(context: PythonEnvironment, options: PackageManagementOptions): Promise<void> {
         await waitForEnvManagerId([context.envId.managerId]);
         const manager = this.envManagers.getPackageManager(context);
@@ -653,9 +658,18 @@ export function setPythonApi(
     projectCreators: ProjectCreators,
     terminalManager: TerminalManager,
     envVarManager: EnvVarManager,
+    environmentManagerRegistration: Promise<void> = Promise.resolve(),
 ) {
     _deferred.resolve(
-        new PythonEnvironmentApiImpl(envMgr, projectMgr, projectCreators, terminalManager, envVarManager),
+        new PythonEnvironmentApiImpl(
+            envMgr,
+            projectMgr,
+            projectCreators,
+            terminalManager,
+            envVarManager,
+            [],
+            environmentManagerRegistration,
+        ),
     );
 }
 

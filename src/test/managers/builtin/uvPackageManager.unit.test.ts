@@ -13,7 +13,7 @@ import { UvListCommand } from '../../../managers/builtin/commands';
 import * as helpers from '../../../managers/builtin/helpers';
 import * as pipUtils from '../../../managers/builtin/pipUtils';
 import { UvPackageManager } from '../../../managers/builtin/uvPackageManager';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
 import { createMockLogOutputChannel } from '../../mocks/helper';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
 
@@ -35,7 +35,11 @@ suite('UvPackageManager', () => {
         source = new CancellationTokenSource();
         createPackageItem = sinon.stub().callsFake((info) => info);
         const api: Partial<PythonEnvironmentApi> = { createPackageItem };
-        manager = new UvPackageManager(api as PythonEnvironmentApi, createMockLogOutputChannel(), {} as VenvManager);
+        manager = new UvPackageManager(
+            api as PythonEnvironmentApi,
+            createMockLogOutputChannel(),
+            {} as BuiltInEnvironmentManager,
+        );
         getUvExecutable = sinon.stub(helpers, 'getUvExecutable').resolves('workspace-uv');
         runUV = sinon.stub(helpers, 'runUV').resolves('[]');
         runPython = sinon.stub(helpers, 'runPython').rejects(new Error('Unexpected pip invocation'));
@@ -133,7 +137,7 @@ suite('UvPackageManager', () => {
         const api = {} as PythonEnvironmentApi;
         const interactive = new UvPackageManager(api, manager.log, {
             getProjectsByEnvironment: () => [],
-        } as unknown as VenvManager);
+        } as unknown as BuiltInEnvironmentManager);
         try {
             await interactive.manage(environment, { install: [] });
             assert.ok(picker.calledOnce);

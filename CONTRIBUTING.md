@@ -112,12 +112,62 @@ This project has adopted the [Microsoft Open Source Code of Conduct](https://ope
 
 ## Public API package (`@vscode/python-environments`)
 
-The npm package under [`api/`](./api) is the public API facade other extensions consume. Its sources — `api/src/main.ts`, `api/src/types.ts`, and `api/src/publicErrors.ts` — are **copies** of [`src/api.ts`](./src/api.ts), [`src/types.ts`](./src/types.ts), and [`src/publicErrors.ts`](./src/publicErrors.ts) respectively — the single sources of truth — and are **not committed** (see [`api/.gitignore`](./api/.gitignore)).
+The npm package under [`api/`](./api) is the public API facade other extensions consume.
+Its generated `api/src` sources are **not committed** (see [`api/.gitignore`](./api/.gitignore)).
 
-- Edit the public API only in `src/api.ts` (the runtime facade: `PythonEnvironments.api()` helper and `EXTENSION_ID`), `src/types.ts` (public contracts: interfaces, types, enums), and `src/publicErrors.ts` (concrete public error classes and type guards). `api/src/*.ts` files are build artifacts — never edit or commit them.
-- `api/src/main.ts`, `api/src/types.ts`, and `api/src/publicErrors.ts` are produced by the publish pipeline ([`build/azure-pipeline.npm.yml`](./build/azure-pipeline.npm.yml)), which copies `src/api.ts` to `api/src/main.ts`, `src/types.ts` to `api/src/types.ts`, and `src/publicErrors.ts` to `api/src/publicErrors.ts` before compiling. The api package is therefore built in CI only; to build it locally, copy the files first (e.g. `cp src/api.ts api/src/main.ts && cp src/types.ts api/src/types.ts && cp src/publicErrors.ts api/src/publicErrors.ts`).
-- `src/api.ts`, `src/types.ts`, and `src/publicErrors.ts` are validated on every PR by the extension's own lint and TypeScript compile.
-- **Versioning and compatibility:** the published package version in [`api/package.json`](./api/package.json) is maintained independently of the extension version in [`package.json`](./package.json) — the two do not need to match. Compatibility is based on the API shape exported by the installed Python Environments extension at runtime. Package updates must preserve backwards-compatible contracts unless the API package version intentionally communicates a breaking change; consumers should treat newly added members as optional when they may run against older installed extension versions. Any PR that edits `src/api.ts`, `src/types.ts`, or `src/publicErrors.ts` must bump `api/package.json` (use the `skip api version` label to bypass) and add an entry to [`api/CHANGELOG.md`](./api/CHANGELOG.md) (use the `skip api changelog` label to bypass).
+- Edit shared public sources in `src/api.ts`, `src/types.ts`, `src/publicErrors.ts`,
+  `src/capabilities.ts`, and `src/legacyCapabilities.ts`. They are copied under the
+  same filenames into `api/src`. The npm-only entry point is maintained in
+  `api/runtime/main.ts` and copied to `api/src/main.ts`.
+- `npm --prefix api run compile` regenerates these copies and a private
+  `packageMetadata.ts` module from `api/package.json`, then builds declarations,
+  ESM, and CommonJS. Never edit generated sources or maintain a second version
+  constant. Install dependencies with `npm --prefix api ci` first.
+- Run `npm --prefix api test` after compilation. This tests the release validator
+  and packs/installs the package for modern/legacy TypeScript and ESM/CommonJS
+  runtime checks. `npm --prefix api run check:release` validates the declared
+  minimum locally without network requests.
+- Shared API sources are also checked by the extension's lint and TypeScript
+  compile. The PR's **API package compatibility** job builds/tests npm release
+  inputs and validates their declared minimum without a GitHub lookup.
+  Configure that job as a required check in branch protection.
+
+### API versioning and publication
+
+The npm version in [`api/package.json`](./api/package.json) is independent of the
+extension version in [`package.json`](./package.json). Each new npm release must
+declare `minimumExtensionVersion` as an exact stable SemVer identifying the
+chosen supported extension release (without its leading `v`). It need not be the
+latest release. Ranges, prerelease floors, and build metadata are rejected.
+The helper checks installed extension versions before activation using normal
+SemVer precedence, including already-active extensions. Published npm releases
+keep their original minimum.
+
+Defer npm version bumps to release PRs by applying `skip api version` to API
+implementation PRs. Any PR editing a shared public API source or
+`api/runtime/**/*.ts` must still update [`api/CHANGELOG.md`](./api/CHANGELOG.md)
+and [`docs/README.md`](./docs/README.md). The existing `skip api changelog` and
+`skip api docs` labels apply to those file checks. None of these labels bypass
+compatibility or publication validation.
+
+Release in this order: merge API changes without an npm version bump, ship the
+stable extension, then merge an npm release PR updating
+`minimumExtensionVersion`, the npm version, and the changelog. The stable npm
+version bump starts the publication pipeline automatically. Development can merge
+before the extension ships. Release authors must confirm that the declared
+minimum contains the APIs required by the npm package. Automated GitHub release
+and source-provenance checks are deferred to a separate PR; neither PR checks
+nor the publication pipeline currently performs those lookups.
+
+The packed manifest and both compiled runtime floors must agree. The publish
+stage checks this metadata in the actual tarball locally, without a GitHub
+lookup. A newer stable extension does not invalidate the selected baseline or
+require repacking. To change the minimum, update the manifest, rebuild, retest,
+and rerun the pipeline; do not restamp the existing artifact. Both `latest` and
+`next` npm tags currently use a stable baseline: preview-only API publishing
+needs a separate policy.
+
+- **Releasing:** merging a stable version change in `api/package.json` into `main` automatically starts the [npm pipeline](./build/azure-pipeline.npm.yml), including its existing build, package tests, and MicroBuild approval process. Other manifest edits build and validate the package without publishing. The version check compares the merged commit with its parent, relying on the repository's squash-only merge policy; direct pushes to `main` also trigger it. Preview releases remain manual: queue the pipeline with `quality: preview` and `publishPackage: true`. Manual runs otherwise remain build-only unless `publishPackage` is explicitly enabled.
 
 ## Internal Python agent-tool bridge
 

@@ -30,6 +30,7 @@ import * as settingHelpers from '../../features/settings/settingHelpers';
 import type { PythonProjectManager } from '../../features/projectManager';
 import type { InternalPackageManager } from '../../managers/common/registeredManagers';
 import { setupNonThenable } from '../mocks/helper';
+import { DEFAULT_PACKAGE_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID } from '../../common/constants';
 
 suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
     let envManagers: PythonEnvironmentManagers;
@@ -102,7 +103,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         const manager = {
             name,
             displayName: 'Test Env Manager',
-            preferredPackageManagerId: 'ms-python.python:pip',
+            preferredPackageManagerId: DEFAULT_PACKAGE_MANAGER_ID,
             onDidChangeEnvironment: onDidChangeEnvironment.event,
             onDidChangeEnvironments: onDidChangeEnvironments.event,
             get: getImpl,
@@ -120,7 +121,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         return id;
     }
 
-    function stubPackageManager(id = 'ms-python.python:pip'): void {
+    function stubPackageManager(id = DEFAULT_PACKAGE_MANAGER_ID): void {
         const packageManager = typeMoq.Mock.ofType<InternalPackageManager>();
         setupNonThenable(packageManager);
         packageManager.setup((manager) => manager.id).returns(() => id);
@@ -183,7 +184,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         await recovered;
 
         assert.ok(events.some((event) => event.uri === scope && event.new === environment));
-        assert.strictEqual(envManagers.getEnvironmentManager(scope)?.id, 'ms-python.python:inline-script');
+        assert.strictEqual(envManagers.getEnvironmentManager(scope)?.id, INLINE_SCRIPT_MANAGER_ID);
     });
 
     test('returns the active environment after it has been resolved', async () => {
@@ -686,7 +687,7 @@ suite('PythonEnvironmentManagers getLastKnownEnvironment', () => {
         sinon.stub(settingHelpers, 'getExactPythonProjectSetting').returns({
             path: 'script.py',
             envManager: selectedId,
-            packageManager: 'ms-python.python:pip',
+            packageManager: DEFAULT_PACKAGE_MANAGER_ID,
             _inlineScriptRegistration: { kind: 'created' },
         });
         markInlineScript(script);

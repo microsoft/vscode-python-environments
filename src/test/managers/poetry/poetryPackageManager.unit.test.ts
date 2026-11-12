@@ -15,11 +15,12 @@ import { PoetryPackageManager } from '../../../managers/poetry/poetryPackageMana
 import { PoetryManager } from '../../../managers/poetry/poetryManager';
 import * as poetryUtils from '../../../managers/poetry/poetryUtils';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
+import { POETRY_MANAGER_ID } from '../../../common/constants';
 
 suite('PoetryPackageManager', () => {
     const environment = createMockPythonEnvironment({
         envPath: path.join(process.cwd(), '.venv'),
-        managerId: 'ms-python.python:poetry',
+        managerId: POETRY_MANAGER_ID,
     });
     let logError: sinon.SinonStub;
     let manager: PoetryPackageManager;

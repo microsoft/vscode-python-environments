@@ -1,6 +1,12 @@
 name: $(Date:yyyyMMdd)$(Rev:.r)
 
-trigger: none
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - api/package.json
 pr: none
 
 resources:
@@ -48,6 +54,8 @@ variables:
 extends:
   template: azure-pipelines/MicroBuild.1ES.Official.Publish.yml@MicroBuildTemplate
   parameters:
+    settings:
+      networkIsolationPolicy: Preferred,GitHub,NodeTool
     sdl:
       sourceAnalysisPool: VSEng-MicroBuildVSStable
       codeSignValidation:
@@ -74,25 +82,38 @@ extends:
                   targetPath: $(Build.ArtifactStagingDirectory)
                   artifactName: npm-package
             steps:
+              - checkout: self
+                fetchDepth: 2
+
               - template: azure-pipelines/extension/templates/steps/setup.yml@templates
                 parameters:
                   installPython: false
                   customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
                   nodeVersion: $(NodeVersion)
 
-              - script: npm install
+              - bash: |
+                  set -euo pipefail
+                  previous=$(git show HEAD^:api/package.json | jq -er '.version | strings')
+                  current=$(git show HEAD:api/package.json | jq -er '.version | strings')
+                  changed=false
+                  if [[ "$previous" != "$current" && "$current" != *-* ]]; then
+                    changed=true
+                  fi
+                  echo "Package version: $previous -> $current"
+                  echo "##vso[task.setvariable variable=versionChanged;isOutput=true]$changed"
+                name: checkVersion
+                displayName: Check for a stable package version change
+                condition: and(succeeded(), in(variables['Build.Reason'], 'IndividualCI', 'BatchedCI'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+              - script: npm ci
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Install package dependencies
-
-              - script: npm run copy:sources
-                workingDirectory: $(Build.SourcesDirectory)/api
-                displayName: Copy API facade, types, errors, and capabilities to API package sources
 
               - script: npm run compile
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Compile TypeScript
 
-              - script: npm run test:package
+              - script: npm test
                 workingDirectory: $(Build.SourcesDirectory)/api
                 displayName: Pack and validate npm package
 
@@ -106,16 +127,33 @@ extends:
       - stage: PublishNPM
         displayName: Publish to NPM
         dependsOn: Build
-        condition: and(succeeded(), eq('${{ parameters.publishPackage }}', 'true'))
+        condition: and(succeeded(), or(eq('${{ parameters.publishPackage }}', 'true'), eq(dependencies.Build.outputs['BuildPackage.checkVersion.versionChanged'], 'true')))
         jobs:
           - job: PublishPackage
             displayName: Publish npm package
             templateContext:
               isReleaseJob: true
             steps:
+              - checkout: self
+                persistCredentials: false
+
               - download: current
                 artifact: npm-package
                 displayName: Download npm-package artifact
+
+              - template: azure-pipelines/extension/templates/steps/setup.yml@templates
+                parameters:
+                  installPython: false
+                  customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
+                  nodeVersion: $(NodeVersion)
+
+              - script: npm ci --ignore-scripts
+                workingDirectory: $(Build.SourcesDirectory)/api
+                displayName: Install release validator dependencies
+
+              - script: npm run check:release -- --artifact-directory "$(Pipeline.Workspace)/npm-package"
+                workingDirectory: $(Build.SourcesDirectory)/api
+                displayName: Validate packed compatibility metadata before publishing
 
               - template: MicroBuild.Publish.yml@MicroBuildTemplate
                 parameters:

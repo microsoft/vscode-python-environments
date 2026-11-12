@@ -43,7 +43,7 @@ import {
 } from './commands/index';
 import { getUvExecutable } from './helpers';
 import { getWorkspacePackagesToInstall } from './pipUtils';
-import { VenvManager } from './venvManager';
+import { BuiltInEnvironmentManager } from './builtInEnvironmentManager';
 
 let hasShownPackageRefreshError = false;
 
@@ -82,7 +82,7 @@ export class UvPackageManager implements PackageManager, Disposable {
     constructor(
         private readonly api: PythonEnvironmentApi,
         public readonly log: LogOutputChannel,
-        private readonly venv: VenvManager,
+        private readonly venv: BuiltInEnvironmentManager,
     ) {}
 
     /** Evicts inventory for an environment without emitting public package changes. */

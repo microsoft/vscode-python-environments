@@ -9,7 +9,9 @@ import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonProj
 import { VENV_MANAGER_ID } from '../../../common/constants';
 import { normalizePath } from '../../../common/utils/pathUtils';
 import * as windowApis from '../../../common/window.apis';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { createMockPythonEnvironment } from '../../mocks/pythonEnvironment';
@@ -33,7 +35,7 @@ suite('VenvManager auto-selection for a project', () => {
         });
     }
 
-    async function createManager(): Promise<VenvManager> {
+    async function createManager(): Promise<BuiltInEnvironmentManager> {
         const project = { name: 'project', uri: projectUri } as PythonProject;
         const projectRoot = normalizePath(projectUri.fsPath);
         const api = {
@@ -45,7 +47,14 @@ suite('VenvManager auto-selection for a project', () => {
         } as unknown as PythonEnvironmentApi;
         const baseManager = { getEnvironments: sinon.stub().resolves([]) } as unknown as EnvironmentManager;
         const log = { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() } as unknown as LogOutputChannel;
-        const manager = new VenvManager({} as NativePythonFinder, api, baseManager, log);
+        const manager = new BuiltInEnvironmentManager(
+            {} as NativePythonFinder,
+            api,
+            baseManager,
+            log,
+            new VenvEnvironmentManager(),
+            new UvEnvironmentManager(),
+        );
         await manager.initialize();
         return manager;
     }

@@ -8,6 +8,7 @@ import * as workspaceApis from '../../../common/workspace.apis';
 import { ShellStartupActivationVariablesManagerImpl } from '../../../features/terminal/shellStartupActivationVariablesManager';
 import { ShellEnvsProvider } from '../../../features/terminal/shells/startupProvider';
 import * as terminalUtils from '../../../features/terminal/utils';
+import { VENV_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID } from '../../../common/constants';
 
 function makeEnvironment(id: string, managerId: string): PythonEnvironment {
     return {
@@ -47,8 +48,8 @@ class RecordingEnvsProvider implements ShellEnvsProvider {
 suite('ShellStartupActivationVariablesManager', () => {
     const folderUri = Uri.file('/workspace');
     const workspaceFolder = { uri: folderUri, name: 'workspace', index: 0 } as WorkspaceFolder;
-    const folderEnvironment = makeEnvironment('folder-venv', 'ms-python.python:venv');
-    const scriptEnvironment = makeEnvironment('script-env', 'ms-python.python:inline-script');
+    const folderEnvironment = makeEnvironment('folder-venv', VENV_MANAGER_ID);
+    const scriptEnvironment = makeEnvironment('script-env', INLINE_SCRIPT_MANAGER_ID);
 
     let provider: RecordingEnvsProvider;
     let scopedCollection: object;
@@ -113,7 +114,7 @@ suite('ShellStartupActivationVariablesManager', () => {
     test('writes the folder environment resolved at folder scope, not the event payload', async () => {
         await changeListener!({
             uri: folderUri,
-            new: makeEnvironment('stale-payload', 'ms-python.python:venv'),
+            new: makeEnvironment('stale-payload', VENV_MANAGER_ID),
             old: undefined,
         });
 
@@ -137,7 +138,7 @@ suite('ShellStartupActivationVariablesManager', () => {
     });
 
     test('refreshes global startup variables after a global selection changes', async () => {
-        const newEnvironment = makeEnvironment('global-venv-b', 'ms-python.python:venv');
+        const newEnvironment = makeEnvironment('global-venv-b', VENV_MANAGER_ID);
         await changeListener!({ uri: undefined, new: folderEnvironment, old: undefined });
         await changeListener!({ uri: undefined, new: newEnvironment, old: folderEnvironment });
 
@@ -147,7 +148,7 @@ suite('ShellStartupActivationVariablesManager', () => {
     });
 
     test('uses the global change payload while the API still returns the previous selection', async () => {
-        const newEnvironment = makeEnvironment('global-venv-b', 'ms-python.python:venv');
+        const newEnvironment = makeEnvironment('global-venv-b', VENV_MANAGER_ID);
         getEnvironmentStub.resolves(folderEnvironment);
 
         await changeListener!({ uri: undefined, new: newEnvironment, old: folderEnvironment });
@@ -157,7 +158,7 @@ suite('ShellStartupActivationVariablesManager', () => {
     });
 
     test('does not let pending global initialization overwrite a newer selection', async () => {
-        const newEnvironment = makeEnvironment('global-venv-b', 'ms-python.python:venv');
+        const newEnvironment = makeEnvironment('global-venv-b', VENV_MANAGER_ID);
         const pendingInitialization = createDeferred<PythonEnvironment | undefined>();
         getEnvironmentStub.returns(pendingInitialization.promise);
 

@@ -10,7 +10,9 @@ import * as workspaceApis from '../../../common/workspace.apis';
 import * as extensionApi from '../../../extensionApi';
 import { registerSystemPythonFeatures } from '../../../managers/builtin/main';
 import { SysPythonManager } from '../../../managers/builtin/sysPythonManager';
-import { VenvManager } from '../../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../../managers/builtin/venvEnvironmentManager';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 
 suite('registerSystemPythonFeatures - activation watcher', () => {
@@ -44,7 +46,7 @@ suite('registerSystemPythonFeatures - activation watcher', () => {
         createFileSystemWatcherStub = sandbox.stub(workspaceApis, 'createFileSystemWatcher');
         sandbox.stub(workspaceApis, 'onDidDeleteFiles').returns(new Disposable(() => undefined));
 
-        watcherRefreshStub = sandbox.stub(VenvManager.prototype, 'watcherRefresh').resolves();
+        watcherRefreshStub = sandbox.stub(BuiltInEnvironmentManager.prototype, 'watcherRefresh').resolves();
 
         registerPackageManagerStub = sandbox.stub().returns(new Disposable(() => undefined));
         registerEnvironmentManagerStub = sandbox.stub().returns(new Disposable(() => undefined));
@@ -122,7 +124,7 @@ suite('registerSystemPythonFeatures - activation watcher', () => {
         createFileSystemWatcherStub.withArgs('**/*').returns(deletionWatcher);
         const venvFolder = Uri.file(path.resolve('workspace', '.venv'));
         sandbox
-            .stub(VenvManager.prototype, 'hasEnvironmentAt')
+            .stub(BuiltInEnvironmentManager.prototype, 'hasEnvironmentAt')
             .callsFake((fsPath: string) => fsPath === venvFolder.fsPath);
 
         const disposables: Disposable[] = [];
@@ -152,12 +154,14 @@ suite('VenvManager.hasEnvironmentAt', () => {
     const project = path.resolve('venv-delete-project');
     const venvPrefix = path.join(project, '.venv');
 
-    function createManager(): VenvManager {
-        const manager = new VenvManager(
+    function createManager(): BuiltInEnvironmentManager {
+        const manager = new BuiltInEnvironmentManager(
             {} as NativePythonFinder,
             {} as PythonEnvironmentApi,
             {} as SysPythonManager,
             {} as LogOutputChannel,
+            new VenvEnvironmentManager(),
+            new UvEnvironmentManager(),
         );
         (manager as unknown as { collection: PythonEnvironment[] }).collection = [
             { sysPrefix: venvPrefix } as PythonEnvironment,

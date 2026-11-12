@@ -15,7 +15,7 @@ import {
     WorkspaceConfiguration,
 } from 'vscode';
 import { PackageManager, PythonEnvironment } from '../../api';
-import { PYTHON_EXTENSION_ID, SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../common/constants';
+import { PYTHON_EXTENSION_ID, SYSTEM_MANAGER_ID, VENV_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../common/constants';
 import * as persistentState from '../../common/persistentState';
 import { createDeferred, Deferred } from '../../common/utils/deferred';
 import * as frameUtils from '../../common/utils/frameUtils';
@@ -28,7 +28,9 @@ import { PythonProjectManagerImpl } from '../../features/projectManager';
 import { SYSTEM_WORKSPACE_KEY } from '../../managers/builtin/cache';
 import { SysPythonManager } from '../../managers/builtin/sysPythonManager';
 import * as systemUtils from '../../managers/builtin/utils';
-import { VenvManager } from '../../managers/builtin/venvManager';
+import { BuiltInEnvironmentManager } from '../../managers/builtin/builtInEnvironmentManager';
+import { UvEnvironmentManager } from '../../managers/builtin/uvEnvironmentManager';
+import { VenvEnvironmentManager } from '../../managers/builtin/venvEnvironmentManager';
 import * as venvUtils from '../../managers/builtin/venvUtils';
 import { NativePythonFinder } from '../../managers/common/nativePythonFinder';
 import { createMockLogOutputChannel } from '../mocks/helper';
@@ -84,7 +86,14 @@ suite('Python tools stateless startup selection', () => {
             disposables,
         );
         const system = new SysPythonManager(nativeFinder, api, createMockLogOutputChannel());
-        const venv = new VenvManager(nativeFinder, api, system, createMockLogOutputChannel());
+        const venv = new BuiltInEnvironmentManager(
+            nativeFinder,
+            api,
+            system,
+            createMockLogOutputChannel(),
+            new VenvEnvironmentManager(),
+            new UvEnvironmentManager(),
+        );
         const pip: PackageManager = {
             name: 'pip',
             manage: sinon.stub().resolves(),
@@ -159,7 +168,7 @@ suite('Python tools stateless startup selection', () => {
         sinon.stub(workspaceApis, 'getConfiguration').callsFake((section) => {
             const defaults = new Map<string, unknown>([
                 ['python-envs.defaultEnvManager', VENV_MANAGER_ID],
-                ['python-envs.defaultPackageManager', 'ms-python.python:pip'],
+                ['python-envs.defaultPackageManager', DEFAULT_PACKAGE_MANAGER_ID],
                 ['python-envs.pythonProjects', []],
             ]);
             const configuration: WorkspaceConfiguration = {
@@ -307,7 +316,7 @@ suite('Python tools stateless startup selection', () => {
             {
                 path: 'New Service',
                 envManager: VENV_MANAGER_ID,
-                packageManager: 'ms-python.python:pip',
+                packageManager: DEFAULT_PACKAGE_MANAGER_ID,
             },
         ]);
         assert.strictEqual(workspaceSettings.get('python-envs.defaultEnvManager'), undefined);
