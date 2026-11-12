@@ -16,6 +16,7 @@ import * as managerReady from '../features/common/managerReady';
 import { PythonEnvironmentApiImpl } from '../extensionApi';
 import type { PythonProjectManager } from '../features/projectManager';
 import { VENV_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
+import * as nativePythonFinder from '../managers/common/nativePythonFinder';
 import { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import { createMockPythonEnvironment } from './mocks/pythonEnvironment';
 
@@ -76,6 +77,37 @@ suite('PythonEnvironmentApiImpl - onDidChangePythonProjects', () => {
             (firedEventPayload as { removed: PythonProject[] }).removed[0].uri.fsPath,
             newProject.uri.fsPath,
         );
+    });
+});
+
+suite('PythonEnvironmentApiImpl - getAllExtraSearchPaths', () => {
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('delegates to the canonical native finder helper', async () => {
+        const expected = ['configured-envs', 'workspace-envs'];
+        const getAllExtraSearchPaths = sinon
+            .stub(nativePythonFinder, 'getAllExtraSearchPaths')
+            .resolves(expected);
+
+        type ApiArgs = ConstructorParameters<typeof PythonEnvironmentApiImpl>;
+        const api = new PythonEnvironmentApiImpl(
+            {
+                onDidChangeActiveEnvironment: new EventEmitter().event,
+                onDidChangePackageProviderPackages: new EventEmitter().event,
+            } as unknown as ApiArgs[0],
+            {
+                getProjects: () => [],
+                onDidChangeProjects: new EventEmitter<void>().event,
+            } as unknown as ApiArgs[1],
+            {} as ApiArgs[2],
+            {} as ApiArgs[3],
+            { onDidChangeEnvironmentVariables: new EventEmitter().event } as unknown as ApiArgs[4],
+        );
+
+        assert.strictEqual(await api.getAllExtraSearchPaths(), expected);
+        assert.ok(getAllExtraSearchPaths.calledOnceWithExactly());
     });
 });
 

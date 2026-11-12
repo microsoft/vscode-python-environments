@@ -32,6 +32,9 @@ export async function activate() {
     for (const env of envs) {
         console.log(env.displayName, env.version);
     }
+
+    // Reuse the extension's canonical configured environment search paths
+    const searchPaths = await api.getAllExtraSearchPaths();
 }
 ```
 
@@ -92,7 +95,7 @@ The complete manual documents every method and data type, organized by domain -
 environments, packages, projects, execution, environment variables, and
 extensibility - with field tables, parameter tables, return types, and examples.
 
-- [Environments](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#environments) - discover, resolve, select, create, and remove interpreters
+- [Environments](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#environments) - discover, resolve, select, create, and remove interpreters, and read configured search paths
 - [Packages](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#packages) - list, install, uninstall, and look up versions
 - [Projects](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#projects) - the folders the extension tracks
 - [Execution](https://github.com/microsoft/vscode-python-environments/blob/main/docs/README.md#execution) - run Python in terminals, tasks, and background processes
