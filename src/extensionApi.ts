@@ -53,6 +53,7 @@ import type { ProjectCreators } from './features/creators/projectCreators';
 import type { PythonProjectManager } from './features/projectManager';
 import type { InternalEnvironmentManager, InternalPackageManager } from './managers/common/registeredManagers';
 import { PythonEnvironmentImpl, PythonPackageImpl } from './managers/common/models';
+import { getAllExtraSearchPaths as resolveAllExtraSearchPaths } from './managers/common/nativePythonFinder';
 import { waitForAllEnvManagers, waitForEnvManager, waitForEnvManagerId } from './features/common/managerReady';
 import { EnvVarManager } from './features/execution/envVariableManager';
 import { runAsTask } from './features/execution/runAsTask';
@@ -416,6 +417,14 @@ export class PythonEnvironmentApiImpl implements PythonEnvironmentApi {
         const items = await manager.getEnvironments(currentScope);
         return items;
     }
+
+    /**
+     * Returns the canonical configured search paths used by native environment discovery.
+     */
+    getAllExtraSearchPaths(): Promise<string[]> {
+        return resolveAllExtraSearchPaths();
+    }
+
     onDidChangeEnvironments: Event<DidChangeEnvironmentsEventArgs> = this._onDidChangeEnvironments.event;
     async setEnvironment(scope: SetEnvironmentScope, environment?: PythonEnvironment): Promise<void> {
         const currentScope = checkUri(scope) as SetEnvironmentScope;

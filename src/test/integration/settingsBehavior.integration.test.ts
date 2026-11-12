@@ -19,6 +19,7 @@
  */
 
 import * as assert from 'assert';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { PythonEnvironmentApi } from '../../api';
 import { ENVS_EXTENSION_ID } from '../constants';
@@ -170,6 +171,99 @@ suite('Integration: Settings Behavior', function () {
     // SETTINGS + API INTEGRATION TESTS
     // These tests verify settings and API work together correctly.
     // =========================================================================
+
+    test('getAllExtraSearchPaths resolves configured settings through the public API', async function () {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) {
+            this.skip();
+            return;
+        }
+
+        const pythonConfig = vscode.workspace.getConfiguration('python');
+        const globalEnvConfig = vscode.workspace.getConfiguration('python-envs');
+        const workspaceEnvConfig = vscode.workspace.getConfiguration('python-envs', workspaceFolder.uri);
+
+        const originalVenvPath = pythonConfig.inspect<string>('venvPath')?.globalValue;
+        const originalVenvFolders = pythonConfig.inspect<string[]>('venvFolders')?.globalValue;
+        const originalGlobalSearchPaths =
+            globalEnvConfig.inspect<string[]>('globalSearchPaths')?.globalValue;
+        const originalInvalidWorkspaceSearchPaths =
+            globalEnvConfig.inspect<string[]>('workspaceSearchPaths')?.globalValue;
+        const originalWorkspaceSearchPaths =
+            workspaceEnvConfig.inspect<string[]>('workspaceSearchPaths')?.workspaceValue;
+
+        const legacyPath = path.join(workspaceFolder.uri.fsPath, '.api-legacy-envs');
+        const duplicatePath = path.join(workspaceFolder.uri.fsPath, '.api-shared-envs');
+        const globalPath = path.join(workspaceFolder.uri.fsPath, '.api-global-envs');
+        const invalidGlobalWorkspacePath = path.join(
+            workspaceFolder.uri.fsPath,
+            '.api-invalid-global-workspace-envs',
+        );
+        const relativeWorkspacePath = '.api-workspace-envs';
+        const normalize = (value: string) => value.replace(/\\/g, '/');
+
+        try {
+            await pythonConfig.update('venvPath', legacyPath, vscode.ConfigurationTarget.Global);
+            await pythonConfig.update('venvFolders', [duplicatePath], vscode.ConfigurationTarget.Global);
+            await globalEnvConfig.update(
+                'globalSearchPaths',
+                [globalPath, duplicatePath, '', '   '],
+                vscode.ConfigurationTarget.Global,
+            );
+            await globalEnvConfig.update(
+                'workspaceSearchPaths',
+                [invalidGlobalWorkspacePath],
+                vscode.ConfigurationTarget.Global,
+            );
+            await workspaceEnvConfig.update(
+                'workspaceSearchPaths',
+                [relativeWorkspacePath, duplicatePath, '', '   '],
+                vscode.ConfigurationTarget.Workspace,
+            );
+
+            const result = await api.getAllExtraSearchPaths();
+            const expected = new Set([
+                normalize(legacyPath),
+                normalize(duplicatePath),
+                normalize(globalPath),
+                normalize(path.resolve(workspaceFolder.uri.fsPath, relativeWorkspacePath)),
+            ]);
+
+            assert.deepStrictEqual(new Set(result), expected);
+            assert.strictEqual(
+                result.filter((item) => item === normalize(duplicatePath)).length,
+                1,
+                'An exact path shared by legacy, global, and workspace settings should be returned once',
+            );
+            assert.ok(
+                !result.includes(normalize(invalidGlobalWorkspacePath)),
+                'A user-level workspaceSearchPaths value should be ignored',
+            );
+            assert.ok(result.every((item) => item.trim().length > 0), 'Empty search paths should be ignored');
+        } finally {
+            await workspaceEnvConfig.update(
+                'workspaceSearchPaths',
+                originalWorkspaceSearchPaths,
+                vscode.ConfigurationTarget.Workspace,
+            );
+            await globalEnvConfig.update(
+                'workspaceSearchPaths',
+                originalInvalidWorkspaceSearchPaths,
+                vscode.ConfigurationTarget.Global,
+            );
+            await globalEnvConfig.update(
+                'globalSearchPaths',
+                originalGlobalSearchPaths,
+                vscode.ConfigurationTarget.Global,
+            );
+            await pythonConfig.update(
+                'venvFolders',
+                originalVenvFolders,
+                vscode.ConfigurationTarget.Global,
+            );
+            await pythonConfig.update('venvPath', originalVenvPath, vscode.ConfigurationTarget.Global);
+        }
+    });
 
     /**
      * Test: Settings and API are connected

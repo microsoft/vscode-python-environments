@@ -44,6 +44,7 @@ api.getPackageAvailableVersions(environment, 'example', {
     errorMode: 'legacy',
 }) satisfies Promise<Pep440Version[] | undefined>;
 api.getPackageAvailableVersions(environment, 'example', { errorMode: 'throw' }) satisfies Promise<Pep440Version[]>;
+api.getAllExtraSearchPaths() satisfies Promise<string[]>;
 
 // Public error construction, discriminator, and narrowing.
 const lookupError = new PackageVersionLookupNotSupportedError('unsupported');

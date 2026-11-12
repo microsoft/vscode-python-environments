@@ -1142,6 +1142,25 @@ export interface PythonEnvironmentsApi {
     getEnvironments(scope: GetEnvironmentsScope): Promise<PythonEnvironment[]>;
 
     /**
+     * Returns the canonical extra search paths used by native environment discovery.
+     *
+     * The result combines the legacy `python.venvPath` and `python.venvFolders`
+     * settings with `python-envs.globalSearchPaths` and the effective
+     * `python-envs.workspaceSearchPaths` value for every workspace folder. Relative
+     * workspace paths are resolved against the folder that defines them, including in
+     * multi-root workspaces. A user/global `workspaceSearchPaths` value and empty
+     * entries are ignored, exact duplicate entries are removed, and path separators
+     * are normalized to `/` for glob support.
+     *
+     * Returned entries may contain glob patterns and are not checked for existence.
+     * Consumers that support older installed extension versions should feature-detect
+     * this method before calling it.
+     *
+     * @returns A promise that resolves to the configured search paths.
+     */
+    getAllExtraSearchPaths(): Promise<string[]>;
+
+    /**
      * Event that is fired when the list of Python environments changes.
      * @see {@link DidChangeEnvironmentsEventArgs}
      */
