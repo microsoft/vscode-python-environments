@@ -889,7 +889,18 @@ export async function removePythonProjectSetting(edits: EditProjectSettings[]): 
         const overrides = config.get<PythonProjectSettings[]>('pythonProjects', []);
         es.forEach((e) => {
             const pwPath = normalizePath(e.project.uri.fsPath);
-            const index = overrides.findIndex((s) => normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath);
+            const workspaceIndex = overrides.findIndex(
+                (s) =>
+                    s.workspace === w.name &&
+                    normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath,
+            );
+            const index =
+                workspaceIndex >= 0
+                    ? workspaceIndex
+                    : overrides.findIndex(
+                          (s) =>
+                              !s.workspace && normalizePath(path.resolve(w.uri.fsPath, s.path)) === pwPath,
+                      );
             if (index >= 0) {
                 overrides.splice(index, 1);
             }
