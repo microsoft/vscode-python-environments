@@ -1,8 +1,19 @@
 import assert from 'node:assert';
 import { reset, verify, when } from 'ts-mockito';
-import { Disposable, MessageItem, MessageOptions, TextDocument, WindowState } from 'vscode';
+import {
+    Disposable,
+    MessageItem,
+    MessageOptions,
+    QuickInputButton,
+    QuickPick,
+    QuickPickItem,
+    TextDocument,
+    ThemeIcon,
+    WindowState,
+} from 'vscode';
 import { executeCommand, registerCommand } from '../../common/command.api';
-import { onDidChangeWindowState, showWarningMessage } from '../../common/window.apis';
+import { createDeferred } from '../../common/utils/deferred';
+import { onDidChangeWindowState, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
 import { onDidOpenTextDocument } from '../../common/workspace.apis';
 import { mockedVSCodeNamespaces } from '../unittests';
 
@@ -10,6 +21,47 @@ suite('Typed API wrappers', () => {
     const commands = mockedVSCodeNamespaces.commands!;
     const window = mockedVSCodeNamespaces.window!;
     const workspace = mockedVSCodeNamespaces.workspace!;
+
+    function createQuickPickHarness() {
+        const buttonListeners = new Set<(button: QuickInputButton) => void>();
+        const acceptListeners = new Set<() => void>();
+        const hideListeners = new Set<() => void>();
+        let hideCount = 0;
+        let disposeCount = 0;
+        const register = <T>(listeners: Set<(event: T) => void>, listener: (event: T) => void) => {
+            listeners.add(listener);
+            return new Disposable(() => listeners.delete(listener));
+        };
+        const quickPick = {
+            items: [],
+            buttons: [],
+            selectedItems: [],
+            activeItems: [],
+            onDidTriggerButton: (listener: (button: QuickInputButton) => void) => register(buttonListeners, listener),
+            onDidAccept: (listener: () => void) => register(acceptListeners, listener),
+            onDidHide: (listener: () => void) => register(hideListeners, listener),
+            onDidTriggerItemButton: () => new Disposable(() => undefined),
+            show: () => undefined,
+            hide: () => {
+                hideCount += 1;
+                hideListeners.forEach((listener) => listener());
+            },
+            dispose: () => {
+                disposeCount += 1;
+            },
+        } as unknown as QuickPick<QuickPickItem>;
+        return {
+            quickPick,
+            triggerButton: (button: QuickInputButton) => buttonListeners.forEach((listener) => listener(button)),
+            hide: () => quickPick.hide(),
+            get hideCount() {
+                return hideCount;
+            },
+            get disposeCount() {
+                return disposeCount;
+            },
+        };
+    }
 
     teardown(() => {
         reset(commands);
@@ -114,5 +166,73 @@ suite('Typed API wrappers', () => {
 
         assert.strictEqual(selected, action);
         assert.strictEqual(selected?.id, 1);
+    });
+
+    test('keeps a quick pick open when a custom button handler succeeds', async () => {
+        const harness = createQuickPickHarness();
+        when(window.createQuickPick<QuickPickItem>()).thenReturn(harness.quickPick);
+        const button: QuickInputButton = { iconPath: new ThemeIcon('refresh') };
+        const handlerComplete = createDeferred<void>();
+        let handled = false;
+        const result = showQuickPickWithButtons([{ label: 'Environment' }], {
+            buttons: [button],
+            buttonHandler: () => {
+                handled = true;
+                return handlerComplete.promise;
+            },
+        });
+
+        harness.triggerButton(button);
+        await Promise.resolve();
+
+        assert.strictEqual(handled, true);
+        assert.strictEqual(harness.hideCount, 0);
+        handlerComplete.resolve();
+        await handlerComplete.promise;
+        assert.strictEqual(harness.hideCount, 0);
+        harness.hide();
+        assert.strictEqual(await result, undefined);
+        assert.strictEqual(harness.disposeCount, 1);
+    });
+
+    test('preserves legacy custom button rejection and hide behavior', async () => {
+        const harness = createQuickPickHarness();
+        when(window.createQuickPick<QuickPickItem>()).thenReturn(harness.quickPick);
+        const button: QuickInputButton = { iconPath: new ThemeIcon('edit') };
+        const item = { label: 'Environment' };
+        const result = showQuickPickWithButtons([item], { buttons: [button], selected: [item] });
+
+        harness.triggerButton(button);
+
+        await assert.rejects(
+            result,
+            (error) =>
+                typeof error === 'object' &&
+                error !== null &&
+                'button' in error &&
+                error.button === button &&
+                'item' in error &&
+                Array.isArray(error.item) &&
+                error.item[0] === item,
+        );
+        assert.strictEqual(harness.hideCount, 1);
+    });
+
+    test('rejects and hides a quick pick when its custom button handler fails', async () => {
+        const harness = createQuickPickHarness();
+        when(window.createQuickPick<QuickPickItem>()).thenReturn(harness.quickPick);
+        const button: QuickInputButton = { iconPath: new ThemeIcon('refresh') };
+        const failure = new Error('button handler failed');
+        const result = showQuickPickWithButtons([{ label: 'Environment' }], {
+            buttons: [button],
+            buttonHandler: () => {
+                throw failure;
+            },
+        });
+
+        harness.triggerButton(button);
+
+        await assert.rejects(result, (error) => error === failure);
+        assert.strictEqual(harness.hideCount, 1);
     });
 });

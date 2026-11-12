@@ -132,6 +132,10 @@ export namespace Pickers {
     export namespace Environments {
         export const selectExecutable = l10n.t('Select Python Executable');
         export const selectEnvironment = l10n.t('Select a Python Environment');
+        export const refresh = l10n.t('Refresh environments');
+        export const refreshFailed = l10n.t(
+            'Failed to refresh Python environments. Check the Python Environments logs for more details.',
+        );
     }
 
     export namespace Packages {
