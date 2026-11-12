@@ -198,7 +198,7 @@
                 "title": "%python-envs.setEnvManager.title%",
                 "category": "Python",
                 "icon": "$(gear)",
-                "when": "config.python.useEnvironmentsExtension != false"
+                "enablement": "pythonEnvs.enabled"
             },
             {
                 "command": "python-envs.setPkgManager",
@@ -403,7 +403,7 @@
                 "title": "%python-envs.runPetInTerminal.title%",
                 "category": "Python",
                 "icon": "$(terminal)",
-                "when": "config.python.useEnvironmentsExtension != false"
+                "enablement": "pythonEnvs.enabled"
             }
         ],
         "menus": {
@@ -442,19 +442,19 @@
                 },
                 {
                     "command": "python-envs.setEnvManager",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "pythonEnvs.enabled"
                 },
                 {
                     "command": "python-envs.packages",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "pythonEnvs.enabled"
                 },
                 {
                     "command": "python-envs.set",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "pythonEnvs.enabled"
                 },
                 {
                     "command": "python-envs.setPkgManager",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "pythonEnvs.enabled"
                 },
                 {
                     "command": "python-envs.removePythonProject",
@@ -470,7 +470,7 @@
                 },
                 {
                     "command": "python-envs.runAsTask",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "pythonEnvs.enabled"
                 },
                 {
                     "command": "python-envs.clearScriptEnvCache",
@@ -522,15 +522,15 @@
                 },
                 {
                     "command": "python-envs.createNewProjectFromTemplate",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "pythonEnvs.enabled"
                 },
                 {
                     "command": "python-envs.terminal.revertStartupScriptChanges",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "pythonEnvs.enabled"
                 },
                 {
                     "command": "python-envs.reportIssue",
-                    "when": "config.python.useEnvironmentsExtension != false"
+                    "when": "pythonEnvs.enabled"
                 }
             ],
             "view/item/context": [
@@ -734,7 +734,7 @@
                     "id": "python",
                     "title": "Python",
                     "icon": "files/logo.svg",
-                    "when": "config.python.useEnvironmentsExtension != false && python-envs.workspaceHasPython"
+                    "when": "pythonEnvs.enabled && python-envs.workspaceHasPython"
                 }
             ]
         },
@@ -745,14 +745,14 @@
                     "name": "Python Projects",
                     "icon": "files/logo.svg",
                     "contextualTitle": "Python Projects",
-                    "when": "config.python.useEnvironmentsExtension != false && python-envs.workspaceHasPython"
+                    "when": "pythonEnvs.enabled && python-envs.workspaceHasPython"
                 },
                 {
                     "id": "env-managers",
                     "name": "Environment Managers",
                     "icon": "files/logo.svg",
                     "contextualTitle": "Environment Managers",
-                    "when": "config.python.useEnvironmentsExtension != false && python-envs.workspaceHasPython"
+                    "when": "pythonEnvs.enabled && python-envs.workspaceHasPython"
                 }
             ]
         },
