@@ -63,6 +63,46 @@ suite('Environment Picker Creation Availability', () => {
         assert.strictEqual(selected, environment);
     });
 
+    test('can hide environment creation when an open folder exists', async () => {
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([folder]);
+        const picker = sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items) => {
+            assert.ok(items.some((item) => item.label === Interpreter.browsePath));
+            assert.ok(items.some((item) => item.label === Interpreter.enterInterpreterPath));
+            assert.ok(!items.some((item) => item.label === Interpreter.createVirtualEnvironment));
+            return undefined;
+        });
+
+        assert.strictEqual(
+            await pickEnvironment([], [], { projects: [], showCreateEnvironment: false }),
+            undefined,
+        );
+        sinon.assert.calledOnce(picker);
+    });
+
+    test('selects an environment whose name matches an action label', async () => {
+        const environment = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), 'matching-label', 'python'),
+            displayName: Interpreter.createVirtualEnvironment,
+        });
+        const manager = {
+            displayName: 'Test manager',
+            getEnvironments: sinon.stub().resolves([environment]),
+        } as unknown as InternalEnvironmentManager;
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([folder]);
+        const pickManager = sinon.stub(managerPicker, 'pickEnvironmentManager');
+        sinon
+            .stub(windowApis, 'showQuickPickWithButtons')
+            .callsFake(async (items) => items.find((item) => 'result' in item));
+
+        const selected = await pickEnvironment([manager], [manager], {
+            projects: [],
+            showCreateEnvironment: false,
+        });
+
+        assert.strictEqual(selected, environment);
+        sinon.assert.notCalled(pickManager);
+    });
+
     test('still allows browsing for an interpreter without an open folder', async () => {
         sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(undefined);
         sinon

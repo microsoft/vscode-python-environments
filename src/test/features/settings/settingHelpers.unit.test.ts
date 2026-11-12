@@ -936,6 +936,73 @@ suite('Setting Helpers - Project Removal', () => {
             ]);
             assert.strictEqual(updateCalls[0].target, ConfigurationTarget.Workspace);
         });
+
+        test('removes only the matching workspace entry when multi-root paths are identical', async () => {
+            const project = new PythonProjectsImpl(
+                'script.py',
+                Uri.file(path.join(secondWorkspaceUri.fsPath, 'script.py')),
+            );
+            const firstSetting = {
+                path: 'script.py',
+                envManager: INLINE_MANAGER_ID,
+                packageManager: PIP_MANAGER_ID,
+                workspace: firstWorkspace.name,
+            };
+            const config = createProjectConfig({
+                workspaceName: secondWorkspace.name,
+                workspaceValue: [
+                    firstSetting,
+                    {
+                        path: 'script.py',
+                        envManager: VENV_MANAGER_ID,
+                        packageManager: PIP_MANAGER_ID,
+                        workspace: secondWorkspace.name,
+                    },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace, secondWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(secondWorkspace);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            await removePythonProjectSetting([{ project }]);
+
+            assert.strictEqual(updateCalls.length, 1, 'Should update pythonProjects once');
+            assert.deepStrictEqual(updateCalls[0].value, [firstSetting]);
+            assert.strictEqual(updateCalls[0].target, ConfigurationTarget.Workspace);
+        });
+
+        test('prefers the matching workspace entry over a legacy unqualified entry', async () => {
+            const project = new PythonProjectsImpl(
+                'script.py',
+                Uri.file(path.join(secondWorkspaceUri.fsPath, 'script.py')),
+            );
+            const legacySetting = {
+                path: 'script.py',
+                envManager: INLINE_MANAGER_ID,
+                packageManager: PIP_MANAGER_ID,
+            };
+            const config = createProjectConfig({
+                workspaceName: secondWorkspace.name,
+                workspaceValue: [
+                    legacySetting,
+                    {
+                        path: 'script.py',
+                        envManager: VENV_MANAGER_ID,
+                        packageManager: PIP_MANAGER_ID,
+                        workspace: secondWorkspace.name,
+                    },
+                ],
+            });
+            sinon.stub(workspaceApis, 'getWorkspaceFolders').returns([firstWorkspace, secondWorkspace]);
+            sinon.stub(workspaceApis, 'getWorkspaceFolder').returns(secondWorkspace);
+            sinon.stub(workspaceApis, 'getConfiguration').returns(config);
+
+            await removePythonProjectSetting([{ project }]);
+
+            assert.strictEqual(updateCalls.length, 1, 'Should update pythonProjects once');
+            assert.deepStrictEqual(updateCalls[0].value, [legacySetting]);
+            assert.strictEqual(updateCalls[0].target, ConfigurationTarget.Workspace);
+        });
     });
 
     suite('inline-script project registration', () => {
