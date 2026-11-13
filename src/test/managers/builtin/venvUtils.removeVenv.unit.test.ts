@@ -1,8 +1,10 @@
 import * as assert from 'assert';
-import * as fse from 'fs-extra';
-import * as os from 'os';
+import type { BigIntStats } from 'fs';
+import fse from 'fs-extra';
+import os from 'os';
 import * as path from 'path';
 import * as sinon from 'sinon';
+import { Uri } from 'vscode';
 import { Common } from '../../../common/localize';
 import * as windowApis from '../../../common/window.apis';
 import * as uvEnvironments from '../../../managers/builtin/uvEnvironments';
@@ -153,6 +155,207 @@ suite('venvUtils removeVenv validation integration', () => {
             os.platform() === 'win32' ? 'C:\\Users\\test\\.venv\\pyvenv.cfg' : '/home/user/.venv/pyvenv.cfg',
             'Should check for pyvenv.cfg in the environment root',
         );
+    });
+
+    suite('venvUtils bounded Windows removal', () => {
+        const envPath = Uri.file(path.resolve('workspace', 'project', '.venv')).fsPath;
+        const identity = { dev: 1n, ino: 10n } as BigIntStats;
+        let clock: sinon.SinonFakeTimers;
+        let platform: sinon.SinonStub;
+        let remove: sinon.SinonStub;
+        let lstat: sinon.SinonStub;
+        let pathExists: sinon.SinonStub;
+        let untrack: sinon.SinonStub;
+        let showError: sinon.SinonStub;
+        let log: ReturnType<typeof createMockLogOutputChannel>;
+
+        const sharingError = () => Object.assign(new Error('File is in use'), { code: 'EPERM' });
+        const removeEnvironment = () =>
+            removeVenv(createMockPythonEnvironment({ name: '.venv', envPath }), log, { runHeadless: true });
+
+        setup(() => {
+            clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+            platform = sinon.stub(os, 'platform').returns('win32');
+            pathExists = sinon.stub(fse, 'pathExists').resolves(true);
+            lstat = sinon.stub(fse, 'lstat').resolves(identity);
+            remove = sinon.stub(fse, 'remove').resolves();
+            untrack = sinon.stub(uvEnvironments, 'removeUvEnvironment').resolves();
+            showError = sinon.stub(windowApis, 'showErrorMessage').resolves(undefined);
+            sinon.stub(windowApis, 'withProgress').callsFake(async (_options, task) => task({} as never, {} as never));
+            log = createMockLogOutputChannel();
+        });
+
+        teardown(() => sinon.restore());
+
+        for (const code of ['EPERM', 'EBUSY']) {
+            test(`recovers from ${code} after partial deletion, then untracks once`, async () => {
+                remove.onFirstCall().callsFake(async () => {
+                    pathExists.resolves(false);
+                    throw Object.assign(new Error('Temporary file lock'), { code });
+                });
+                const pending = removeEnvironment();
+
+                await clock.tickAsync(0);
+                sinon.assert.notCalled(untrack);
+                await clock.tickAsync(100);
+
+                assert.strictEqual(await pending, true);
+                sinon.assert.calledTwice(remove);
+                sinon.assert.calledOnce(pathExists);
+                sinon.assert.calledOnce(untrack);
+                sinon.assert.notCalled(showError);
+            });
+        }
+
+        test('persistent fast failures share one bounded retry window', async () => {
+            const attempts: number[] = [];
+            remove.callsFake(async () => {
+                attempts.push(performance.now());
+                throw sharingError();
+            });
+            const pending = removeEnvironment();
+            await clock.tickAsync(1_000);
+
+            assert.strictEqual(await pending, false);
+            assert.strictEqual(attempts.length, 5);
+            assert.ok(attempts.every((time) => time < 500));
+            sinon.assert.notCalled(untrack);
+            sinon.assert.calledOnce(showError);
+            sinon.assert.calledOnce(log.error as sinon.SinonStub);
+        });
+
+        test('does not retry when the initial deletion already consumed the budget', async () => {
+            remove.callsFake(async () => {
+                await new Promise<void>((resolve) => setTimeout(resolve, 600));
+                throw sharingError();
+            });
+            const pending = removeEnvironment();
+            await clock.tickAsync(1_000);
+
+            assert.strictEqual(await pending, false);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.notCalled(untrack);
+            sinon.assert.calledOnce(showError);
+        });
+
+        test('does not abandon a slow deletion that is still running', async () => {
+            remove.callsFake(async () => {
+                await new Promise<void>((resolve) => setTimeout(resolve, 2_000));
+            });
+            const pending = removeEnvironment();
+            await clock.tickAsync(1_000);
+            sinon.assert.notCalled(untrack);
+            await clock.tickAsync(1_000);
+
+            assert.strictEqual(await pending, true);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.calledOnce(untrack);
+            sinon.assert.notCalled(showError);
+        });
+
+        test('does not start another attempt after a delayed timer exhausts the budget', async () => {
+            remove.rejects(sharingError());
+            const pending = removeEnvironment();
+            await clock.tickAsync(0);
+            sinon.stub(performance, 'now').returns(1_000);
+            await clock.tickAsync(100);
+
+            assert.strictEqual(await pending, false);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.notCalled(untrack);
+        });
+
+        test('does not retry after an identity recheck consumes the remaining budget', async () => {
+            remove.rejects(sharingError());
+            lstat.onSecondCall().callsFake(async () => {
+                await new Promise<void>((resolve) => setTimeout(resolve, 600));
+                return identity;
+            });
+            const pending = removeEnvironment();
+            await clock.tickAsync(1_000);
+
+            assert.strictEqual(await pending, false);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.notCalled(untrack);
+        });
+
+        test('does not delete a replacement directory at the same path', async () => {
+            remove.rejects(sharingError());
+            lstat.onSecondCall().resolves({ ...identity, ino: identity.ino + 1n });
+            const pending = removeEnvironment();
+            await clock.tickAsync(100);
+
+            assert.strictEqual(await pending, false);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.notCalled(untrack);
+            sinon.assert.calledOnce(showError);
+        });
+
+        test('treats a directory removed by another operation as successfully removed', async () => {
+            remove.rejects(sharingError());
+            lstat.onSecondCall().rejects(Object.assign(new Error('Already removed'), { code: 'ENOENT' }));
+            const pending = removeEnvironment();
+            await clock.tickAsync(100);
+
+            assert.strictEqual(await pending, true);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.calledOnce(untrack);
+            sinon.assert.notCalled(showError);
+        });
+
+        test('keeps the original single-attempt behavior outside Windows', async () => {
+            platform.returns('linux');
+            remove.rejects(sharingError());
+
+            assert.strictEqual(await removeEnvironment(), false);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.notCalled(lstat);
+            sinon.assert.notCalled(untrack);
+        });
+
+        test('does not retry non-sharing errors', async () => {
+            remove.rejects(Object.assign(new Error('Permission denied'), { code: 'EACCES' }));
+
+            assert.strictEqual(await removeEnvironment(), false);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.notCalled(untrack);
+            sinon.assert.calledOnce(showError);
+        });
+
+        test('identity lookup failure does not prevent the original deletion attempt', async () => {
+            lstat.rejects(Object.assign(new Error('Identity unavailable'), { code: 'EACCES' }));
+
+            assert.strictEqual(await removeEnvironment(), true);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.calledOnce(untrack);
+        });
+
+        test('does not retry when the filesystem provides no usable directory identity', async () => {
+            lstat.resolves({ ...identity, ino: 0n });
+            remove.rejects(sharingError());
+
+            assert.strictEqual(await removeEnvironment(), false);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.notCalled(untrack);
+        });
+
+        test('never retries deletion after an untracking failure', async () => {
+            untrack.rejects(sharingError());
+
+            assert.strictEqual(await removeEnvironment(), false);
+            sinon.assert.calledOnce(remove);
+            sinon.assert.calledOnce(untrack);
+            sinon.assert.calledOnce(showError);
+        });
+
+        test('never attempts deletion when venv validation fails', async () => {
+            pathExists.resolves(false);
+
+            assert.strictEqual(await removeEnvironment(), false);
+            sinon.assert.notCalled(remove);
+            sinon.assert.notCalled(lstat);
+            sinon.assert.notCalled(untrack);
+        });
     });
 
     test('headless removal skips confirmation and removes the environment', async () => {

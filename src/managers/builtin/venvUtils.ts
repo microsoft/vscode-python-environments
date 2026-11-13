@@ -785,6 +785,77 @@ async function validateVenvRemovalPath(envPath: string, log: LogOutputChannel): 
     return undefined;
 }
 
+function hasRemovalErrorCode(error: unknown, ...codes: string[]): boolean {
+    return (
+        typeof error === 'object' &&
+        error !== null &&
+        'code' in error &&
+        typeof error.code === 'string' &&
+        codes.includes(error.code)
+    );
+}
+
+async function removeVenvDirectory(envPath: string): Promise<void> {
+    if (os.platform() !== 'win32') {
+        return fsapi.remove(envPath);
+    }
+
+    // Bound retries across the entire deletion, not separately at every directory level.
+    const deadline = performance.now() + 500;
+    const target = await fsapi.lstat(envPath, { bigint: true }).catch((error: unknown) => {
+        if (!hasRemovalErrorCode(error, 'ENOENT')) {
+            traceVerbose(`Cannot capture venv directory identity; removal will not be retried: ${error}`);
+        }
+        return undefined;
+    });
+
+    for (let attempt = 1; ; attempt++) {
+        try {
+            await fsapi.remove(envPath);
+            return;
+        } catch (error) {
+            if (
+                !target?.ino ||
+                !hasRemovalErrorCode(error, 'EPERM', 'EBUSY') ||
+                attempt >= 5 ||
+                performance.now() + 100 >= deadline
+            ) {
+                throw error;
+            }
+
+            await new Promise<void>((resolve) => setTimeout(resolve, 100));
+            if (performance.now() >= deadline) {
+                throw error;
+            }
+
+            // A partial deletion can remove pyvenv.cfg; verify directory identity instead.
+            let current;
+            try {
+                current = await fsapi.lstat(envPath, { bigint: true });
+            } catch (identityError) {
+                if (hasRemovalErrorCode(identityError, 'ENOENT')) {
+                    return;
+                }
+                throw identityError;
+            }
+            if (current.dev !== target.dev || current.ino !== target.ino) {
+                throw new Error('Virtual environment directory changed during removal');
+            }
+            if (performance.now() >= deadline) {
+                throw error;
+            }
+        }
+    }
+}
+
+/**
+ * Removes a validated virtual environment after confirmation.
+ * @param environment Environment whose directory should be removed.
+ * @param log Logger for validation and removal failures.
+ * @param options Allows an explicitly headless caller to skip confirmation.
+ * @param backends Environment trackers to update only after deletion succeeds.
+ * @returns Whether deletion and untracking succeeded; false on cancellation or failure.
+ */
 export async function removeVenv(
     environment: PythonEnvironment,
     log: LogOutputChannel,
@@ -825,7 +896,7 @@ export async function removeVenv(
             },
             async () => {
                 try {
-                    await fsapi.remove(envPath);
+                    await removeVenvDirectory(envPath);
                     await backends.uv.untrackEnvironment(environment.environmentPath.fsPath);
                     await backends.venv.untrackEnvironment(environment.environmentPath.fsPath);
                     return true;
