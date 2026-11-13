@@ -55,17 +55,18 @@ Alternatively, right-click any folder or Python file in the Explorer and select 
      Alt text: VS Code Explorer context menu with "Add as Python Project" highlighted
      Caption: Right-click any folder or file to add it as a Python project -->
 
-### Method 2: Auto-find projects
+### Method 2: Add discovered projects
 
-Use this to quickly discover all Python projects in your workspace based on common project markers.
+Use this to add Python projects the extension finds from common project markers.
 
 1. Open the Python Environments panel.
 2. Click the **+** button in the Python Projects section.
-3. Select **Auto Find**.
-4. The extension searches for folders containing `pyproject.toml` or `setup.py` files.
-5. Select which discovered projects to add from the list.
+3. The extension searches for folders containing `pyproject.toml` or `setup.py` that are not already projects.
+4. Those folders are listed in the same quick pick as **Select Existing** and **Create New**. Select one to add it. When more than one is found, **Add all discovered projects** adds every listed folder.
 
-> **Tip**: Auto-find is especially useful when you clone a mono-repo and want to quickly identify all its Python projects.
+If that search finds nothing new, the quick pick does not include Auto Find.
+
+> **Tip**: This is especially useful when you clone a mono-repo and want to identify its Python projects without a separate search step.
 
 ### Method 3: Create a new project from a template
 
@@ -298,8 +299,8 @@ Access these via the Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 You have a repository with multiple Python services, each needing isolated dependencies.
 
 1. Open the root folder in VS Code.
-2. Click **+** in Python Projects and select **Auto Find** to discover all services with `pyproject.toml`.
-3. Select the services you want to track.
+2. Click **+** in Python Projects. Services with `pyproject.toml` or `setup.py` that are not already projects appear in that list.
+3. Select the services you want to track, or choose **Add all discovered projects**.
 4. For each service, create a virtual environment by right-clicking and selecting **Create Environment**.
 5. Each service now runs with its own isolated environment.
 

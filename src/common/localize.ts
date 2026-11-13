@@ -288,6 +288,11 @@ export namespace ProjectCreatorString {
     export const autoFindProjectsDescription = l10n.t(
         'Automatically find folders with `pyproject.toml` or `setup.py` files.',
     );
+    export const selectProject = l10n.t('Select a project');
+    export const discoveredProjects = l10n.t('Discovered projects');
+    export const addAllDiscoveredProjects = l10n.t('Add all discovered projects');
+    export const addAllDiscoveredProjectsDescription = l10n.t('Add every project found in this workspace');
+    export const findingProjects = l10n.t('Finding Python projects');
 
     export const noProjectsFound = l10n.t('No projects found');
 }

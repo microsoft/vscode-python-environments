@@ -29,6 +29,7 @@ import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import * as persistentState from '../common/persistentState';
 import type { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
 import { normalizePackageName } from '../managers/common/packageUtils';
+import { AutoFindProjects } from './creators/autoFindProjects';
 import type { ProjectCreators } from './creators/projectCreators';
 import type { EnvironmentManagers } from './envManagers';
 import { selectPackageManagementEnvironment } from './nonGlobalPackageInstallationEnvironment';
@@ -39,7 +40,7 @@ import { valid as pep440Valid } from '@renovatebot/pep440';
 import { executeCommand } from '../common/command.api';
 import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { clipboardWriteText } from '../common/env.apis';
-import { Pickers } from '../common/localize';
+import { Pickers, ProjectCreatorString } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
 import {
     ENTER_INTERPRETER_PATH_ID,
@@ -681,11 +682,25 @@ export async function addPythonProjectCommand(
         }
     }
 
-    // If not a URI or existingProjectsCreator not found, fall back to picker
-    const creator: PythonProjectCreator | undefined = await pickCreator(pc.getProjectCreators());
-    if (!creator) {
+    // Discover before the quick pick so found projects are items in that list.
+    // Auto Find is not offered when that search has nothing to add.
+    const creators = pc.getProjectCreators();
+    const autoFind = creators.find((creator): creator is AutoFindProjects => creator instanceof AutoFindProjects);
+    const discovered = autoFind
+        ? await withProgress({ location: ProgressLocation.Window, title: ProjectCreatorString.findingProjects }, () =>
+              autoFind.findNewProjects(),
+          )
+        : [];
+    const selection = await pickCreator(creators, discovered);
+    if (!selection) {
         return;
     }
+    if (selection.kind === 'discovered') {
+        autoFind?.addDiscoveredProjects(selection.uris);
+        await Promise.all(em.managers.map((m) => m.refresh(options?.rootUri)));
+        return;
+    }
+    const creator: PythonProjectCreator = selection.creator;
 
     // if multiroot, prompt the user to select which workspace to create the project in
     const workspaceFolders = workspace.workspaceFolders;
