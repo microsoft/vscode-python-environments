@@ -20,13 +20,14 @@
 
 import * as assert from 'assert';
 import * as fs from 'fs-extra';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../../api';
 import { VENV_MANAGER_ID } from '../../common/constants';
 import { normalizePath } from '../../common/utils/pathUtils';
 import { ENVS_EXTENSION_ID } from '../constants';
-import { runWithBlockedDialogsAsCancellation, waitForCondition } from '../testUtils';
+import { retryUntilSuccess, runWithBlockedDialogsAsCancellation, waitForCondition } from '../testUtils';
 
 suite('Integration: Environment Creation', function () {
     this.timeout(120_000); // Environment creation can be slow
@@ -35,22 +36,9 @@ suite('Integration: Environment Creation', function () {
     let defaultManagerScope: vscode.Uri | undefined;
     let previousDefaultManager: string | undefined;
     let previousEffectiveDefaultManager: string | undefined;
-    let workspaceRoot: string | undefined;
-    let originalVenvDirectories = new Set<string>();
+    let fixtureRoot: string | undefined;
+    let creationScope: vscode.Uri;
     let settingSnapshotTaken = false;
-    let venvSnapshotTaken = false;
-
-    async function getVenvDirectories(): Promise<Set<string>> {
-        if (!workspaceRoot) {
-            return new Set();
-        }
-        const entries = await fs.readdir(workspaceRoot, { withFileTypes: true });
-        return new Set(
-            entries
-                .filter((entry) => entry.isDirectory() && /^\.venv(?:-\d+)?$/.test(entry.name))
-                .map((entry) => entry.name),
-        );
-    }
 
     async function removeCreatedEnvironment(environment: PythonEnvironment): Promise<void> {
         const environmentPath = path.resolve(environment.sysPrefix);
@@ -68,10 +56,10 @@ suite('Integration: Environment Creation', function () {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
         assert.ok(workspaceFolder, 'Environment creation tests require a workspace folder');
         defaultManagerScope = workspaceFolder.uri;
-        workspaceRoot = workspaceFolder.uri.fsPath;
-        const venvDirectories = await getVenvDirectories();
-        originalVenvDirectories = venvDirectories;
-        venvSnapshotTaken = true;
+        // Workspace activation-script watchers can schedule discovery after creation returns.
+        // Keep owned interpreters outside that workspace to avoid competing background refreshes.
+        fixtureRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pyenvs-creation-')));
+        creationScope = vscode.Uri.file(fixtureRoot);
         const defaultManagerConfig = vscode.workspace.getConfiguration('python-envs', defaultManagerScope);
         const inspected = defaultManagerConfig.inspect<string>('defaultEnvManager');
         previousDefaultManager = inspected?.workspaceValue;
@@ -108,23 +96,15 @@ suite('Integration: Environment Creation', function () {
     suiteTeardown(async function () {
         this.timeout(30_000);
         const cleanupErrors: unknown[] = [];
-        if (venvSnapshotTaken && workspaceRoot) {
+        if (fixtureRoot) {
+            const root = fixtureRoot;
             try {
-                const currentVenvDirectories = await getVenvDirectories();
-                for (const directory of currentVenvDirectories) {
-                    if (!originalVenvDirectories.has(directory)) {
-                        try {
-                            await fs.rm(path.join(workspaceRoot, directory), {
-                                recursive: true,
-                                force: true,
-                                maxRetries: 5,
-                                retryDelay: 100,
-                            });
-                        } catch (error) {
-                            cleanupErrors.push(error);
-                        }
-                    }
-                }
+                await retryUntilSuccess(
+                    () => fs.remove(root),
+                    () => true,
+                    5_000,
+                    'Failed to remove owned environment creation fixture',
+                );
             } catch (error) {
                 cleanupErrors.push(error);
             }
@@ -186,13 +166,12 @@ suite('Integration: Environment Creation', function () {
             return;
         }
 
-        const workspaceUri = workspaceFolders[0].uri;
         let createdEnv: PythonEnvironment | undefined;
 
         try {
             // --- ACTION: User creates environment ---
             createdEnv = await runWithBlockedDialogsAsCancellation(() =>
-                api.createEnvironment(workspaceUri, { quickCreate: true }),
+                api.createEnvironment(creationScope, { quickCreate: true }),
             );
 
             if (!createdEnv) {
@@ -202,13 +181,14 @@ suite('Integration: Environment Creation', function () {
             }
 
             // --- VERIFY: Created environment is discoverable ---
-            await api.refreshEnvironments(workspaceUri);
-            const environments = await api.getEnvironments(workspaceUri);
+            await api.refreshEnvironments(creationScope);
+            const environments = await api.getEnvironments('all');
 
+            const createdPrefix = normalizePath(path.resolve(createdEnv.sysPrefix));
             const found = environments.some(
                 (env) =>
-                    env.envId.id === createdEnv!.envId.id ||
-                    env.environmentPath.fsPath === createdEnv!.environmentPath.fsPath,
+                    env.envId.managerId === createdEnv!.envId.managerId &&
+                    normalizePath(path.resolve(env.sysPrefix)) === createdPrefix,
             );
 
             assert.ok(found, 'Created environment should appear in discovery');
@@ -244,12 +224,11 @@ suite('Integration: Environment Creation', function () {
             return;
         }
 
-        const workspaceUri = workspaceFolders[0].uri;
         let createdEnv: PythonEnvironment | undefined;
 
         try {
             createdEnv = await runWithBlockedDialogsAsCancellation(() =>
-                api.createEnvironment(workspaceUri, { quickCreate: true }),
+                api.createEnvironment(creationScope, { quickCreate: true }),
             );
             if (!createdEnv) {
                 this.skip();
@@ -264,7 +243,7 @@ suite('Integration: Environment Creation', function () {
             await removeCreatedEnvironment(createdEnv);
 
             // --- VERIFY: Environment is no longer discoverable ---
-            await api.refreshEnvironments(workspaceUri);
+            await api.refreshEnvironments(creationScope);
             const environments = await api.getEnvironments('all');
 
             const stillExists = environments.some(
@@ -306,12 +285,11 @@ suite('Integration: Environment Creation', function () {
             return;
         }
 
-        const workspaceUri = workspaceFolders[0].uri;
         let createdEnv: PythonEnvironment | undefined;
 
         try {
             createdEnv = await runWithBlockedDialogsAsCancellation(() =>
-                api.createEnvironment(workspaceUri, { quickCreate: true }),
+                api.createEnvironment(creationScope, { quickCreate: true }),
             );
 
             if (!createdEnv) {
