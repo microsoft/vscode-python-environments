@@ -93,6 +93,116 @@ function getMainBatchFileContent(startupFile: string): string {
     return content.join(lineSep);
 }
 
+/**
+ * Splits a CMD AutoRun string into individual commands delimited by '&' or '&&',
+ * properly respecting double-quoted segments.
+ */
+export function splitAutoRunCommands(autoRun: string): string[] {
+    const commands: string[] = [];
+    let current = '';
+    let inQuotes = false;
+
+    for (let i = 0; i < autoRun.length; i++) {
+        const char = autoRun[i];
+        if (char === '"') {
+            inQuotes = !inQuotes;
+            current += char;
+        } else if (char === '&' && !inQuotes) {
+            if (i + 1 < autoRun.length && autoRun[i + 1] === '&') {
+                i++;
+            }
+            const trimmed = current.trim();
+            if (trimmed.length > 0) {
+                commands.push(trimmed);
+            }
+            current = '';
+        } else {
+            current += char;
+        }
+    }
+
+    const trimmed = current.trim();
+    if (trimmed.length > 0) {
+        commands.push(trimmed);
+    }
+
+    return commands;
+}
+
+/**
+ * Returns the invocation string used in CMD AutoRun to call our startup batch file.
+ */
+export function getAutoRunCallCommand(mainBatchFile: string): string {
+    return `if exist "${mainBatchFile}" call "${mainBatchFile}"`;
+}
+
+function isOurAutoRunCommand(command: string, mainBatchFile: string, regMainBatchFile?: string): boolean {
+    return (
+        command.includes(mainBatchFile) ||
+        (regMainBatchFile !== undefined && regMainBatchFile.length > 0 && command.includes(regMainBatchFile))
+    );
+}
+
+/**
+ * Checks whether an AutoRun string already contains our startup batch invocation.
+ */
+export function hasAutoRunCommand(
+    autoRun: string | undefined,
+    mainBatchFile: string,
+    regMainBatchFile?: string,
+): boolean {
+    if (!autoRun) {
+        return false;
+    }
+    const commands = splitAutoRunCommands(autoRun);
+    return commands.some((cmd) => isOurAutoRunCommand(cmd, mainBatchFile, regMainBatchFile));
+}
+
+/**
+ * Merges our invocation command into an existing AutoRun string without overwriting user content.
+ * If our command is already present, returns the existing string unchanged (idempotent).
+ */
+export function mergeAutoRunCommand(
+    existingAutoRun: string | undefined,
+    mainBatchFile: string,
+    regMainBatchFile?: string,
+): string {
+    const ourCommand = getAutoRunCallCommand(mainBatchFile);
+    if (!existingAutoRun || existingAutoRun.trim().length === 0) {
+        return ourCommand;
+    }
+
+    if (hasAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile)) {
+        return existingAutoRun.trim();
+    }
+
+    return `${existingAutoRun.trim()} & ${ourCommand}`;
+}
+
+/**
+ * Removes only our startup batch invocation from an existing AutoRun string,
+ * preserving any user or other third-party commands.
+ * Returns undefined if no commands remain (meaning the key should be deleted/cleared).
+ */
+export function removeAutoRunCommand(
+    existingAutoRun: string | undefined,
+    mainBatchFile: string,
+    regMainBatchFile?: string,
+): string | undefined {
+    if (!existingAutoRun || existingAutoRun.trim().length === 0) {
+        return undefined;
+    }
+
+    const commands = splitAutoRunCommands(existingAutoRun);
+    const remaining = commands.filter((cmd) => !isOurAutoRunCommand(cmd, mainBatchFile, regMainBatchFile));
+
+    if (remaining.length === 0) {
+        return undefined;
+    }
+
+    return remaining.join(' & ');
+}
+
 async function checkRegistryAutoRun(mainBatchFile: string, regMainBatchFile: string): Promise<boolean> {
     if (!isWindows()) {
         return false;
@@ -130,19 +240,26 @@ async function getExistingAutoRun(): Promise<string | undefined> {
     return undefined;
 }
 
-async function setupRegistryAutoRun(mainBatchFile: string): Promise<boolean> {
+async function setupRegistryAutoRun(mainBatchFile: string, regMainBatchFile?: string): Promise<boolean> {
     if (!isWindows()) {
         return false;
     }
 
     try {
-        // Set the registry key to call our main batch file
+        const existingAutoRun = await getExistingAutoRun();
+        if (hasAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile)) {
+            traceInfo(`SHELL: CMD AutoRun registry key already contains our main batch file`);
+            return true;
+        }
+
+        const newAutoRun = mergeAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile);
+        const escaped = newAutoRun.replace(/"/g, '\\"');
         await execCommand(
-            `reg add "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun /t REG_SZ /d "if exist \\"${mainBatchFile}\\" call \\"${mainBatchFile}\\"" /f`,
+            `reg add "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun /t REG_SZ /d "${escaped}" /f`,
         );
 
         traceInfo(
-            `Set CMD AutoRun registry key [HKCU\\Software\\Microsoft\\Command Processor] to call: ${mainBatchFile}`,
+            `Set CMD AutoRun registry key [HKCU\\Software\\Microsoft\\Command Processor] to call: ${newAutoRun}`,
         );
         return true;
     } catch (err) {
@@ -204,9 +321,6 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
             traceInfo(`SHELL: Created new CMD activation file at: ${cmdFiles.startupFile}\r\n${activationContent}`);
         }
 
-        // Step 2: Get existing AutoRun content
-        const existingAutoRun = await getExistingAutoRun();
-
         // Step 3: Create or update the main batch file
         if (await fs.pathExists(cmdFiles.mainBatchFile)) {
             const content = await fs.readFile(cmdFiles.mainBatchFile, 'utf8');
@@ -232,36 +346,61 @@ async function setupCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boo
         }
 
         // Step 4: Setup registry AutoRun to call our main batch file
-        if (existingAutoRun?.includes(cmdFiles.regMainBatchFile) || existingAutoRun?.includes(cmdFiles.mainBatchFile)) {
-            traceInfo(`SHELL: CMD AutoRun registry key already contains our main batch file`);
-        } else {
-            const registrySetup = await setupRegistryAutoRun(cmdFiles.mainBatchFile);
-            return registrySetup;
-        }
-        return true;
+        const registrySetup = await setupRegistryAutoRun(cmdFiles.mainBatchFile, cmdFiles.regMainBatchFile);
+        return registrySetup;
     } catch (err) {
         traceVerbose(`Failed to setup CMD startup`, err);
         return false;
     }
 }
 
-async function removeCmdStartup(startupFile: string, key: string): Promise<boolean> {
-    // Note: We deliberately DO NOT remove the main batch file or registry AutoRun setting
-    // This allows other components to continue using the AutoRun functionality
-    if (await fs.pathExists(startupFile)) {
+async function removeRegistryAutoRun(mainBatchFile: string, regMainBatchFile?: string): Promise<boolean> {
+    if (!isWindows()) {
+        return false;
+    }
+
+    try {
+        const existingAutoRun = await getExistingAutoRun();
+        if (!existingAutoRun || !hasAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile)) {
+            return true;
+        }
+
+        const updatedAutoRun = removeAutoRunCommand(existingAutoRun, mainBatchFile, regMainBatchFile);
+        if (updatedAutoRun && updatedAutoRun.length > 0) {
+            const escaped = updatedAutoRun.replace(/"/g, '\\"');
+            await execCommand(
+                `reg add "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun /t REG_SZ /d "${escaped}" /f`,
+            );
+            traceInfo(`Restored CMD AutoRun registry key to: ${updatedAutoRun}`);
+        } else {
+            await execCommand('reg delete "HKCU\\Software\\Microsoft\\Command Processor" /v AutoRun /f');
+            traceInfo('Removed CMD AutoRun registry key');
+        }
+        return true;
+    } catch (err) {
+        traceError('Failed to remove CMD AutoRun registry key [HKCU\\Software\\Microsoft\\Command Processor]', err);
+        return false;
+    }
+}
+
+async function removeCmdStartup(cmdFiles: CmdFilePaths, key: string): Promise<boolean> {
+    if (await fs.pathExists(cmdFiles.startupFile)) {
         try {
-            const content = await fs.readFile(startupFile, 'utf8');
+            const content = await fs.readFile(cmdFiles.startupFile, 'utf8');
             if (hasStartupCode(content, regionStart, regionEnd, [key])) {
-                await fs.writeFile(startupFile, removeStartupCode(content, regionStart, regionEnd));
-                traceInfo(`Removed activation from CMD activation file at: ${startupFile}`);
+                await fs.writeFile(cmdFiles.startupFile, removeStartupCode(content, regionStart, regionEnd));
+                traceInfo(`Removed activation from CMD activation file at: ${cmdFiles.startupFile}`);
             } else {
-                traceInfo(`CMD activation file at ${startupFile} does not contain activation code`);
+                traceInfo(`CMD activation file at ${cmdFiles.startupFile} does not contain activation code`);
             }
         } catch (err) {
             traceVerbose(`Failed to remove CMD activation file content`, err);
             return false;
         }
     }
+
+    await removeRegistryAutoRun(cmdFiles.mainBatchFile, cmdFiles.regMainBatchFile);
+
     return true;
 }
 
@@ -311,8 +450,8 @@ export class CmdStartupProvider implements ShellStartupScriptProvider {
         }
 
         try {
-            const { startupFile } = await getCmdFilePaths();
-            const success = await removeCmdStartup(startupFile, CMD_ENV_KEY);
+            const cmdFiles = await getCmdFilePaths();
+            const success = await removeCmdStartup(cmdFiles, CMD_ENV_KEY);
             return success ? ShellScriptEditState.Edited : ShellScriptEditState.NotEdited;
         } catch (err) {
             traceError('Failed to remove CMD startup', err);
