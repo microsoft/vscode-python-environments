@@ -4,12 +4,22 @@
 import assert from 'node:assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
-import { CancellationTokenSource, Uri } from 'vscode';
+import {
+    CancellationTokenSource,
+    QuickInputButtons,
+    QuickPick,
+    QuickPickItem,
+    Uri,
+} from 'vscode';
 import { PythonEnvironment } from '../../api';
-import { Interpreter } from '../../common/localize';
+import * as errorUtils from '../../common/errors/utils';
+import { Interpreter, Pickers } from '../../common/localize';
+import * as logging from '../../common/logging';
 import { pickEnvironment } from '../../common/pickers/environments';
 import * as managerPicker from '../../common/pickers/managers';
+import { createDeferred } from '../../common/utils/deferred';
 import * as pythonPath from '../../common/utils/pythonPath';
+import type { QuickPickWithButtonsOptions } from '../../common/window.apis';
 import * as windowApis from '../../common/window.apis';
 import * as workspaceApis from '../../common/workspace.apis';
 import type { InternalEnvironmentManager } from '../../managers/common/registeredManagers';
@@ -72,6 +82,233 @@ suite('Environment Picker Creation Availability', () => {
 
         assert.strictEqual(await pickEnvironment([], [], { projects: [] }), undefined);
         sinon.assert.calledOnce(browse);
+    });
+});
+
+suite('Environment Picker Refresh', () => {
+    interface TestEnvironmentPickItem extends QuickPickItem {
+        readonly result?: PythonEnvironment;
+    }
+
+    interface TestQuickPick extends QuickPick<TestEnvironmentPickItem> {
+        fireHide(): void;
+    }
+
+    type TestPickerOptions = QuickPickWithButtonsOptions<TestEnvironmentPickItem>;
+
+    function createManager(
+        id: string,
+        getEnvironments: sinon.SinonStub,
+        refresh: sinon.SinonStub,
+    ): InternalEnvironmentManager {
+        return {
+            id,
+            displayName: id,
+            supportsCreate: false,
+            getEnvironments,
+            refresh,
+        } as unknown as InternalEnvironmentManager;
+    }
+
+    function createQuickPick(
+        items: readonly TestEnvironmentPickItem[],
+        activeItem?: TestEnvironmentPickItem,
+    ): TestQuickPick {
+        let hideListener: (() => void) | undefined;
+        return {
+            items,
+            activeItems: activeItem ? [activeItem] : [],
+            busy: false,
+            enabled: true,
+            keepScrollPosition: false,
+            onDidHide: (listener: () => void) => {
+                hideListener = listener;
+                return {
+                    dispose: () => {
+                        hideListener = undefined;
+                    },
+                };
+            },
+            fireHide: () => hideListener?.(),
+        } as unknown as TestQuickPick;
+    }
+
+    function getRefreshHandler(options: TestPickerOptions) {
+        const button = options.buttons?.[0];
+        const handler = options.buttonHandler;
+        assert.ok(button, 'Expected a refresh button');
+        assert.ok(handler, 'Expected a refresh button handler');
+        return { button, handler };
+    }
+
+    setup(() => {
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(undefined);
+    });
+
+    teardown(() => {
+        sinon.restore();
+    });
+
+    test('refreshes every manager, rebuilds items, and preserves the recommended selection', async () => {
+        const beforeRefresh = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), 'current', 'python'),
+            id: 'current-environment',
+            managerId: 'first-manager',
+            displayName: 'Current Python',
+        });
+        const afterRefresh = createMockPythonEnvironment({
+            envPath: path.join(process.cwd(), 'current', 'python'),
+            id: 'current-environment',
+            managerId: 'first-manager',
+            displayName: 'Current Python (refreshed)',
+        });
+        const firstGetEnvironments = sinon
+            .stub()
+            .onFirstCall()
+            .resolves([beforeRefresh])
+            .onSecondCall()
+            .resolves([afterRefresh]);
+        const secondGetEnvironments = sinon.stub().resolves([]);
+        const firstRefresh = sinon.stub().resolves();
+        const secondRefresh = sinon.stub().resolves();
+        const managers = [
+            createManager('first-manager', firstGetEnvironments, firstRefresh),
+            createManager('second-manager', secondGetEnvironments, secondRefresh),
+        ];
+
+        sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items, options) => {
+            const initialItems = items as readonly TestEnvironmentPickItem[];
+            const recommendedItem = initialItems.find((item) => item.result === beforeRefresh);
+            assert.strictEqual(recommendedItem?.result, beforeRefresh);
+            const quickPick = createQuickPick(initialItems, recommendedItem);
+            const { button, handler } = getRefreshHandler(options as TestPickerOptions);
+
+            assert.strictEqual(button.tooltip, Pickers.Environments.refresh);
+            await handler(button, quickPick);
+
+            const refreshedItems = quickPick.items as readonly TestEnvironmentPickItem[];
+            const refreshedRecommended = refreshedItems.find((item) => item.result === beforeRefresh);
+            assert.ok(refreshedItems.some((item) => item.result === afterRefresh));
+            assert.strictEqual(quickPick.activeItems[0], refreshedRecommended);
+            assert.strictEqual(quickPick.keepScrollPosition, true);
+            assert.strictEqual(quickPick.busy, false);
+            assert.strictEqual(quickPick.enabled, true);
+            return undefined;
+        });
+
+        assert.strictEqual(
+            await pickEnvironment(managers, [], { projects: [], recommended: beforeRefresh }),
+            undefined,
+        );
+        sinon.assert.calledOnceWithExactly(firstRefresh, undefined);
+        sinon.assert.calledOnceWithExactly(secondRefresh, undefined);
+        sinon.assert.calledTwice(firstGetEnvironments);
+        sinon.assert.calledTwice(secondGetEnvironments);
+    });
+
+    test('coalesces duplicate refresh clicks while a refresh is running', async () => {
+        const refreshComplete = createDeferred<void>();
+        const refresh = sinon.stub().returns(refreshComplete.promise);
+        const manager = createManager('test-manager', sinon.stub().resolves([]), refresh);
+
+        sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items, options) => {
+            const quickPick = createQuickPick(items as readonly TestEnvironmentPickItem[]);
+            const { button, handler } = getRefreshHandler(options as TestPickerOptions);
+
+            const first = handler(button, quickPick);
+            const second = handler(button, quickPick);
+            sinon.assert.calledOnce(refresh);
+
+            refreshComplete.resolve();
+            await Promise.all([first, second]);
+            return undefined;
+        });
+
+        assert.strictEqual(await pickEnvironment([manager], [], { projects: [] }), undefined);
+        sinon.assert.calledOnce(refresh);
+    });
+
+    test('does not rebuild or notify after the picker is cancelled during refresh', async () => {
+        const refreshComplete = createDeferred<void>();
+        const getEnvironments = sinon.stub().resolves([]);
+        const manager = createManager('test-manager', getEnvironments, sinon.stub().returns(refreshComplete.promise));
+        const showError = sinon.stub(errorUtils, 'showErrorMessageWithLogs').resolves();
+
+        sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items, options) => {
+            const initialItems = items as readonly TestEnvironmentPickItem[];
+            const quickPick = createQuickPick(initialItems);
+            const { button, handler } = getRefreshHandler(options as TestPickerOptions);
+
+            const refreshing = handler(button, quickPick);
+            quickPick.fireHide();
+            refreshComplete.resolve();
+            await refreshing;
+
+            assert.strictEqual(quickPick.items, initialItems);
+            return undefined;
+        });
+
+        assert.strictEqual(await pickEnvironment([manager], [], { projects: [] }), undefined);
+        sinon.assert.calledOnce(getEnvironments);
+        sinon.assert.notCalled(showError);
+    });
+
+    test('reports refresh and rebuild failures without blocking the existing picker', async () => {
+        const getEnvironments = sinon
+            .stub()
+            .onFirstCall()
+            .resolves([])
+            .onSecondCall()
+            .rejects(new Error('rebuild failed'));
+        const refresh = sinon
+            .stub()
+            .onFirstCall()
+            .resolves()
+            .onSecondCall()
+            .rejects(new Error('refresh failed'));
+        const manager = createManager('test-manager', getEnvironments, refresh);
+        const notificationComplete = createDeferred<void>();
+        const showError = sinon.stub(errorUtils, 'showErrorMessageWithLogs').returns(notificationComplete.promise);
+        const traceError = sinon.stub(logging, 'traceError');
+
+        sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items, options) => {
+            const initialItems = items as readonly TestEnvironmentPickItem[];
+            const quickPick = createQuickPick(initialItems);
+            const { button, handler } = getRefreshHandler(options as TestPickerOptions);
+
+            await handler(button, quickPick);
+            await handler(button, quickPick);
+
+            assert.strictEqual(quickPick.items, initialItems);
+            assert.strictEqual(quickPick.busy, false);
+            assert.strictEqual(quickPick.enabled, true);
+            return undefined;
+        });
+
+        assert.strictEqual(await pickEnvironment([manager], [], { projects: [] }), undefined);
+        sinon.assert.calledTwice(refresh);
+        sinon.assert.calledOnceWithExactly(showError, Pickers.Environments.refreshFailed);
+        sinon.assert.calledTwice(getEnvironments);
+        sinon.assert.calledTwice(traceError);
+        notificationComplete.resolve();
+    });
+
+    test('preserves back and cancel semantics when the refresh button is present', async () => {
+        const picker = sinon.stub(windowApis, 'showQuickPickWithButtons');
+        picker.callsFake(async (_items, options) => {
+            const pickerOptions = options as TestPickerOptions;
+            assert.strictEqual(pickerOptions.showBackButton, true);
+            assert.strictEqual(pickerOptions.buttons?.[0].tooltip, Pickers.Environments.refresh);
+            throw QuickInputButtons.Back;
+        });
+
+        await assert.rejects(
+            pickEnvironment([], [], { projects: [], showBackButton: true }),
+            (error) => error === QuickInputButtons.Back,
+        );
+
+        picker.resolves(undefined);
+        assert.strictEqual(await pickEnvironment([], [], { projects: [] }), undefined);
     });
 });
 

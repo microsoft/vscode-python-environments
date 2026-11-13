@@ -152,6 +152,13 @@ export interface QuickPickButtonEvent<T extends QuickPickItem> {
     readonly button: QuickInputButton;
 }
 
+export interface QuickPickWithButtonsOptions<T extends QuickPickItem> extends QuickPickOptions {
+    showBackButton?: boolean;
+    buttons?: QuickInputButton[];
+    selected?: T[];
+    buttonHandler?: (button: QuickInputButton, quickPick: QuickPick<T>) => void | Thenable<void>;
+}
+
 export function showQuickPick<T extends QuickPickItem>(
     items: readonly T[] | Thenable<readonly T[]>,
     options?: QuickPickOptions,
@@ -175,7 +182,7 @@ export function withProgress<R>(
 
 export async function showQuickPickWithButtons<T extends QuickPickItem>(
     items: readonly T[],
-    options?: QuickPickOptions & { showBackButton?: boolean; buttons?: QuickInputButton[]; selected?: T[] },
+    options?: QuickPickWithButtonsOptions<T>,
     token?: CancellationToken,
     itemButtonHandler?: (e: QuickPickItemButtonEvent<T>) => void,
 ): Promise<T | T[] | undefined> {
@@ -206,8 +213,20 @@ export async function showQuickPickWithButtons<T extends QuickPickItem>(
                 deferred.reject(QuickInputButtons.Back);
                 quickPick.hide();
             } else if (options?.buttons?.includes(button)) {
-                deferred.reject({ item: quickPick.selectedItems, button });
-                quickPick.hide();
+                if (options.buttonHandler) {
+                    const buttonHandler = options.buttonHandler;
+                    void Promise.resolve()
+                        .then(() => buttonHandler(button, quickPick))
+                        .catch((error) => {
+                            if (!deferred.completed) {
+                                deferred.reject(error);
+                                quickPick.hide();
+                            }
+                        });
+                } else {
+                    deferred.reject({ item: quickPick.selectedItems, button });
+                    quickPick.hide();
+                }
             }
         }),
         quickPick.onDidAccept(() => {
