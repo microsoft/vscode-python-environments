@@ -5,6 +5,12 @@ All notable changes to the `@vscode/python-environments` API package are documen
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Added the flat `PythonEnvironmentApi.getAllExtraSearchPaths()` method, which returns the canonical legacy, global, and workspace-scoped environment search paths used by native discovery.
+
 ## [1.8.0]
 
 ### Added

@@ -144,7 +144,7 @@ every platform.
 
 | Domain | Use it to | Representative members |
 | --- | --- | --- |
-| [Environments](#environments) | Discover, resolve, select, create, and remove interpreters. | `getEnvironments`, `resolveEnvironment`, `setEnvironment`, `createEnvironment` |
+| [Environments](#environments) | Discover, resolve, select, create, and remove interpreters, and read configured search paths. | `getEnvironments`, `getAllExtraSearchPaths`, `resolveEnvironment`, `setEnvironment`, `createEnvironment` |
 | [Packages](#packages) | Read and change what is installed in an environment. | `getPackages`, `managePackages`, `getPackageAvailableVersions` |
 | [Projects](#projects) | Read and modify the set of Python projects. | `getPythonProjects`, `getPythonProject`, `addPythonProject` |
 | [Execution](#execution) | Run Python with an environment already activated. | `createTerminal`, `runInTerminal`, `runAsTask`, `runInBackground` |
@@ -374,6 +374,38 @@ const all = await api.getEnvironments('all');
 const bases = await api.getEnvironments('global');
 const forProject = await api.getEnvironments(projectUri);
 ```
+
+#### `getAllExtraSearchPaths`
+
+Returns the canonical extra search paths used by the extension's native
+environment discovery. This reads configuration only; it does not discover
+environments or check whether returned directories exist.
+
+```typescript
+getAllExtraSearchPaths(): Promise<string[]>;
+```
+
+**Returns** `Promise<string[]>`, combining:
+
+- legacy `python.venvPath` and `python.venvFolders` values;
+- user-level `python-envs.globalSearchPaths`; and
+- the effective workspace-folder or workspace-level
+  `python-envs.workspaceSearchPaths` for every open workspace folder.
+
+Relative workspace paths are resolved against the folder that defines them, so
+different values in a multi-root workspace stay associated with the correct
+root. A user-level `workspaceSearchPaths` value is invalid and ignored. Empty
+entries and exact duplicates are removed, Windows separators are normalized to
+`/`, and glob patterns are preserved for the native discovery tool.
+
+```typescript
+if (typeof api.getAllExtraSearchPaths === 'function') {
+    const configuredSearchPaths = await api.getAllExtraSearchPaths();
+}
+```
+
+Feature-detect the method when the consumer can run with an older installed
+version of the Python Environments extension.
 
 #### `refreshEnvironments`
 
@@ -1838,7 +1870,7 @@ directly on the single flat API object.
 
 | Interface | Members grouped by the interface | Description |
 | --- | --- | --- |
-| `PythonEnvironmentsApi` | Environment discovery, resolution, and capabilities | Lists and refreshes discovered environments, resolves environment URIs, queries manager support, and reports discovery changes. |
+| `PythonEnvironmentsApi` | Environment discovery, search-path configuration, resolution, and capabilities | Lists and refreshes discovered environments, returns configured search paths, resolves environment URIs, queries manager support, and reports discovery changes. |
 | `PythonProjectEnvironmentApi` | Selected environment get/set | Reads, updates, and observes the selected environment for URI or global scopes. |
 | `PythonEnvironmentManagementApi` | Environment creation/removal | Creates and removes environments through their associated environment managers. |
 | `PythonEnvironmentItemApi` | Environment item creation | Converts provider-supplied environment information into an identified `PythonEnvironment`. |

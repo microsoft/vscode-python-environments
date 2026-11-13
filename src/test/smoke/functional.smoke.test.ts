@@ -46,6 +46,18 @@ suite('Smoke: Functional Checks', function () {
     // ENVIRONMENT DISCOVERY - Core feature must work
     // =========================================================================
 
+    test('getAllExtraSearchPaths is exposed through the real extension API', async function () {
+        assert.strictEqual(typeof api.getAllExtraSearchPaths, 'function');
+
+        const searchPaths = await api.getAllExtraSearchPaths();
+
+        assert.ok(Array.isArray(searchPaths), 'getAllExtraSearchPaths should return an array');
+        for (const searchPath of searchPaths) {
+            assert.ok(searchPath.trim().length > 0, 'Search paths should not contain empty entries');
+            assert.ok(!searchPath.includes('\\'), `Search path should use forward slashes: ${searchPath}`);
+        }
+    });
+
     test('getEnvironments returns an array', async function () {
         // This test verifies discovery machinery works
         // Even if no Python is installed, it should return an empty array, not throw
