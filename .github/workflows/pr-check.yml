@@ -405,9 +405,30 @@ jobs:
           script: integration-test
           artifact-name: integration-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
 
-      - name: Run Integration Tests (non-Linux)
-        if: runner.os != 'Linux'
+      - name: Run Integration Tests (macOS)
+        if: runner.os == 'macOS'
         run: npm run integration-test
+
+      - name: Run Integration Tests (Windows)
+        id: windows-integration-tests
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VSCODE_TEST_DIAGNOSTICS_DIR: ${{ runner.temp }}\vsct-diag
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:VSCODE_TEST_DIAGNOSTICS_DIR | Out-Null
+          npm run integration-test 2>&1 | Tee-Object -FilePath (Join-Path $env:VSCODE_TEST_DIAGNOSTICS_DIR 'launcher.log')
+          $testExitCode = $LASTEXITCODE
+          exit $testExitCode
+
+      - name: Upload Windows integration-test failure diagnostics
+        if: ${{ failure() && steps.windows-integration-tests.outcome == 'failure' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: integration-${{ matrix.os }}-${{ matrix.python-version }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}\vsct-diag
+          if-no-files-found: error
+          retention-days: 7
 
   integration-tests-multiroot:
     name: Integration Tests (Multi-Root)
