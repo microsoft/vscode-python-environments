@@ -21,6 +21,8 @@ import * as frameUtils from '../../common/utils/frameUtils';
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
+    registerLateManagerRegistrationListener,
+    resetFallbackSelections,
     resetSettingWarnings,
     resolveEnvironmentByPriority,
     resolveGlobalEnvironmentByPriority,
@@ -2601,5 +2603,214 @@ suite('Interpreter Selection - Multi-Root Workspace', () => {
 
         // Both folders should be processed independently
         assert.strictEqual(mockEnvManagers.setEnvironment.callCount, 2, 'Both folders should be processed');
+    });
+});
+
+suite('Interpreter Selection - late manager registration', () => {
+    let sandbox: sinon.SinonSandbox;
+    let mockEnvManagers: sinon.SinonStubbedInstance<EnvironmentManagers>;
+    let mockProjectManager: sinon.SinonStubbedInstance<PythonProjectManager>;
+    let mockNativeFinder: sinon.SinonStubbedInstance<NativePythonFinder>;
+    let mockApi: sinon.SinonStubbedInstance<PythonEnvironmentApi>;
+    let mockVenvManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    let mockPixiManager: sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+    let pixiRegistered: boolean;
+    let fireManagerEvent: (e: { kind: 'registered' | 'unregistered'; manager: InternalEnvironmentManager }) => void;
+
+    const testUri = Uri.file('/test/workspace');
+    const pixiManagerId = 'renan-r-santos.pixi-code:pixi';
+    const makeEnv = (id: string, managerId: string): PythonEnvironment => ({
+        envId: { id, managerId },
+        name: id,
+        displayName: id,
+        version: '3.12.0',
+        displayPath: `/test/${id}`,
+        environmentPath: Uri.file(`/test/${id}`),
+        sysPrefix: `/test/${id}`,
+        execInfo: { run: { executable: `/test/${id}/bin/python` } },
+    });
+    const venvEnv = makeEnv('venv-env', VENV_MANAGER_ID);
+    const pixiEnv = makeEnv('pixi-env', pixiManagerId);
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+        resetSettingWarnings();
+        resetFallbackSelections();
+        pixiRegistered = false;
+
+        mockVenvManager = {
+            id: VENV_MANAGER_ID,
+            name: 'venv',
+            displayName: 'Venv',
+            get: sandbox.stub().resolves(venvEnv),
+            set: sandbox.stub().resolves(),
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+        mockPixiManager = {
+            id: pixiManagerId,
+            name: 'pixi',
+            displayName: 'Pixi',
+            get: sandbox.stub().resolves(pixiEnv),
+            set: sandbox.stub().resolves(),
+        } as unknown as sinon.SinonStubbedInstance<InternalEnvironmentManager>;
+
+        mockEnvManagers = {
+            getEnvironmentManager: sandbox.stub().callsFake((scope: unknown) => {
+                if (scope === VENV_MANAGER_ID) {
+                    return mockVenvManager;
+                }
+                if (scope === pixiManagerId && pixiRegistered) {
+                    return mockPixiManager;
+                }
+                return undefined;
+            }),
+            setEnvironment: sandbox.stub().resolves(),
+            setEnvironments: sandbox.stub().resolves(),
+            onDidChangeEnvironmentManager: sandbox.stub().callsFake((handler) => {
+                fireManagerEvent = handler;
+                return { dispose: () => undefined };
+            }),
+            managers: [mockVenvManager],
+        } as unknown as sinon.SinonStubbedInstance<EnvironmentManagers>;
+        mockProjectManager = { get: sandbox.stub() } as unknown as sinon.SinonStubbedInstance<PythonProjectManager>;
+        mockNativeFinder = { resolve: sandbox.stub() } as unknown as sinon.SinonStubbedInstance<NativePythonFinder>;
+        mockApi = { resolveEnvironment: sandbox.stub() } as unknown as sinon.SinonStubbedInstance<PythonEnvironmentApi>;
+
+        sandbox.stub(workspaceApis, 'getWorkspaceFolders').returns([{ uri: testUri, name: 'test', index: 0 }]);
+        sandbox.stub(workspaceApis, 'getConfiguration').returns(createMockConfig([]) as WorkspaceConfiguration);
+        sandbox.stub(helpers, 'getUserConfiguredSetting').callsFake((section: string, key: string) => {
+            if (section === 'python-envs' && key === 'defaultEnvManager') {
+                return pixiManagerId;
+            }
+            return undefined;
+        });
+        sandbox.stub(windowApis, 'showWarningMessage').resolves(undefined);
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    const run = () =>
+        applyInitialEnvironmentSelection(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+    const listen = () =>
+        registerLateManagerRegistrationListener(
+            mockEnvManagers as unknown as EnvironmentManagers,
+            mockProjectManager as unknown as PythonProjectManager,
+            mockNativeFinder as unknown as NativePythonFinder,
+            mockApi as unknown as PythonEnvironmentApi,
+        );
+
+    // Lets the selection re-run queued by the listener finish (it is not awaited by the event handler).
+    const settle = async () => {
+        for (let i = 0; i < 20; i++) {
+            await new Promise<void>((resolve) => setImmediate(resolve));
+        }
+    };
+
+    test('re-applies selection when the configured manager registers after startup selection', async () => {
+        listen();
+        await run();
+
+        // Startup selection fell back because the configured manager was not registered yet.
+        assert.strictEqual(mockEnvManagers.setEnvironment.firstCall.args[1], venvEnv);
+
+        pixiRegistered = true;
+        fireManagerEvent({ kind: 'registered', manager: mockPixiManager });
+        await settle();
+
+        const envs = mockEnvManagers.setEnvironment.getCalls().map((c) => c.args[1]);
+        assert.ok(envs.includes(pixiEnv), 'selection should be re-applied with the configured manager');
+        assert.strictEqual(envs[envs.length - 1], pixiEnv, 'the configured manager should win');
+    });
+
+    test('picks up a manager that registers while startup selection is still running', async () => {
+        listen();
+        // The manager registers during the fallback discovery await, i.e. after it was found missing.
+        mockVenvManager.get.callsFake(async () => {
+            if (!pixiRegistered) {
+                pixiRegistered = true;
+                fireManagerEvent({ kind: 'registered', manager: mockPixiManager });
+            }
+            return venvEnv;
+        });
+
+        await run();
+        await settle();
+
+        const envs = mockEnvManagers.setEnvironment.getCalls().map((c) => c.args[1]);
+        assert.strictEqual(envs[0], venvEnv, 'the in-flight startup selection still completes first');
+        assert.strictEqual(envs[envs.length - 1], pixiEnv, 'the queued re-run applies the configured manager last');
+    });
+
+    test('ignores registrations of managers no setting is waiting for', async () => {
+        listen();
+        await run();
+        const callsBefore = mockEnvManagers.setEnvironment.callCount;
+
+        const otherManager = { ...mockPixiManager, id: 'other.extension:other' };
+        fireManagerEvent({
+            kind: 'registered',
+            manager: otherManager as unknown as InternalEnvironmentManager,
+        });
+        await settle();
+
+        assert.strictEqual(mockEnvManagers.setEnvironment.callCount, callsBefore, 'no re-run expected');
+    });
+
+    test('does not switch the environment when the manager registers after the timeout', async () => {
+        let now = 1_000_000;
+        sandbox.stub(Date, 'now').callsFake(() => now);
+        listen();
+        await run();
+        const callsBefore = mockEnvManagers.setEnvironment.callCount;
+
+        now += 30_001; // just past MANAGER_READY_TIMEOUT_MS
+        pixiRegistered = true;
+        fireManagerEvent({ kind: 'registered', manager: mockPixiManager });
+        await settle();
+
+        assert.strictEqual(
+            mockEnvManagers.setEnvironment.callCount,
+            callsBefore,
+            'a manager that registers long after startup must not switch the environment',
+        );
+    });
+
+    test('only re-selects the workspace folders that fell back for the registered manager', async () => {
+        const otherUri = Uri.file('/test/other');
+        (workspaceApis.getWorkspaceFolders as sinon.SinonStub).returns([
+            { uri: testUri, name: 'test', index: 0 },
+            { uri: otherUri, name: 'other', index: 1 },
+        ]);
+        // Only the first folder is configured for Pixi; the other one uses venv, which is registered.
+        (helpers.getUserConfiguredSetting as sinon.SinonStub).callsFake(
+            (section: string, key: string, scope?: Uri) => {
+                if (section === 'python-envs' && key === 'defaultEnvManager') {
+                    return scope?.toString() === otherUri.toString() ? VENV_MANAGER_ID : pixiManagerId;
+                }
+                return undefined;
+            },
+        );
+        listen();
+        await run();
+        const callsBefore = mockEnvManagers.setEnvironment.callCount;
+
+        pixiRegistered = true;
+        fireManagerEvent({ kind: 'registered', manager: mockPixiManager });
+        await settle();
+
+        const reselected = mockEnvManagers.setEnvironment
+            .getCalls()
+            .slice(callsBefore)
+            .map((c) => (c.args[0] as Uri).toString());
+        assert.deepStrictEqual(reselected, [testUri.toString()], 'only the fallen-back folder is re-selected');
+        assert.strictEqual(mockEnvManagers.setEnvironment.lastCall.args[1], pixiEnv);
+        assert.strictEqual(mockEnvManagers.setEnvironments.callCount, 1, 'global scope is not re-selected');
     });
 });
