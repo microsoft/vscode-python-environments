@@ -52,6 +52,7 @@ import { getProjectFsPathForScope, tryFastPathGet } from '../common/fastPath';
 import { NativePythonFinder } from '../common/nativePythonFinder';
 import { getLatest, shortenVersionString, sortEnvironments } from '../common/utils';
 import { promptInstallPython } from './pythonInstaller';
+import { chooseQuickCreateInterpreter, resolveProjectRequiresPython } from './requiresPython';
 import { getDefaultGlobalPython, resolveSystemPythonEnvironmentPath } from './utils';
 import { UvEnvironmentManager } from './uvEnvironmentManager';
 import { VenvEnvironmentManager } from './venvEnvironmentManager';
@@ -353,12 +354,19 @@ export class BuiltInEnvironmentManager implements EnvironmentManager {
                 }
                 if (this.globalEnv && PythonVersion.tryParse(this.globalEnv.version)?.major === 3) {
                     // quick create given correct information
+                    const requiresPython = await resolveProjectRequiresPython(venvRoot);
+                    const baseEnv = chooseQuickCreateInterpreter(this.globalEnv, globals, requiresPython);
+                    if (baseEnv !== this.globalEnv && requiresPython) {
+                        this.log.info(
+                            `Quick Create selected Python ${baseEnv.version} to satisfy requires-python ${requiresPython}.`,
+                        );
+                    }
                     result = await quickCreateVenv(
                         this.nativeFinder,
                         this.api,
                         this.log,
                         this,
-                        this.globalEnv,
+                        baseEnv,
                         venvRoot,
                         options?.additionalPackages,
                         undefined,

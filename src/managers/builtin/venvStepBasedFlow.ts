@@ -13,6 +13,7 @@ import {
     PipPackages,
     shouldProceedAfterPyprojectValidation,
 } from './pipUtils';
+import { resolveProjectRequiresPython, selectInterpretersForRequiresPython } from './requiresPython';
 import {
     CreateEnvironmentResult,
     createWithProgress,
@@ -54,6 +55,9 @@ interface VenvCreationState {
 
     // Root directory where venv will be created (used for path validation)
     venvRoot?: Uri;
+
+    // requires-python from the project's pyproject.toml, when it filtered the interpreter list
+    requiresPython?: string;
 }
 /**
  * Type definition for step functions in the wizard-like flow.
@@ -83,7 +87,12 @@ async function selectCreateType(state: VenvCreationState): Promise<StepFunction 
                 {
                     label: VenvManagerStrings.quickCreate,
                     description: VenvManagerStrings.quickCreateDescription,
-                    detail: `Uses Python version ${state.sortedEnvs[0].version} and installs workspace dependencies.`,
+                    detail: state.requiresPython
+                        ? VenvManagerStrings.quickCreateDetailRequiresPython(
+                              state.sortedEnvs[0].version,
+                              state.requiresPython,
+                          )
+                        : VenvManagerStrings.quickCreateDetail(state.sortedEnvs[0].version),
                 },
                 {
                     label: VenvManagerStrings.customize,
@@ -147,7 +156,9 @@ async function selectBasePython(state: VenvCreationState): Promise<StepFunction 
 
         // Show Python environment selection dialog with back button
         const selected = await showQuickPickWithButtons(items, {
-            placeHolder: Pickers.Environments.selectEnvironment,
+            placeHolder: state.requiresPython
+                ? VenvManagerStrings.selectEnvironmentRequiresPython(state.requiresPython)
+                : Pickers.Environments.selectEnvironment,
             ignoreFocusOut: true,
             showBackButton: true,
         });
@@ -311,7 +322,21 @@ export async function createStepBasedVenvFlow(
     },
 ): Promise<CreateEnvironmentResult | undefined> {
     // Sort and filter available Python environments
-    const sortedEnvs = ensureGlobalEnv(basePythons, log);
+    const python3 = ensureGlobalEnv(basePythons, log);
+    const declaredRequiresPython = await resolveProjectRequiresPython(venvRoot);
+    const selection = selectInterpretersForRequiresPython(python3, declaredRequiresPython);
+    const sortedEnvs = selection.interpreters;
+    if (selection.outcome === 'applied' && selection.requiresPython) {
+        log.info(
+            `Create Environment will offer ${sortedEnvs.length} interpreter(s) that satisfy requires-python ${selection.requiresPython}.`,
+        );
+    } else if (selection.outcome === 'none-compatible' && declaredRequiresPython) {
+        log.warn(
+            `No Python interpreter satisfies requires-python ${declaredRequiresPython}. Offering every Python 3 interpreter.`,
+        );
+    } else if (selection.outcome === 'unparseable' && declaredRequiresPython) {
+        log.warn(`Ignoring unparseable requires-python '${declaredRequiresPython}' during environment creation.`);
+    }
     if (sortedEnvs.length === 0) {
         return {
             envCreationErr: 'No suitable Python environments found',
@@ -321,6 +346,7 @@ export async function createStepBasedVenvFlow(
     // Initialize the state object that will track user selections
     const state: VenvCreationState = {
         sortedEnvs, // Store sorted environments in state to avoid re-sorting
+        requiresPython: selection.requiresPython,
         api, // Store API reference for package selection
         project: [api.getPythonProject(venvRoot)].filter(Boolean) as PythonProject[], // Get project for venvRoot
         venvRoot, // Store venvRoot for path validation

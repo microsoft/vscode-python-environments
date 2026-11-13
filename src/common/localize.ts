@@ -205,6 +205,22 @@ export namespace VenvManagerStrings {
     export const quickCreateDescription = l10n.t('Create a virtual environment in the workspace root');
     export const customize = l10n.t('Custom');
     export const customizeDescription = l10n.t('Choose python version, location, packages, name, etc.');
+
+    export function quickCreateDetail(version: string): string {
+        return l10n.t('Uses Python version {0} and installs workspace dependencies.', version);
+    }
+
+    export function quickCreateDetailRequiresPython(version: string, requiresPython: string): string {
+        return l10n.t(
+            'Uses Python version {0} to satisfy requires-python {1} and installs workspace dependencies.',
+            version,
+            requiresPython,
+        );
+    }
+
+    export function selectEnvironmentRequiresPython(requiresPython: string): string {
+        return l10n.t('Select a Python interpreter that satisfies requires-python {0}', requiresPython);
+    }
 }
 
 export namespace SysManagerStrings {
