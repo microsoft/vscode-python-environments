@@ -86,6 +86,7 @@ import { registerCompletionProvider } from './features/settings/settingCompletio
 import {
     isEnvironmentsExtensionEnabled,
     migrateGlobalDefaultEnvManagerSetting,
+    setEnvironmentsExtensionEnabledContext,
 } from './features/settings/settingHelpers';
 import { setActivateMenuButtonContext } from './features/terminal/activateMenuButton';
 import { normalizeShellPath } from './features/terminal/shells/common/shellUtils';
@@ -144,6 +145,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
     context.subscriptions.push(outputChannel, registerLogger(outputChannel));
+
+    await setEnvironmentsExtensionEnabledContext(true);
 
     // Track whether this is a Python workspace (drives the activity bar icon). Registered after the
     // `useEnvironmentsExtension` guard and the logger so failures are reported.
@@ -850,6 +853,7 @@ export async function disposeAll(disposables: IDisposable[]): Promise<void> {
 }
 
 export async function deactivate(context: ExtensionContext) {
+    await setEnvironmentsExtensionEnabledContext(false);
     await disposeAll(context.subscriptions);
     if (context.subscriptions?.length) {
         context.subscriptions.length = 0; // Clear subscriptions to prevent memory leaks
