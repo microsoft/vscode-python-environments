@@ -2063,19 +2063,19 @@ export class RelativePattern implements IRelativePattern {
 
     pattern: string;
 
-    constructor(base: vscode.WorkspaceFolder | string, pattern: string) {
-        if (typeof base !== 'string') {
-            if (!base || !vscUri.URI.isUri(base.uri)) {
-                throw illegalArgument('base');
-            }
+    constructor(base: vscode.WorkspaceFolder | vscode.Uri | string, pattern: string) {
+        // Like VS Code's RelativePattern, the base can be a Uri as well as a workspace folder.
+        const baseUri = typeof base === 'string' || !base || !('uri' in base) ? base : base.uri;
+        if (typeof baseUri !== 'string' && !vscUri.URI.isUri(baseUri)) {
+            throw illegalArgument('base');
         }
 
         if (typeof pattern !== 'string') {
             throw illegalArgument('pattern');
         }
 
-        this.baseUri = typeof base === 'string' ? vscUri.URI.parse(base) : base.uri;
-        this.base = typeof base === 'string' ? base : base.uri.fsPath;
+        this.baseUri = typeof baseUri === 'string' ? vscUri.URI.parse(baseUri) : baseUri;
+        this.base = typeof baseUri === 'string' ? baseUri : baseUri.fsPath;
         this.pattern = pattern;
     }
 

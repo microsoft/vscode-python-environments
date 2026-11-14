@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 import assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typemoq from 'typemoq';
 import { Disposable, Uri } from 'vscode';
@@ -15,6 +16,7 @@ import {
 } from '../../../common/inlineScript/routingRegistry';
 import { InlineScriptStrings, PythonInstallStrings } from '../../../common/localize';
 import { createDeferred } from '../../../common/utils/deferred';
+import * as pathUtils from '../../../common/utils/pathUtils';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
 import {
@@ -184,6 +186,7 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
     let manager: typemoq.IMock<InternalEnvironmentManager>;
     let routing: InlineScriptRoutingRegistry;
     let findFilesStub: sinon.SinonStub;
+    let getWorkspaceFoldersStub: sinon.SinonStub;
     let readMetadataStub: sinon.SinonStub;
     let quickPickStub: sinon.SinonStub;
     let infoStub: sinon.SinonStub;
@@ -195,6 +198,7 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
         em.setup((m) => m.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID)).returns(() => manager.object);
 
         findFilesStub = sinon.stub(wapi, 'findFiles');
+        getWorkspaceFoldersStub = sinon.stub(wapi, 'getWorkspaceFolders').returns(undefined);
         sinon.stub(wapi, 'asRelativePath').callsFake((p) => (p instanceof Uri ? p.fsPath : String(p)));
         sinon.stub(wapi, 'getOpenTextDocuments').returns([]);
         readMetadataStub = sinon.stub(metadataApi, 'readInlineScriptMetadataFromFile');
@@ -222,11 +226,26 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
 
         await setUpInlineScriptEnvironmentsInWorkspace(em.object, routing);
 
+        sinon.assert.calledOnce(findFilesStub);
+        const [include, exclude, maxResults] = findFilesStub.firstCall.args;
+        assert.strictEqual(include, '**/*.{py,Py,pY,PY}');
+        assert.strictEqual(exclude, '{**/.venv/**,**/node_modules/**}');
+        assert.strictEqual(maxResults, 1000);
+    });
+
+    test('does not search a workspace folder that is the home folder and tells the user why', async () => {
+        const home = path.join(path.parse(process.cwd()).root, 'home', 'tester');
+        sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
+        getWorkspaceFoldersStub.returns([{ uri: Uri.file(home), name: 'tester', index: 0 }]);
+        findFilesStub.resolves([]);
+
+        await setUpInlineScriptEnvironmentsInWorkspace(em.object, routing);
+
+        sinon.assert.notCalled(findFilesStub);
         sinon.assert.calledOnceWithExactly(
-            findFilesStub,
-            '**/*.{py,Py,pY,PY}',
-            '{**/.venv/**,**/node_modules/**}',
-            1000,
+            infoStub,
+            `No Python files were found in the workspace. ${Uri.file(home).fsPath} is not searched, because it ` +
+                'is your home folder or contains it. Open the folder that holds your scripts instead.',
         );
     });
 
@@ -439,7 +458,8 @@ suite('setupInlineScriptEnvironmentHandler', () => {
         return env;
     }
 
-    test('saves a dirty document before setup, because setup reads the block from disk', async () => {        openDirtyDocument();
+    test('saves a dirty document before setup, because setup reads the block from disk', async () => {
+        openDirtyDocument();
         expectEnvironmentCreated();
 
         await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
@@ -497,7 +517,8 @@ suite('setupInlineScriptEnvironmentHandler', () => {
         sinon.assert.calledOnce(errorStub);
     });
 
-    test('does not report a failing companion-extension prompt as a setup failure', async () => {        expectEnvironmentCreated();
+    test('does not report a failing companion-extension prompt as a setup failure', async () => {
+        expectEnvironmentCreated();
         promptStub.rejects(new Error('boom'));
 
         await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);

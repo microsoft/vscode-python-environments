@@ -2,11 +2,12 @@ import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import * as typmoq from 'typemoq';
-import { Uri, WorkspaceFolder } from 'vscode';
+import { CancellationToken, Uri, WorkspaceFolder } from 'vscode';
 import { PythonEnvironment, PythonProject } from '../../../api';
 import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../../common/constants';
 import { timeout } from '../../../common/utils/asyncUtils';
 import { createDeferred } from '../../../common/utils/deferred';
+import * as pathUtils from '../../../common/utils/pathUtils';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
 import { AutoFindProjects } from '../../../features/creators/autoFindProjects';
@@ -288,7 +289,10 @@ suite('Auto Find Project tests', () => {
             return { uri: Uri.file(fsPath), name: path.basename(fsPath), index };
         }
 
-        function setupEnvironments(prefixes: Map<string, string | undefined | Error>, managerId = VENV_MANAGER_ID): void {
+        function setupEnvironments(
+            prefixes: Map<string, string | undefined | Error>,
+            managerId = VENV_MANAGER_ID,
+        ): void {
             getWorkspaceFoldersStub.returns(Array.from(prefixes.keys()).map((p, i) => folder(p, i)));
             envManagers
                 .setup((em) => em.getEnvironment(typmoq.It.isAny()))
@@ -355,7 +359,12 @@ suite('Auto Find Project tests', () => {
         });
 
         test('Keeps workspace projects when a selected prefix contains or equals the workspace', async () => {
-            setupEnvironments(new Map([[root, broadPrefix], [root2, root2]]));
+            setupEnvironments(
+                new Map([
+                    [root, broadPrefix],
+                    [root2, root2],
+                ]),
+            );
             findFilesStub.resolves([
                 Uri.file(path.join(root, 'app', 'pyproject.toml')),
                 Uri.file(path.join(root2, 'setup.py')),
@@ -369,7 +378,12 @@ suite('Auto Find Project tests', () => {
         test('Keeps a nested workspace root selected as the parent workspace environment prefix', async () => {
             const nested = path.join(root, 'nested');
             const nestedEnv = path.join(nested, 'custom-env');
-            setupEnvironments(new Map([[root, nested], [nested, nestedEnv]]));
+            setupEnvironments(
+                new Map([
+                    [root, nested],
+                    [nested, nestedEnv],
+                ]),
+            );
             findFilesStub.resolves([
                 Uri.file(path.join(root, 'app', 'setup.py')),
                 Uri.file(path.join(nested, 'pyproject.toml')),
@@ -384,7 +398,12 @@ suite('Auto Find Project tests', () => {
         test('Still excludes packages outside a nested workspace under the selected prefix', async () => {
             const envPrefix = path.join(root, 'custom-env');
             const nested = path.join(envPrefix, 'docs');
-            setupEnvironments(new Map([[root, envPrefix], [nested, undefined]]));
+            setupEnvironments(
+                new Map([
+                    [root, envPrefix],
+                    [nested, undefined],
+                ]),
+            );
             findFilesStub.resolves([
                 Uri.file(path.join(nested, 'pyproject.toml')),
                 Uri.file(path.join(envPrefix, 'lib', 'site-packages', 'pkg', 'setup.py')),
@@ -421,7 +440,12 @@ suite('Auto Find Project tests', () => {
 
         test('Excludes a selected environment inside a different workspace folder', async () => {
             const envPrefix = path.join(root2, 'shared-env');
-            setupEnvironments(new Map([[root, envPrefix], [root2, undefined]]));
+            setupEnvironments(
+                new Map([
+                    [root, envPrefix],
+                    [root2, undefined],
+                ]),
+            );
             findFilesStub.resolves([
                 Uri.file(path.join(root, 'app', 'pyproject.toml')),
                 Uri.file(path.join(root2, 'other', 'pyproject.toml')),
@@ -475,6 +499,84 @@ suite('Auto Find Project tests', () => {
             assert.ok(showWarningMessageStub.notCalled, 'Already registered warning should not be shown');
             assert.ok(showQuickPickWithButtonsStub.notCalled, 'Picker should not be shown');
             projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.never());
+        });
+    });
+
+    suite('Search bounds', () => {
+        const home = path.join(path.parse(process.cwd()).root, 'home', 'tester');
+
+        setup(() => {
+            sinon.stub(pathUtils, 'getUserHomeDir').returns(home);
+        });
+
+        test('caps the marker search at 1,000 files', async () => {
+            findFilesStub.resolves([]);
+
+            await new AutoFindProjects(projectManager.object, envManagers.object).create();
+
+            assert.strictEqual(findFilesStub.callCount, 1);
+            const [include, exclude, maxResults] = findFilesStub.firstCall.args;
+            assert.strictEqual(include, '**/{pyproject.toml,setup.py}');
+            assert.strictEqual(exclude, '**/.venv/**');
+            assert.strictEqual(maxResults, 1_000);
+        });
+
+        test('offers the projects of a marker search that runs for minutes', async () => {
+            const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+            const marker = Uri.file(path.join(path.parse(process.cwd()).root, 'work', 'app', 'pyproject.toml'));
+            // Like VS Code, a cancelled search returns an empty list, not the matches found so far.
+            findFilesStub.callsFake(
+                (_include: string, _exclude: string, _maxResults: number, token?: CancellationToken) =>
+                    new Promise<Uri[]>((resolve) => {
+                        token?.onCancellationRequested(() => resolve([]));
+                        setTimeout(() => resolve([marker]), 10 * 60_000);
+                    }),
+            );
+            projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+            try {
+                const pending = new AutoFindProjects(projectManager.object, envManagers.object).create();
+
+                await clock.tickAsync(10 * 60_000);
+
+                const result = await pending;
+                assert.ok(Array.isArray(result), 'the found project should be offered');
+                assert.deepStrictEqual(
+                    result.map((project) => project.uri.fsPath),
+                    [path.dirname(marker.fsPath)],
+                );
+            } finally {
+                clock.restore();
+            }
+        });
+
+        test('does not search a workspace folder that is the home folder and tells the user why', async () => {
+            getWorkspaceFoldersStub.returns([{ uri: Uri.file(home), name: 'tester', index: 0 }]);
+            const shown = createDeferred();
+            showErrorMessageStub.callsFake(() => shown.resolve());
+
+            const result = await new AutoFindProjects(projectManager.object, envManagers.object).create();
+
+            assert.strictEqual(result, undefined);
+            assert.ok(findFilesStub.notCalled, 'the home folder should not be searched');
+            await Promise.race([shown.promise, timeout(100)]);
+            sinon.assert.calledOnceWithExactly(
+                showErrorMessageStub,
+                `No projects found. Auto Find does not search ${Uri.file(home).fsPath}, because it is your ` +
+                    'home folder or contains it. Open your project folder instead.',
+            );
+        });
+
+        test('shows the plain message when it searched every workspace folder', async () => {
+            const app = path.join(path.parse(process.cwd()).root, 'work', 'app');
+            getWorkspaceFoldersStub.returns([{ uri: Uri.file(app), name: 'app', index: 0 }]);
+            findFilesStub.resolves([]);
+            const shown = createDeferred();
+            showErrorMessageStub.callsFake(() => shown.resolve());
+
+            await new AutoFindProjects(projectManager.object, envManagers.object).create();
+
+            await Promise.race([shown.promise, timeout(100)]);
+            sinon.assert.calledOnceWithExactly(showErrorMessageStub, 'No projects found');
         });
     });
 });
