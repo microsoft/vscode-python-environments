@@ -1,0 +1,5 @@
+pytest
+httpx
+setuptools
+wheel
+# TODO: update the necessary requirements to develop this FastAPI project
