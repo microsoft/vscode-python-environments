@@ -3,6 +3,7 @@ import {
     QuickPickItem,
     QuickPickItemKind,
     ThemeIcon,
+    Uri,
     workspace,
     WorkspaceFolder,
 } from 'vscode';
@@ -12,7 +13,7 @@ import type {
     InternalPackageManager,
 } from '../../managers/common/registeredManagers';
 import { executeCommand } from '../command.api';
-import { Common, Interpreter, Pickers } from '../localize';
+import { Common, Interpreter, Pickers, ProjectCreatorString } from '../localize';
 import { showQuickPickWithButtons } from '../window.apis';
 
 export const ENTER_INTERPRETER_PATH_ID = 'EnterInterpreterPath';
@@ -182,63 +183,127 @@ export async function pickWorkspaceFolder(showBackButton = true): Promise<Worksp
     const selectedItem = Array.isArray(selected) ? selected[0] : selected;
     return selectedItem?.folder;
 }
-export async function pickCreator(creators: PythonProjectCreator[]): Promise<PythonProjectCreator | undefined> {
-    if (creators.length === 0) {
+/** A project directory found from pyproject.toml or setup.py before the quick pick opens. */
+export interface DiscoveredProjectOption {
+    readonly label: string;
+    readonly description?: string;
+    readonly uri: Uri;
+}
+
+export type ProjectCreatorPick =
+    | { readonly kind: 'creator'; readonly creator: PythonProjectCreator }
+    | { readonly kind: 'discovered'; readonly uris: readonly Uri[] };
+
+interface ProjectAdditionQuickPickItem extends QuickPickItem {
+    pickId?: 'discovered' | 'discovered-all' | 'existing' | 'new';
+    uri?: Uri;
+}
+
+export async function pickCreator(
+    creators: PythonProjectCreator[],
+    discovered: readonly DiscoveredProjectOption[] = [],
+): Promise<ProjectCreatorPick | undefined> {
+    if (creators.length === 0 && discovered.length === 0) {
         return;
     }
 
-    if (creators.length === 1) {
-        return creators[0];
+    // A lone non-discovery creator still skips the menu. Auto Find is not that creator:
+    // with nothing to add it would only report that no projects were found.
+    if (discovered.length === 0 && creators.length === 1) {
+        if (creators[0].name === 'autoProjects') {
+            return undefined;
+        }
+        return { kind: 'creator', creator: creators[0] };
     }
 
-    // First level menu
-    const autoFindCreator = creators.find((c) => c.name === 'autoProjects');
     const existingProjectsCreator = creators.find((c) => c.name === 'existingProjects');
+    const otherCreators = creators.filter((c) => c.name !== 'autoProjects' && c.name !== 'existingProjects');
 
-    const items: QuickPickItem[] = [
-        {
-            label: 'Auto Find',
-            description: autoFindCreator?.description ?? 'Automatically find Python projects',
-        },
-        {
+    // List discoveries in this quick pick. Omit Auto Find entirely: when the search
+    // finds nothing, that action only produced a "No projects found" error.
+    const items: ProjectAdditionQuickPickItem[] = [];
+    if (discovered.length > 0) {
+        items.push({
+            label: ProjectCreatorString.discoveredProjects,
+            kind: QuickPickItemKind.Separator,
+        });
+        for (const project of discovered) {
+            items.push({
+                label: project.label,
+                description: project.description,
+                pickId: 'discovered',
+                uri: project.uri,
+            });
+        }
+        if (discovered.length > 1) {
+            items.push({
+                label: ProjectCreatorString.addAllDiscoveredProjects,
+                description: ProjectCreatorString.addAllDiscoveredProjectsDescription,
+                pickId: 'discovered-all',
+            });
+        }
+    }
+
+    const actions: ProjectAdditionQuickPickItem[] = [];
+    if (existingProjectsCreator) {
+        actions.push({
             label: 'Select Existing',
-            description: existingProjectsCreator?.description ?? 'Select existing Python projects',
-        },
-        {
+            description: existingProjectsCreator.description ?? 'Select existing Python projects',
+            pickId: 'existing',
+        });
+    }
+    if (otherCreators.length > 0) {
+        actions.push({
             label: 'Create New',
             description: 'Create a Python project from a template',
-        },
-    ];
+            pickId: 'new',
+        });
+    }
+    if (discovered.length > 0 && actions.length > 0) {
+        items.push({ label: '', kind: QuickPickItemKind.Separator });
+    }
+    items.push(...actions);
+
+    if (!items.some((item) => item.kind !== QuickPickItemKind.Separator)) {
+        return undefined;
+    }
 
     const selected = await showQuickPickWithButtons(items, {
-        placeHolder: Pickers.Managers.selectProjectCreator,
+        placeHolder:
+            discovered.length > 0 ? ProjectCreatorString.selectProject : Pickers.Managers.selectProjectCreator,
         ignoreFocusOut: true,
         showBackButton: true,
+        matchOnDescription: discovered.length > 0,
     });
 
     if (!selected) {
         return undefined;
     }
 
-    // Return appropriate creator based on selection
-    // Handle case where selected could be an array (should not happen, but for type safety)
     const selectedItem = Array.isArray(selected) ? selected[0] : selected;
-    if (!selectedItem) {
+    if (!selectedItem || selectedItem.kind === QuickPickItemKind.Separator) {
         return undefined;
     }
-    switch (selectedItem.label) {
-        case 'Auto Find':
-            return autoFindCreator;
-        case 'Select Existing':
-            return existingProjectsCreator;
-        case 'Create New':
-            return newProjectSelection(creators);
+    switch (selectedItem.pickId) {
+        case 'discovered':
+            return selectedItem.uri ? { kind: 'discovered', uris: [selectedItem.uri] } : undefined;
+        case 'discovered-all':
+            return { kind: 'discovered', uris: discovered.map((project) => project.uri) };
+        case 'existing':
+            return existingProjectsCreator ? { kind: 'creator', creator: existingProjectsCreator } : undefined;
+        case 'new': {
+            const creator = await newProjectSelection(creators, discovered);
+            return creator ? { kind: 'creator', creator } : undefined;
+        }
+        default:
+            return undefined;
     }
-
-    return undefined;
 }
 
-export async function newProjectSelection(creators: PythonProjectCreator[]): Promise<PythonProjectCreator | undefined> {
+export async function newProjectSelection(
+    creators: PythonProjectCreator[],
+    discovered: readonly DiscoveredProjectOption[] = [],
+): Promise<PythonProjectCreator | undefined> {
     const otherCreators = creators.filter((c) => c.name !== 'autoProjects' && c.name !== 'existingProjects');
 
     // Show second level menu for other creators
@@ -267,7 +332,8 @@ export async function newProjectSelection(creators: PythonProjectCreator[]): Pro
             (newSelected.kind === QuickPickItemKind.Separator || ('back' in newSelected && newSelected.back === true))
         ) {
             // User pressed the back button, re-show the first menu
-            return pickCreator(creators);
+            const next = await pickCreator(creators, discovered);
+            return next?.kind === 'creator' ? next.creator : undefined;
         }
 
         // Handle case where newSelected could be an array (should not happen, but for type safety)
