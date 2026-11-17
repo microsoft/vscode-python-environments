@@ -3,8 +3,11 @@
 
 const { createHash } = require('node:crypto');
 
+const classifier = 'vs-code-engineering[bot]';
+const flagNames = ['~spam', '~info-needed'];
+const reviewLabel = 'moderation-review-needed';
 const marker = '<!-- gh-aw-workflow-id: issue-moderation -->';
-const classifications = ['unrelated', 'needs-info', 'relevant'];
+const maxFlagAge = 7 * 24 * 60 * 60 * 1000;
 const maintainerAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const replies = {
     unrelated:
@@ -13,73 +16,106 @@ const replies = {
         'Thanks for reaching out! Could you fill out the issue template in this issue? A little more information would help us investigate and better understand how to help.',
 };
 
-function getTarget(context) {
-    const number = context.payload.issue?.number ?? context.payload.inputs?.issue_number;
-    if (!/^[1-9]\d*$/.test(String(number)) || !Number.isSafeInteger(Number(number))) {
-        throw new Error('An issue event or a positive issue_number input is required.');
+function isClassifier(actor) {
+    return actor?.login === classifier;
+}
+
+function isHuman(actor) {
+    return !actor || (actor.type !== 'Bot' && !isClassifier(actor));
+}
+
+function getTarget(context, issueNumber) {
+    if (!/^[1-9]\d*$/.test(String(issueNumber)) || !Number.isSafeInteger(Number(issueNumber))) {
+        throw new Error('A positive issue number is required.');
     }
-    return { ...context.repo, issue_number: Number(number) };
+    if (context.payload.issue && context.payload.issue.number !== Number(issueNumber)) {
+        throw new Error('The requested issue does not match the triggering issue.');
+    }
+    return { ...context.repo, issue_number: Number(issueNumber) };
 }
 
 /**
- * Read the triggering issue and all comments. Return an eligibility reason or
- * a content fingerprint for checking that the classified report is unchanged.
- * Only the known external classifier's spam label may be independently reassessed;
- * human-applied labels and previous workflow responses remain protected.
+ * Inspect a recent, currently applied central-bot flag. Human triage and replies
+ * take precedence, while central assignments and area-label changes are preserved.
+ * The fingerprint binds the report, discussion, and flag events across AI review.
  */
-async function inspectIssue({ github, context, ownCommentId, appliedLabels = [] }) {
-    const target = getTarget(context);
+async function inspectIssue({ github, context, issueNumber, flagEventId, ownCommentId, now = Date.now() }) {
+    const target = getTarget(context, issueNumber);
     const { data: issue } = await github.rest.issues.get(target);
-    if (issue.pull_request) {
-        throw new Error('Issue moderation cannot target a pull request.');
+    const skip = (reason) => ({ target, reason });
+    if (issue.pull_request || issue.state !== 'open' || issue.locked) {
+        return skip('The target is not an open, unlocked issue.');
     }
     const labels = issue.labels.map((label) => label.name);
-    let reason;
-    let externalSpam = false;
-    let comments = [];
-    if (issue.state !== 'open' || issue.locked) {
-        reason = 'The issue is closed or locked.';
-    } else if (
-        issue.assignees.length ||
-        labels.some((label) => !['triage-needed', '~spam', ...appliedLabels].includes(label)) ||
-        appliedLabels.some((label) => !labels.includes(label))
-    ) {
-        reason = 'The issue is assigned or already labeled for triage.';
-    } else if (
-        context.payload.issue &&
-        (issue.title !== context.payload.issue.title || (issue.body ?? '') !== (context.payload.issue.body ?? ''))
-    ) {
-        reason = 'The issue was edited after this run was triggered.';
-    } else {
-        if (labels.includes('~spam')) {
-            const events = await github.paginate(github.rest.issues.listEventsForTimeline, { ...target, per_page: 100 });
-            const event = events.findLast((entry) => entry.event === 'labeled' && entry.label?.name === '~spam');
-            externalSpam = event?.actor?.login === 'vs-code-engineering[bot]';
-            const ownSpam =
-                ownCommentId &&
-                appliedLabels.includes('~spam') &&
-                event?.actor?.login === 'github-actions[bot]';
-            if (!externalSpam && !ownSpam) {
-                return { target, reason: 'The spam label is not a verified automated-classifier decision.' };
-            }
+    if (labels.includes(reviewLabel) || labels.includes('info-needed')) {
+        return skip('The issue is already awaiting information or human review.');
+    }
+    const presentFlags = flagNames.filter((name) => labels.includes(name));
+    if (!presentFlags.length) {
+        return skip('There is no central triage flag to follow up.');
+    }
+    const events = await github.paginate(github.rest.issues.listEventsForTimeline, { ...target, per_page: 100 });
+    const lastLabelEvent = (name) =>
+        events.findLast((event) => ['labeled', 'unlabeled'].includes(event.event) && event.label?.name === name);
+    const flags = presentFlags.map(lastLabelEvent);
+    if (flags.some((event) => event?.event !== 'labeled' || !isClassifier(event.actor))) {
+        return skip('A current triage flag was not applied by the trusted central bot.');
+    }
+    if (flags.some((event) =>
+        !/^[1-9]\d*$/.test(String(event.id)) ||
+        !Number.isSafeInteger(Number(event.id)) ||
+        !Number.isFinite(Date.parse(event.created_at)))) {
+        throw new Error('GitHub returned an invalid triage flag event.');
+    }
+    flags.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || Number(b.id) - Number(a.id));
+    const latest = flags[0];
+    if (Date.parse(latest.created_at) < now - maxFlagAge || Date.parse(latest.created_at) > now + 5 * 60 * 1000) {
+        return skip('The bot flag is outside the seven-day automatic follow-up window.');
+    }
+    if (flagEventId !== undefined && String(latest.id) !== String(flagEventId)) {
+        return skip('The selected flag was superseded before follow-up.');
+    }
+    for (const name of labels.filter((name) => !flagNames.includes(name) && name !== 'triage-needed')) {
+        const event = lastLabelEvent(name);
+        if (!event || isHuman(event.actor)) {
+            return skip('A human-owned triage label is present.');
         }
-        comments = (await github.paginate(github.rest.issues.listComments, { ...target, per_page: 100 })).filter(
-            (comment) => ownCommentId === undefined || comment.id !== ownCommentId,
-        );
-        if (comments.some((comment) => maintainerAssociations.has(comment.author_association))) {
-            reason = 'A maintainer has already commented.';
-        } else if (
-            comments.some(
-                (comment) => comment.user?.login === 'github-actions[bot]' && (comment.body ?? '').includes(marker),
-            )
-        ) {
-            reason = 'This workflow has already posted an advisory.';
-        } else if (
-            context.payload.issue?.comments !== undefined &&
-            comments.length !== context.payload.issue.comments
-        ) {
-            reason = 'The discussion changed after this run was triggered.';
+    }
+    for (const assignee of issue.assignees) {
+        const event = events.findLast((entry) => entry.event === 'assigned' && entry.assignee?.login === assignee.login);
+        if (!event || isHuman(event.actor)) {
+            return skip('A human has assigned the issue.');
         }
+    }
+    if (
+        events.some(
+            (event) =>
+                ['labeled', 'unlabeled', 'assigned', 'unassigned'].includes(event.event) &&
+                isHuman(event.actor) &&
+                Date.parse(event.created_at) >= Date.parse(latest.created_at),
+        )
+    ) {
+        return skip('A human changed triage after the central flag.');
+    }
+    const comments = (await github.paginate(github.rest.issues.listComments, { ...target, per_page: 100 })).filter(
+        (comment) => ownCommentId === undefined || comment.id !== ownCommentId,
+    );
+    if (
+        comments.some(
+            (comment) =>
+                isHuman(comment.user) &&
+                (maintainerAssociations.has(comment.author_association) ||
+                    Date.parse(comment.updated_at || comment.created_at) >= Date.parse(latest.created_at)),
+        )
+    ) {
+        return skip('A human has already handled or replied to the flagged report.');
+    }
+    if (
+        comments.some(
+            (comment) => comment.user?.login === 'github-actions[bot]' && (comment.body ?? '').includes(marker),
+        )
+    ) {
+        return skip('This workflow has already followed up on the issue.');
     }
     const snapshot = createHash('sha256')
         .update(
@@ -87,100 +123,149 @@ async function inspectIssue({ github, context, ownCommentId, appliedLabels = [] 
                 target,
                 title: issue.title,
                 body: issue.body ?? '',
+                flags: flags.map((event) => String(event.id)),
                 comments: comments.map((comment) => ({
                     id: comment.id,
                     body: comment.body,
                     author: comment.user?.login,
-                    association: comment.author_association,
                     updated: comment.updated_at,
                 })),
             }),
         )
         .digest('hex');
-    return { target, reason, snapshot, externalSpam };
+    return {
+        target,
+        snapshot,
+        flagEventId: String(latest.id),
+        flagName: flags.length > 1 ? 'conflicting' : latest.label.name,
+    };
 }
 
 /**
- * Apply one classification to the triggering issue, using a trusted pre-inference
- * snapshot, fixed replies, and fresh checks before label/state changes.
- * Relevant reports stay open; incomplete reports enter the existing info-needed
- * lifecycle; only clearly unrelated reports are labeled as spam and closed.
- * Staged runs preview all actions without writing to GitHub. API failures propagate.
+ * Select at most 20 eligible bot-flagged issues for one event, manual replay, or
+ * hourly catch-up. Catch-up scans the latest 100 updated issues per source label;
+ * deferred/truncated work is reported rather than silently claiming full coverage.
  */
-async function applyModeration({ github, context, output, snapshot, staged = false }) {
-    const items = Array.isArray(output?.items)
-        ? output.items.filter((item) => item?.type === 'moderation_action')
-        : [];
-    if (items.length !== 1 || !classifications.includes(items[0].classification)) {
+async function planFollowups({ github, context, now = Date.now() }) {
+    let numbers;
+    let truncated = false;
+    if (context.eventName === 'issues') {
+        if (context.payload.action !== 'labeled' || !isClassifier(context.payload.sender) ||
+            !flagNames.includes(context.payload.label?.name)) {
+            return { candidates: [], truncated };
+        }
+        numbers = [context.payload.issue.number];
+    } else if (context.payload.inputs?.issue_number) {
+        numbers = [getTarget(context, context.payload.inputs.issue_number).issue_number];
+    } else {
+        numbers = [];
+        for (const name of flagNames) {
+            const { data } = await github.rest.issues.listForRepo({
+                ...context.repo,
+                state: 'open',
+                labels: name,
+                since: new Date(now - maxFlagAge).toISOString(),
+                sort: 'updated',
+                direction: 'desc',
+                per_page: 100,
+            });
+            truncated ||= data.length === 100;
+            numbers.push(...data.filter((issue) => !issue.pull_request).map((issue) => issue.number));
+        }
+    }
+    const candidates = [];
+    for (const number of [...new Set(numbers)]) {
+        const current = await inspectIssue({ github, context, issueNumber: number, now });
+        if (!current.reason) {
+            candidates.push({ issue_number: String(number), flag_event_id: current.flagEventId });
+            if (candidates.length === 20) {
+                truncated = true;
+                break;
+            }
+        }
+    }
+    return { candidates, truncated };
+}
+
+async function ensureReviewLabel(github, repo) {
+    try {
+        await github.rest.issues.getLabel({ ...repo, name: reviewLabel });
+    } catch (error) {
+        if (error.status !== 404) throw error;
+        try {
+            await github.rest.issues.createLabel({
+                ...repo,
+                name: reviewLabel,
+                color: 'fbca04',
+                description: 'A central-bot flag needs a human moderation decision.',
+            });
+        } catch (creationError) {
+            if (creationError.status !== 422) throw creationError;
+            await github.rest.issues.getLabel({ ...repo, name: reviewLabel });
+        }
+    }
+}
+
+/**
+ * Apply the repository's follow-up policy to one verified flag. Source labels and
+ * assignments are never rewritten. Only an unambiguous spam flag can authorize
+ * closure; uncertain/relevant or conflicting results are queued for human review.
+ */
+async function applyModeration({ github, context, issueNumber, flagEventId, output, snapshot, staged = false }) {
+    const items = Array.isArray(output?.items) ? output.items.filter((item) => item?.type === 'moderation_action') : [];
+    if (items.length !== 1 || !['unrelated', 'needs-info', 'relevant'].includes(items[0].classification)) {
         throw new Error('Exactly one valid moderation classification is required.');
     }
     if (typeof snapshot !== 'string' || !/^[a-f0-9]{64}$/.test(snapshot)) {
         throw new Error('A trusted pre-inference issue snapshot is required.');
     }
-    const classification = items[0].classification;
     let ownCommentId;
-    const check = async (appliedLabels = []) => {
-        const current = await inspectIssue({ github, context, ownCommentId, appliedLabels });
+    const check = async () => {
+        const current = await inspectIssue({ github, context, issueNumber, flagEventId, ownCommentId });
         if (!current.reason && current.snapshot !== snapshot) {
-            current.reason = 'The issue or discussion changed after classification started.';
+            current.reason = 'The report, discussion, or source flags changed during review.';
         }
         return current;
     };
     const current = await check();
-    if (current.reason) {
-        return { status: 'skipped', reason: current.reason };
+    if (current.reason) return { status: 'skipped', reason: current.reason };
+    const classification = current.flagName === 'conflicting' ? 'relevant' : items[0].classification;
+    if (classification === 'unrelated' && current.flagName !== '~spam') {
+        throw new Error('An information-needed flag cannot authorize closure.');
     }
-    const { target } = current;
+    const action = classification === 'unrelated'
+        ? 'Reply politely and close as not planned; preserve the central spam flag.'
+        : classification === 'needs-info'
+            ? 'Request information, add info-needed, and leave the issue open.'
+            : 'Leave open without a reply and add moderation-review-needed for a human decision.';
     const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-    const body =
-        classification === 'relevant'
-            ? undefined
-            : [
-                  replies[classification],
-                  '',
-                  `_Automated issue moderation (${classification}). [Workflow run](${runUrl})._`,
-                  '',
-                  marker,
-              ].join('\n');
-    const action =
-        classification === 'unrelated'
-            ? 'Post the fixed reply, apply ~spam, and close as not planned.'
-            : classification === 'needs-info'
-              ? 'Post the fixed reply and apply info-needed and triage-needed; leave the issue open.'
-              : 'Leave the issue open without a reply.';
-    if (staged) {
-        return {
-            status: 'skipped',
-            reason: `Staged preview: ${action}${current.externalSpam && classification !== 'unrelated' ? ' Remove the external classifier spam label.' : ''}`,
-            body,
-        };
-    }
+    const body = classification === 'relevant' ? undefined : [
+        replies[classification],
+        '',
+        `_Automated flag follow-up (${classification}). [Workflow run](${runUrl})._`,
+        '',
+        marker,
+    ].join('\n');
+    if (staged) return { status: 'skipped', reason: `Staged preview: ${action}`, body };
     if (classification === 'relevant') {
-        if (current.externalSpam) {
-            await github.rest.issues.removeLabel({ ...target, name: '~spam' });
-            return { status: 'success', reason: 'Removed the external spam flag; the report remains open without a reply.' };
-        }
-        return { status: 'skipped', reason: 'The report is relevant or uncertain; it remains open without a reply.' };
+        await ensureReviewLabel(github, context.repo);
+        const fresh = await check();
+        if (fresh.reason) return { status: 'skipped', reason: fresh.reason };
+        await github.rest.issues.addLabels({ ...current.target, labels: [reviewLabel] });
+        return { status: 'success', reason: action };
     }
-    const { data: comment } = await github.rest.issues.createComment({ ...target, body });
+    const { data: comment } = await github.rest.issues.createComment({ ...current.target, body });
     ownCommentId = comment.id;
-    const afterReply = await check();
-    if (afterReply.reason) {
-        return { status: 'skipped', reason: `A reply was posted, but no further action was taken: ${afterReply.reason}` };
+    const fresh = await check();
+    if (fresh.reason) {
+        return { status: 'skipped', reason: `A reply was posted; further actions were skipped: ${fresh.reason}` };
     }
-    if (classification === 'needs-info' && afterReply.externalSpam) {
-        await github.rest.issues.removeLabel({ ...target, name: '~spam' });
-    }
-    const labels = classification === 'unrelated' ? ['~spam'] : ['info-needed', 'triage-needed'];
-    await github.rest.issues.addLabels({ ...target, labels });
-    if (classification === 'unrelated') {
-        const beforeClose = await check(labels);
-        if (beforeClose.reason) {
-            return { status: 'skipped', reason: `A reply and label were added, but closure was skipped: ${beforeClose.reason}` };
-        }
-        await github.rest.issues.update({ ...target, state: 'closed', state_reason: 'not_planned' });
+    if (classification === 'needs-info') {
+        await github.rest.issues.addLabels({ ...current.target, labels: ['info-needed'] });
+    } else {
+        await github.rest.issues.update({ ...current.target, state: 'closed', state_reason: 'not_planned' });
     }
     return { status: 'success', reason: action, url: comment.html_url };
 }
 
-module.exports = { inspectIssue, applyModeration };
+module.exports = { inspectIssue, planFollowups, applyModeration };

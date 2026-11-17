@@ -33,7 +33,9 @@ jobs:
           token: ${{secrets.GITHUB_TOKEN}}
 
   remove_label:
-    if: contains(github.event.issue.labels.*.name, 'info-needed') && contains(github.event.issue.labels.*.name, 'triage-needed')
+    if: >-
+      contains(github.event.issue.labels.*.name, 'info-needed') &&
+      (!github.event.issue.pull_request || contains(github.event.issue.labels.*.name, 'triage-needed'))
     runs-on: ubuntu-latest
     permissions:
       issues: write
