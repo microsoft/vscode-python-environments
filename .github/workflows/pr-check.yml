@@ -124,6 +124,9 @@ jobs:
       - name: Run Tests
         run: npm run unittest
 
+      - name: Test issue moderation safeguards
+        run: node --test .github/scripts/issue-moderation.test.cjs
+
   smoke-tests:
     name: Smoke Tests
     runs-on: ${{ matrix.os }}
