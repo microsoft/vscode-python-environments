@@ -4,6 +4,11 @@ Python Environments uses even minor versions for stable releases and odd minor
 versions for pre-release development. For example, `1.38.0` is a stable release
 and `1.39.0` starts the next pre-release cycle.
 
+Release PRs must originate from a branch in the upstream
+`microsoft/vscode-python-environments` repository, not a fork. The PR's head and
+base repositories must match. **Release PR / Release** skips fork-originated
+PRs, even when opened by a maintainer.
+
 ## Prepare the release branch
 
 Complete these steps before release day:
