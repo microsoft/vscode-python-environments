@@ -10,7 +10,7 @@ const replies = {
     unrelated:
         "Thanks for reaching out! This tracker is for bugs and feature requests about the Python Environments extension for VS Code. This report appears unrelated, so we're closing it for now. If we misunderstood, please leave a comment so a maintainer can review it.",
     'needs-info':
-        "Thanks for reaching out! Could you fill out the issue template in this issue? A little more information would help us investigate and better understand how to help. There's no need to open a new issue.",
+        'Thanks for reaching out! Could you fill out the issue template in this issue? A little more information would help us investigate and better understand how to help.',
 };
 
 function getTarget(context) {

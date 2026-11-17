@@ -115,7 +115,7 @@ test('binds fixed replies and moderation writes to the triggering issue, ignorin
         if (classification === 'needs-info') {
             assert.match(f.writes[0].body, /fill out the issue template/);
             assert.match(f.writes[0].body, /more information would help us investigate/);
-            assert.doesNotMatch(f.writes[0].body, /extension versions|VS Code and Python versions/);
+            assert.doesNotMatch(f.writes[0].body, /extension versions|VS Code and Python versions|no need to open a new issue/);
             assert.deepEqual(f.writes.map((write) => write.operation), ['comment', 'label']);
             assert.deepEqual(f.writes[1].labels, ['info-needed', 'triage-needed']);
             assert.equal(f.issue.state, 'open');
