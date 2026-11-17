@@ -65,6 +65,13 @@ test('posts a fixed reply on the triggering issue, ignoring model-supplied text 
         assert.match(f.writes[0].body, /https:\/\/github.com\/example\/python-environments\/actions\/runs\/123/);
         assert.doesNotMatch(f.writes[0].body, /Injected reply/);
         assert.match(result.url, /#issuecomment-1$/);
+        if (classification === 'needs-info') {
+            assert.match(f.writes[0].body, /fill out the issue template in this existing issue/);
+            assert.match(f.writes[0].body, /extension versions/);
+            assert.match(f.writes[0].body, /Python Environments logs/);
+            assert.match(f.writes[0].body, /steps to reproduce/);
+            assert.match(f.writes[0].body, /expected versus actual behavior/);
+        }
     }
 });
 
@@ -89,6 +96,7 @@ test('skips closed, locked, assigned, labeled, and edited issues before publicat
         { locked: true },
         { assignees: [{ login: 'maintainer' }] },
         { labels: [{ name: 'info-needed' }] },
+        { labels: [{ name: '~spam' }] },
         { title: 'A new title' },
         { body: 'The reporter added a real description.' },
     ]) {

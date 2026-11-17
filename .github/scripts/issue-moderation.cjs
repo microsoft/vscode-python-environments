@@ -8,7 +8,7 @@ const replies = {
     unrelated:
         "Thanks for reaching out! This tracker is for bugs and feature requests about the Python Environments extension for VS Code. We couldn't identify one in this report. If you're reporting an extension issue, please describe what happened and what you expected so we can help.",
     'needs-info':
-        "Thanks for the report! Could you describe the problem or request related to Python Environments? If you're reporting a bug, please include what you expected, what happened, and the steps to reproduce it. This will help us understand and triage your issue.",
+        'Thanks for the report! Please fill out the issue template in this existing issue. For a bug report, include the Python Environments and Python extension versions, VS Code and Python versions, relevant Python Environments logs, steps to reproduce, and expected versus actual behavior. These details help us investigate. Please update this issue rather than opening a duplicate.',
 };
 
 function getTarget(context) {
