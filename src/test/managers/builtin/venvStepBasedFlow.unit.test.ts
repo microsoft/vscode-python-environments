@@ -196,4 +196,135 @@ suite('step-based venv creation pyproject preflight', () => {
         assert.ok(createWithProgress.calledOnce);
         assert.deepStrictEqual(createWithProgress.firstCall.args[7], { install: [], uninstall: [] });
     });
+
+    test('Quick Create uses an interpreter that satisfies pyproject requires-python', async () => {
+        await fs.outputFile(
+            path.join(tempRoot, 'pyproject.toml'),
+            '[project]\nname = "demo"\nversion = "0.0.1"\nrequires-python = ">=3.10,<3.12"\n',
+        );
+        const incompatible = createMockPythonEnvironment({
+            name: 'Python 3.13',
+            envPath: path.join(tempRoot, 'base', 'python3.13'),
+            version: '3.13.1',
+        });
+        const compatible = createMockPythonEnvironment({
+            name: 'Python 3.11',
+            envPath: path.join(tempRoot, 'base', 'python3.11'),
+            version: '3.11.5',
+        });
+        const quickPick = sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items) =>
+            items.find((item) => item.label === VenvManagerStrings.quickCreate),
+        );
+        sinon.stub(pipUtils, 'getProjectInstallable').resolves({ installables: [], validationErrors: [] });
+        sinon.stub(pipUtils, 'shouldProceedAfterPyprojectValidation').resolves(true);
+        createWithProgress.resolves({ environment: compatible });
+
+        const result = await createStepBasedVenvFlow(
+            {} as NativePythonFinder,
+            api,
+            log,
+            manager,
+            [incompatible, baseEnvironment, compatible],
+            Uri.file(tempRoot),
+            { showQuickAndCustomOptions: true },
+        );
+
+        assert.strictEqual(result?.environment, compatible);
+        assert.strictEqual(createWithProgress.firstCall.args[4], compatible);
+        const quickCreateItem = quickPick.firstCall.args[0].find(
+            (item: { label: string }) => item.label === VenvManagerStrings.quickCreate,
+        );
+        assert.ok(quickCreateItem);
+        const detail = quickCreateItem.detail;
+        assert.strictEqual(
+            detail,
+            'Uses Python version 3.11.5 to satisfy requires-python >=3.10,<3.12 and installs workspace dependencies.',
+        );
+    });
+
+    test('custom creation offers only interpreters that satisfy requires-python >3.10', async () => {
+        await fs.outputFile(
+            path.join(tempRoot, 'pyproject.toml'),
+            '[project]\nname = "demo"\nversion = "0.0.1"\nrequires-python = ">3.10"\n',
+        );
+        const tooOld = createMockPythonEnvironment({
+            name: 'Python 3.10.0',
+            envPath: path.join(tempRoot, 'base', 'python3.10.0'),
+            version: '3.10.0',
+        });
+        const patch = createMockPythonEnvironment({
+            name: 'Python 3.10.1',
+            envPath: path.join(tempRoot, 'base', 'python3.10.1'),
+            version: '3.10.1',
+        });
+        const newest = createMockPythonEnvironment({
+            name: 'Python 3.12',
+            envPath: path.join(tempRoot, 'base', 'python3.12'),
+            version: '3.12.0',
+        });
+        const quickPick = sinon.stub(windowApis, 'showQuickPickWithButtons');
+        quickPick.onFirstCall().callsFake(async (items) =>
+            items.find((item) => item.label === VenvManagerStrings.customize),
+        );
+        let offered: string[] = [];
+        quickPick.onSecondCall().callsFake(async (items, options) => {
+            offered = items.map((item) => (item as unknown as { e: { version: string } }).e.version);
+            assert.strictEqual(
+                options?.placeHolder,
+                'Select a Python interpreter that satisfies requires-python >3.10',
+            );
+            return items[0];
+        });
+        sinon.stub(windowApis, 'showInputBoxWithButtons').resolves('.custom-venv');
+        sinon.stub(pipUtils, 'getWorkspacePackagesToInstall').resolves({ install: [], uninstall: [] });
+        createWithProgress.resolves({ environment: newest });
+
+        await createStepBasedVenvFlow(
+            {} as NativePythonFinder,
+            api,
+            log,
+            manager,
+            [tooOld, patch, newest],
+            Uri.file(tempRoot),
+            { showQuickAndCustomOptions: true },
+        );
+
+        assert.deepStrictEqual(offered, ['3.12.0', '3.10.1']);
+        assert.strictEqual(createWithProgress.firstCall.args[4], newest);
+    });
+
+    test('creation still offers every Python 3 interpreter when none satisfy requires-python', async () => {
+        await fs.outputFile(
+            path.join(tempRoot, 'pyproject.toml'),
+            '[project]\nname = "demo"\nversion = "0.0.1"\nrequires-python = ">=3.13"\n',
+        );
+        const older = createMockPythonEnvironment({
+            name: 'Python 3.9',
+            envPath: path.join(tempRoot, 'base', 'python3.9'),
+            version: '3.9.7',
+        });
+        sinon.stub(windowApis, 'showQuickPickWithButtons').callsFake(async (items) =>
+            items.find((item) => item.label === VenvManagerStrings.quickCreate),
+        );
+        sinon.stub(pipUtils, 'getProjectInstallable').resolves({ installables: [], validationErrors: [] });
+        sinon.stub(pipUtils, 'shouldProceedAfterPyprojectValidation').resolves(true);
+        createWithProgress.resolves({ environment: baseEnvironment });
+
+        await createStepBasedVenvFlow(
+            {} as NativePythonFinder,
+            api,
+            log,
+            manager,
+            [older, baseEnvironment],
+            Uri.file(tempRoot),
+            { showQuickAndCustomOptions: true },
+        );
+
+        assert.strictEqual(createWithProgress.firstCall.args[4], baseEnvironment);
+        assert.ok(
+            (log.warn as sinon.SinonStub).calledWith(
+                'No Python interpreter satisfies requires-python >=3.13. Offering every Python 3 interpreter.',
+            ),
+        );
+    });
 });

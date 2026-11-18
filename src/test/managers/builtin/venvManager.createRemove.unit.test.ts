@@ -158,6 +158,56 @@ suite('VenvManager.create - orchestration', () => {
         assert.deepStrictEqual(quickCreateVenvStub.firstCall.args[6], ['pytest']);
     });
 
+    test('quick create keeps a default interpreter that already satisfies requires-python', async () => {
+        const globalEnv = createMockPythonEnvironment({
+            name: 'global',
+            envPath: testPath('global', 'python3.11'),
+            version: '3.11.2',
+        });
+        const newer = createMockPythonEnvironment({
+            name: 'newer',
+            envPath: testPath('global', 'python3.13'),
+            version: '3.13.0',
+        });
+        const manager = createManager({ getEnvironments: sinon.stub().resolves([globalEnv, newer]) });
+        (manager as any).globalEnv = globalEnv;
+        quickCreateVenvStub.resolves({ environment: createdEnvironment() });
+        const scope = Uri.file(path.join(tmpRoot, 'compatible-project'));
+        await fse.outputFile(
+            path.join(scope.fsPath, 'pyproject.toml'),
+            '[project]\nname = "demo"\nversion = "0.0.1"\nrequires-python = ">=3.10"\n',
+        );
+
+        await manager.create(scope, { quickCreate: true });
+
+        assert.strictEqual(quickCreateVenvStub.firstCall.args[4], globalEnv);
+    });
+
+    test('quick create selects an interpreter that satisfies requires-python', async () => {
+        const globalEnv = createMockPythonEnvironment({
+            name: 'global',
+            envPath: testPath('global', 'python3.9'),
+            version: '3.9.1',
+        });
+        const compatible = createMockPythonEnvironment({
+            name: 'compatible',
+            envPath: testPath('global', 'python3.12'),
+            version: '3.12.2',
+        });
+        const manager = createManager({ getEnvironments: sinon.stub().resolves([globalEnv, compatible]) });
+        (manager as any).globalEnv = globalEnv;
+        quickCreateVenvStub.resolves({ environment: createdEnvironment() });
+        const scope = Uri.file(path.join(tmpRoot, 'constrained-project'));
+        await fse.outputFile(
+            path.join(scope.fsPath, 'pyproject.toml'),
+            '[project]\nname = "demo"\nversion = "0.0.1"\nrequires-python = ">3.10"\n',
+        );
+
+        await manager.create(scope, { quickCreate: true });
+
+        assert.strictEqual(quickCreateVenvStub.firstCall.args[4], compatible);
+    });
+
     test('dependency-search cancellation returns quietly without environment side effects', async () => {
         const globalEnv = createMockPythonEnvironment({
             name: 'global',
@@ -218,7 +268,10 @@ suite('VenvManager.create - orchestration', () => {
     test('stops without an extra error or environment creation when Python installation is declined', async () => {
         const manager = createManager();
 
-        assert.strictEqual(await manager.create(Uri.file(path.join(tmpRoot, 'project')), { quickCreate: true }), undefined);
+        assert.strictEqual(
+            await manager.create(Uri.file(path.join(tmpRoot, 'project')), { quickCreate: true }),
+            undefined,
+        );
 
         sinon.assert.calledOnce(installPythonStub);
         sinon.assert.notCalled(createPythonVenvStub);
@@ -275,7 +328,10 @@ suite('VenvManager.create - orchestration', () => {
         const manager = createManager();
         installPythonStub.resolves(path.join(tmpRoot, 'missing', 'python.exe'));
 
-        assert.strictEqual(await manager.create(Uri.file(path.join(tmpRoot, 'project')), { quickCreate: true }), undefined);
+        assert.strictEqual(
+            await manager.create(Uri.file(path.join(tmpRoot, 'project')), { quickCreate: true }),
+            undefined,
+        );
 
         sinon.assert.calledOnce(showErrorStub);
         sinon.assert.notCalled(quickCreateVenvStub);
