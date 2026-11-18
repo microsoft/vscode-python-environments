@@ -3,15 +3,16 @@
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { inspectIssue, applyModeration } = require('./issue-moderation.cjs');
+const { inspectIssue, applyModeration, clearInfoNeededOnEdit } = require('./issue-moderation.cjs');
 
-const human = { login: 'reporter', type: 'User' };
+const human = { id: 7, login: 'reporter', type: 'User' };
 const automation = { login: 'github-actions[bot]', type: 'Bot' };
 const central = { login: 'vs-code-engineering[bot]', type: 'Bot' };
 
 async function fixture() {
     const issue = {
         number: 42, title: 'qwerty', body: '', state: 'open', locked: false, labels: [], assignees: [],
+        user: human, updated_at: '2026-11-18T12:00:00Z',
     };
     const events = [];
     const comments = [];
@@ -38,8 +39,15 @@ async function fixture() {
             addLabels: async (request) => {
                 writes.push({ operation: 'label', ...request });
                 for (const name of request.labels) {
-                    if (!issue.labels.some((label) => label.name === name)) issue.labels.push({ name });
+                    if (!issue.labels.some((label) => label.name === name)) {
+                        issue.labels.push({ name });
+                        events.push({ event: 'labeled', label: { name }, actor: automation, created_at: issue.updated_at });
+                    }
                 }
+            },
+            removeLabel: async (request) => {
+                writes.push({ operation: 'unlabel', ...request });
+                issue.labels = issue.labels.filter((label) => label.name !== request.name);
             },
             update: async (request) => {
                 writes.push({ operation: 'close', ...request });
@@ -66,6 +74,15 @@ function output(classification) {
 function botLabel(f, name) {
     f.issue.labels.push({ name });
     f.events.push({ event: 'labeled', label: { name }, actor: central });
+}
+
+function reporterEdit(f) {
+    const from = f.issue.body;
+    f.issue.body = 'Selecting conda works, but a new PowerShell terminal still uses system Python.';
+    f.issue.updated_at = '2026-11-18T12:05:00Z';
+    f.context.payload = {
+        action: 'edited', issue: structuredClone(f.issue), sender: human, changes: { body: { from } },
+    };
 }
 
 test('new unflagged junk gets a fixed polite reply and closure on its own issue only', async () => {
@@ -363,5 +380,151 @@ test('API failures propagate rather than claiming successful moderation', async 
         const classification = operation === 'addLabels' ? 'needs-info' : 'unrelated';
         await assert.rejects(applyModeration({ ...f, output: output(classification) }), /GitHub unavailable/);
         assert.equal(f.issue.state, 'open');
+    }
+});
+
+test('completing the requested template by editing removes only local info-needed without another review', async () => {
+    const f = await fixture();
+    botLabel(f, '~spam');
+    botLabel(f, '~info-needed');
+    await applyModeration({ ...f, output: output('needs-info') });
+    reporterEdit(f);
+    const result = await clearInfoNeededOnEdit(f);
+    assert.equal(result.status, 'success');
+    assert.equal(f.issue.state, 'open');
+    assert.deepEqual(f.issue.labels.map((label) => label.name), ['~spam', '~info-needed']);
+    assert.deepEqual(f.writes.map((write) => write.operation), ['comment', 'label', 'unlabel']);
+    assert.equal(f.writes.at(-1).name, 'info-needed');
+    assert.equal(f.writes.at(-1).issue_number, 42);
+    assert.equal(f.comments.length, 1);
+    assert.match((await inspectIssue(f)).reason, /Only newly opened/);
+    assert.equal((await clearInfoNeededOnEdit(f)).status, 'skipped');
+    assert.equal(f.writes.length, 3);
+});
+
+test('description cleanup requires a real nonempty body update by the human issue author', async () => {
+    for (const change of ['title-only', 'whitespace', 'empty', 'another-user', 'bot', 'unknown-user', 'comment']) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        if (change === 'title-only') delete f.context.payload.changes.body;
+        if (change === 'whitespace') f.context.payload.changes.body.from = `  ${f.issue.body}  `;
+        if (change === 'empty') f.context.payload.issue.body = '';
+        if (change === 'another-user') f.context.payload.sender = { ...human, id: 8 };
+        if (change === 'bot') f.context.payload.sender = { ...human, type: 'Bot' };
+        if (change === 'unknown-user') delete f.context.payload.sender;
+        if (change === 'comment') f.context.eventName = 'issue_comment';
+        assert.equal((await clearInfoNeededOnEdit(f)).status, 'skipped', change);
+        assert.equal(f.writes.length, 2, change);
+        assert.ok(f.issue.labels.some((label) => label.name === 'info-needed'), change);
+    }
+});
+
+test('description cleanup preserves closed, locked, pull-request and superseded responses', async () => {
+    for (const change of ['closed', 'locked', 'pull-request', 'stale-body', 'changed-author', 'no-label']) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        if (change === 'closed') f.issue.state = 'closed';
+        if (change === 'locked') f.issue.locked = true;
+        if (change === 'pull-request') f.issue.pull_request = {};
+        if (change === 'stale-body') f.issue.body = 'A newer edit.';
+        if (change === 'changed-author') f.issue.user = { ...human, id: 8 };
+        if (change === 'no-label') f.issue.labels = [];
+        assert.equal((await clearInfoNeededOnEdit(f)).status, 'skipped', change);
+        assert.equal(f.writes.length, 2, change);
+    }
+});
+
+test('a queued author edit cannot clear an unverifiable or renewed information request', async () => {
+    for (const change of ['missing-event', 'missing-time', 'same-second', 'new-label', 'new-human-request']) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        if (change === 'missing-event') f.events.length = 0;
+        if (change === 'missing-time') delete f.events[0].created_at;
+        if (change === 'same-second') f.events[0].created_at = f.issue.updated_at;
+        if (change === 'new-label') {
+            f.events.push({
+                event: 'labeled', label: { name: 'info-needed' }, actor: human, created_at: '2026-11-18T12:06:00Z',
+            });
+        }
+        if (change === 'new-human-request') {
+            f.events.push({ event: 'commented', user: human, created_at: '2026-11-18T12:06:00Z' });
+        }
+        assert.equal((await clearInfoNeededOnEdit(f)).status, 'skipped', change);
+        assert.equal(f.writes.length, 2, change);
+    }
+});
+
+test('unrelated bot metadata after an author response does not prevent description cleanup', async () => {
+    const f = await fixture();
+    await applyModeration({ ...f, output: output('needs-info') });
+    reporterEdit(f);
+    f.events.push({ event: 'commented', user: central, created_at: '2026-11-18T12:06:00Z' });
+    botLabel(f, 'area-terminal');
+    f.issue.updated_at = '2026-11-18T12:06:00Z';
+    assert.equal((await clearInfoNeededOnEdit(f)).status, 'success');
+    assert.deepEqual(f.issue.labels.map((label) => label.name), ['area-terminal']);
+});
+
+test('a title change belonging to the same response does not veto its body update, but later human changes do', async () => {
+    for (const change of ['same-edit', 'split-body-event', 'later-rename', 'another-person', 'different-title']) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        const oldTitle = f.issue.title;
+        reporterEdit(f);
+        f.issue.title = 'New terminals use the wrong Python after selecting conda';
+        f.context.payload.issue.title = f.issue.title;
+        f.context.payload.changes.title = { from: oldTitle };
+        const renamed = {
+            event: 'renamed', actor: human, created_at: f.issue.updated_at,
+            rename: { from: oldTitle, to: f.issue.title },
+        };
+        if (change === 'split-body-event') delete f.context.payload.changes.title;
+        if (change === 'later-rename') renamed.created_at = '2026-11-18T12:06:00Z';
+        if (change === 'another-person') renamed.actor = { ...human, id: 8 };
+        if (change === 'different-title') renamed.rename.to = 'A separate edit';
+        f.events.push(renamed);
+        const result = await clearInfoNeededOnEdit(f);
+        const sameEdit = ['same-edit', 'split-body-event'].includes(change);
+        assert.equal(result.status, sameEdit ? 'success' : 'skipped', change);
+        assert.equal(f.writes.length, sameEdit ? 3 : 2, change);
+    }
+});
+
+test('passive subscriptions and mentions after an edit are not mistaken for renewed human requests', async () => {
+    const f = await fixture();
+    await applyModeration({ ...f, output: output('needs-info') });
+    reporterEdit(f);
+    f.events.push(
+        { event: 'subscribed', actor: human, created_at: f.issue.updated_at },
+        { event: 'mentioned', actor: human, created_at: f.issue.updated_at },
+    );
+    assert.equal((await clearInfoNeededOnEdit(f)).status, 'success');
+    assert.deepEqual(f.issue.labels, []);
+});
+
+test('description cleanup rechecks intervening changes and propagates API failures', async () => {
+    for (const operation of ['get', 'paginate', 'removeLabel', 'intervening-change']) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        const fail = async () => { throw new Error('GitHub unavailable'); };
+        if (operation === 'get') f.github.rest.issues.get = fail;
+        if (operation === 'paginate') f.github.paginate = fail;
+        if (operation === 'removeLabel') f.github.rest.issues.removeLabel = fail;
+        if (operation === 'intervening-change') {
+            const paginate = f.github.paginate;
+            f.github.paginate = async (...args) => {
+                const events = await paginate(...args);
+                f.issue.updated_at = '2026-11-18T12:07:00Z';
+                return events;
+            };
+            assert.equal((await clearInfoNeededOnEdit(f)).status, 'skipped');
+        } else {
+            await assert.rejects(clearInfoNeededOnEdit(f), /GitHub unavailable/);
+        }
+        assert.equal(f.writes.length, 2);
     }
 });

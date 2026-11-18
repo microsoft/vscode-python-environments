@@ -3,13 +3,18 @@ name: Triage "info-needed" label
 on:
   issue_comment:
     types: [created]
+  issues:
+    types: [edited]
 
 env:
   TRIAGERS: '["karthiknadig","eleanorjboyd","anthonykim1"]'
 
 jobs:
   add_label:
-    if: contains(github.event.issue.labels.*.name, 'triage-needed') && !contains(github.event.issue.labels.*.name, 'info-needed')
+    if: >-
+      github.event_name == 'issue_comment' &&
+      contains(github.event.issue.labels.*.name, 'triage-needed') &&
+      !contains(github.event.issue.labels.*.name, 'info-needed')
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -34,6 +39,7 @@ jobs:
 
   remove_label:
     if: >-
+      github.event_name == 'issue_comment' &&
       contains(github.event.issue.labels.*.name, 'info-needed') &&
       (!github.event.issue.pull_request || contains(github.event.issue.labels.*.name, 'triage-needed'))
     runs-on: ubuntu-latest
@@ -57,3 +63,30 @@ jobs:
           triagers: ${{ env.TRIAGERS }}
           action: 'remove'
           token: ${{secrets.GITHUB_TOKEN}}
+
+  acknowledge_description_edit:
+    if: >-
+      github.event_name == 'issues' &&
+      github.event.changes.body &&
+      github.event.sender.id == github.event.issue.user.id &&
+      contains(github.event.issue.labels.*.name, 'info-needed')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+
+      - name: Acknowledge the author's description update
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const path = require('node:path');
+            const { clearInfoNeededOnEdit } = require(path.resolve('.github', 'scripts', 'issue-moderation.cjs'));
+            const result = await clearInfoNeededOnEdit({ github, context });
+            core.info(result.reason);
+            await core.summary.addRaw(result.reason).write();

@@ -4,6 +4,11 @@
 const { createHash } = require('node:crypto');
 
 const marker = '<!-- gh-aw-workflow-id: issue-moderation -->';
+const triageEvents = new Set([
+    'labeled', 'unlabeled', 'assigned', 'unassigned', 'reopened', 'closed', 'locked', 'unlocked', 'renamed',
+    'milestoned', 'demilestoned', 'pinned', 'unpinned', 'added_to_project', 'removed_from_project',
+    'moved_columns_in_project', 'connected', 'disconnected', 'marked_as_duplicate', 'unmarked_as_duplicate',
+]);
 const replies = {
     unrelated:
         "Thanks for reaching out! This tracker is for bugs and feature requests about the Python Environments extension for VS Code. This report appears unrelated, so we're closing it for now. If we misunderstood, please leave a comment so a maintainer can review it.",
@@ -71,10 +76,7 @@ async function inspectIssue({ github, context, issueNumber, ownCommentId }) {
     if (
         events.some(
             (event) =>
-                ['labeled', 'unlabeled', 'assigned', 'unassigned', 'reopened', 'closed', 'locked', 'unlocked', 'renamed',
-                    'milestoned', 'demilestoned', 'pinned', 'unpinned', 'added_to_project', 'removed_from_project',
-                    'moved_columns_in_project', 'connected', 'disconnected', 'marked_as_duplicate', 'unmarked_as_duplicate']
-                    .includes(event.event) &&
+                triageEvents.has(event.event) &&
                 isHuman(event.actor) &&
                 !initialEvents.has(event),
         )
@@ -153,4 +155,57 @@ async function applyModeration({ github, context, issueNumber, output, snapshot,
     return { status: 'success', reason: action, url: comment.html_url };
 }
 
-module.exports = { inspectIssue, applyModeration };
+/**
+ * Treat a nonempty description update by the issue author as an information
+ * response, like an author comment. Remove only local info-needed without AI,
+ * reopening, or comments. Stale edits and newer human requests take precedence.
+ */
+async function clearInfoNeededOnEdit({ github, context }) {
+    const { issue: edited, sender, changes } = context.payload;
+    const skip = (reason) => ({ status: 'skipped', reason });
+    if (context.eventName !== 'issues' || context.payload.action !== 'edited' || !changes?.body) {
+        return skip('Only issue-description edits can acknowledge an information response.');
+    }
+    if (!Number.isSafeInteger(sender?.id) || sender.id !== edited?.user?.id || sender.type !== 'User') {
+        return skip('Only the issue author can acknowledge an information response by editing.');
+    }
+    const body = edited.body ?? '';
+    if (!body.trim() || body.trim() === (changes.body.from ?? '').trim()) {
+        return skip('The description has no nonempty content change.');
+    }
+    const target = getTarget(context);
+    const { data: issue } = await github.rest.issues.get(target);
+    if (issue.pull_request || issue.state !== 'open' || issue.locked || issue.user?.id !== sender.id ||
+        issue.body !== body || !issue.labels.some((label) => label.name === 'info-needed')) {
+        return skip('The response is stale or the issue is not awaiting information.');
+    }
+    const editedAt = Date.parse(edited.updated_at);
+    const events = await github.paginate(github.rest.issues.listEventsForTimeline, { ...target, per_page: 100 });
+    const label = events.findLast((event) =>
+        ['labeled', 'unlabeled'].includes(event.event) && event.label?.name === 'info-needed');
+    const labeledAt = Date.parse(label?.created_at);
+    if (!Number.isFinite(editedAt) || !Number.isFinite(labeledAt) ||
+        label.event !== 'labeled' || labeledAt >= editedAt) {
+        return skip('The information request does not verifiably precede this response.');
+    }
+    if (events.some((event) => {
+        const time = Date.parse(event.created_at);
+        // GitHub can emit separate edited payloads for one title/body update.
+        const sameEditRename = event.event === 'renamed' && event.actor?.id === sender.id &&
+            time === editedAt && event.rename?.to === edited.title &&
+            (!changes.title || event.rename?.from === changes.title.from);
+        return (triageEvents.has(event.event) || event.event === 'commented') && !sameEditRename &&
+            isHuman(event.actor ?? event.user) && (!Number.isFinite(time) || time >= editedAt);
+    })) {
+        return skip('Newer human activity takes precedence over this queued response.');
+    }
+    const { data: fresh } = await github.rest.issues.get(target);
+    if (fresh.updated_at !== issue.updated_at || fresh.body !== body || fresh.state !== 'open' || fresh.locked ||
+        !fresh.labels.some((entry) => entry.name === 'info-needed')) {
+        return skip('The issue changed while checking the response.');
+    }
+    await github.rest.issues.removeLabel({ ...target, name: 'info-needed' });
+    return { status: 'success', reason: 'The issue author updated the description; local info-needed was removed.' };
+}
+
+module.exports = { inspectIssue, applyModeration, clearInfoNeededOnEdit };
