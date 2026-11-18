@@ -118,9 +118,10 @@ There are a few ways to add a Python Project from the Python Environments panel:
 
 #### Create New Project from Template
 
-The **Python Envs: Create New Project from Template** command simplifies the process of starting a new Python project by scaffolding it for you. Whether in a new workspace or an existing one, this command configures the environment and boilerplate file structure, so you don’t have to worry about the initial setup, and only the code you want to write. There are currently two project types supported:
+The **Python Envs: Create New Project from Template** command simplifies the process of starting a new Python project by scaffolding it for you. Whether in a new workspace or an existing one, this command configures the environment and boilerplate file structure, so you don’t have to worry about the initial setup, and only the code you want to write. There are currently three project types supported:
 
 -   Package: A structured Python package with files like `__init__.py` and setup configurations.
+-   FastAPI: A FastAPI web API with `pyproject.toml`, an application module, tests, and a debug configuration that launches Uvicorn.
 -   Script: A simple project for standalone Python scripts, ideal for quick tasks or just to get you started.
 
 ## Command Reference
