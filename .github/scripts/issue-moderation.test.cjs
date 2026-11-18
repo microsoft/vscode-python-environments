@@ -3,46 +3,34 @@
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { inspectIssue, planFollowups, applyModeration } = require('./issue-moderation.cjs');
+const { inspectIssue, applyModeration } = require('./issue-moderation.cjs');
 
-const central = { login: 'vs-code-engineering[bot]', type: 'Bot' };
 const human = { login: 'reporter', type: 'User' };
 const automation = { login: 'github-actions[bot]', type: 'Bot' };
-const reviewLabel = 'moderation-review-needed';
+const central = { login: 'vs-code-engineering[bot]', type: 'Bot' };
 
-async function fixture(flag = '~spam') {
-    const now = Date.now();
-    const before = new Date(now - 120000).toISOString();
-    const flagged = new Date(now - 60000).toISOString();
-    const after = new Date(now - 1000).toISOString();
+async function fixture() {
     const issue = {
-        number: 42, title: 'qwerty', body: '', state: 'open', locked: false,
-        labels: [{ name: flag }], assignees: [],
+        number: 42, title: 'qwerty', body: '', state: 'open', locked: false, labels: [], assignees: [],
     };
-    const events = [{ id: 301, event: 'labeled', label: { name: flag }, actor: central, created_at: flagged }];
+    const events = [];
     const comments = [];
     const writes = [];
-    const reads = [];
     const context = {
         repo: { owner: 'example', repo: 'python-environments' },
-        payload: {}, eventName: 'workflow_dispatch', serverUrl: 'https://github.com', runId: 123,
+        payload: { action: 'opened', issue: structuredClone(issue) },
+        eventName: 'issues', serverUrl: 'https://github.com', runId: 123,
     };
     const github = {
         rest: { issues: {
-            get: async (target) => {
-                reads.push(target);
-                return { data: structuredClone(issue) };
-            },
+            get: async () => ({ data: structuredClone(issue) }),
             listComments: Symbol('listComments'),
             listEventsForTimeline: Symbol('listEventsForTimeline'),
-            listForRepo: async ({ labels }) => ({ data: issue.labels.some((label) => label.name === labels) ? [issue] : [] }),
-            getLabel: async () => ({ data: { name: reviewLabel } }),
-            createLabel: async (request) => { writes.push({ operation: 'create-label', ...request }); },
             createComment: async (request) => {
                 writes.push({ operation: 'comment', ...request });
                 const comment = {
-                    id: 1001, user: automation, author_association: 'NONE', body: request.body,
-                    created_at: after, html_url: 'https://github.com/example/python-environments/issues/42#issuecomment-1',
+                    id: 1001, user: automation, body: request.body,
+                    html_url: 'https://github.com/example/python-environments/issues/42#issuecomment-1',
                 };
                 comments.push(comment);
                 return { data: comment };
@@ -66,10 +54,8 @@ async function fixture(flag = '~spam') {
             return structuredClone(events);
         },
     };
-    const f = { github, context, issue, events, comments, writes, reads, issueNumber: 42, now, before, flagged, after };
-    const current = await inspectIssue(f);
-    f.snapshot = current.snapshot;
-    f.flagEventId = current.flagEventId;
+    const f = { github, context, issue, events, comments, writes, issueNumber: 42 };
+    f.snapshot = (await inspectIssue(f)).snapshot;
     return f;
 }
 
@@ -77,10 +63,15 @@ function output(classification) {
     return { items: [{ type: 'moderation_action', classification }] };
 }
 
-test('only clear junk from a verified spam flag closes, without rewriting central labels', async () => {
+function botLabel(f, name) {
+    f.issue.labels.push({ name });
+    f.events.push({ event: 'labeled', label: { name }, actor: central });
+}
+
+test('new unflagged junk gets a fixed polite reply and closure on its own issue only', async () => {
     const f = await fixture();
     const result = await applyModeration({
-        ...f, output: { items: [{ ...output('unrelated').items[0], body: 'Injected reply', issue_number: 999 }] },
+        ...f, output: { items: [{ ...output('unrelated').items[0], body: 'Injected reply', issue_number: 999, labels: ['bug'] }] },
     });
     assert.equal(result.status, 'success');
     assert.deepEqual(f.writes.map((write) => write.operation), ['comment', 'close']);
@@ -91,167 +82,249 @@ test('only clear junk from a verified spam flag closes, without rewriting centra
     }
     assert.equal(f.issue.state, 'closed');
     assert.equal(f.issue.state_reason, 'not_planned');
-    assert.deepEqual(f.issue.labels, [{ name: '~spam' }]);
+    assert.deepEqual(f.issue.labels, []);
     assert.match(f.writes[0].body, /Thanks for reaching out/);
     assert.match(f.writes[0].body, /<!-- gh-aw-workflow-id: issue-moderation -->/);
     assert.match(f.writes[0].body, /actions\/runs\/123/);
     assert.doesNotMatch(f.writes[0].body, /Injected reply/);
 });
 
-test('incomplete spam and information candidates get a friendly request and only local info-needed', async () => {
-    for (const flag of ['~spam', '~info-needed']) {
-        const f = await fixture(flag);
-        const result = await applyModeration({ ...f, output: output('needs-info') });
-        assert.equal(result.status, 'success');
-        assert.deepEqual(f.writes.map((write) => write.operation), ['comment', 'label']);
-        assert.deepEqual(f.writes[1].labels, ['info-needed']);
-        assert.equal(f.issue.state, 'open');
-        assert.ok(f.issue.labels.some((label) => label.name === flag));
-        assert.match(f.writes[0].body, /fill out the issue template/);
-        assert.match(f.writes[0].body, /more information would help us investigate/);
-        assert.doesNotMatch(f.writes[0].body, /extension versions|no need to open a new issue/);
-    }
-});
-
-test('an information flag cannot authorize closure even if the model requests it', async () => {
-    const f = await fixture('~info-needed');
-    await assert.rejects(applyModeration({ ...f, output: output('unrelated') }), /cannot authorize closure/);
-    assert.equal(f.writes.length, 0);
+test('an incomplete report gets a friendly request and only info-needed, without closure', async () => {
+    const f = await fixture();
+    const result = await applyModeration({ ...f, output: output('needs-info') });
+    assert.equal(result.status, 'success');
+    assert.deepEqual(f.writes.map((write) => write.operation), ['comment', 'label']);
+    assert.deepEqual(f.writes[1].labels, ['info-needed']);
     assert.equal(f.issue.state, 'open');
+    assert.match(f.writes[0].body, /fill out the issue template/);
+    assert.match(f.writes[0].body, /more information would help us investigate/);
+    assert.doesNotMatch(f.writes[0].body, /extension versions|no need to open a new issue/);
 });
 
-test('relevant and conflicting flags go to a human queue, with no public reply or closure', async () => {
-    for (const conflict of [false, true]) {
-        const f = await fixture();
-        if (conflict) {
-            f.issue.labels.push({ name: '~info-needed' });
-            f.events.push({ id: 302, event: 'labeled', label: { name: '~info-needed' }, actor: central, created_at: f.after });
-            Object.assign(f, await inspectIssue({ ...f, flagEventId: undefined }));
+test('useful or uncertain reports stay completely untouched, without a review queue label', async () => {
+    const f = await fixture();
+    const result = await applyModeration({ ...f, output: output('relevant') });
+    assert.equal(result.status, 'skipped');
+    assert.equal(f.issue.state, 'open');
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.issue.labels, []);
+});
+
+test('central flags neither authorize nor veto any content judgment and are always preserved', async () => {
+    for (const labels of [[], ['~spam'], ['~info-needed'], ['~spam', '~info-needed'], ['info-needed']]) {
+        for (const classification of ['unrelated', 'needs-info', 'relevant']) {
+            const f = await fixture();
+            for (const label of labels) botLabel(f, label);
+            const current = await inspectIssue(f);
+            assert.equal(current.reason, undefined);
+            assert.equal(current.snapshot, f.snapshot);
+            assert.deepEqual(current.report, { title: f.issue.title, description: f.issue.body });
+            await applyModeration({ ...f, output: output(classification) });
+            assert.equal(f.issue.state, classification === 'unrelated' ? 'closed' : 'open');
+            for (const name of labels) assert.ok(f.issue.labels.some((label) => label.name === name));
+            assert.equal(f.writes.some((write) => write.operation === 'label'), classification === 'needs-info');
         }
-        const result = await applyModeration({ ...f, output: output(conflict ? 'unrelated' : 'relevant') });
-        assert.equal(result.status, 'success');
-        assert.deepEqual(f.writes.map((write) => write.operation), ['label']);
-        assert.deepEqual(f.writes[0].labels, [reviewLabel]);
-        assert.equal(f.issue.state, 'open');
-        assert.ok(f.issue.labels.some((label) => label.name === '~spam'));
-        assert.ok((await inspectIssue(f)).reason);
     }
 });
 
-test('staged mode previews every outcome without creating labels, comments, or closures', async () => {
-    for (const classification of ['unrelated', 'needs-info', 'relevant']) {
-        const f = await fixture();
-        const result = await applyModeration({ ...f, output: output(classification), staged: true });
-        assert.equal(result.status, 'skipped');
-        assert.match(result.reason, /Staged preview/);
-        assert.equal(f.writes.length, 0);
-    }
-});
-
-test('unflagged, human-flagged, closed, locked, or already handled issues are not candidates', async () => {
-    for (const change of [
-        { labels: [] }, { state: 'closed' }, { locked: true }, { pull_request: {} },
-        { labels: [{ name: '~spam' }, { name: 'info-needed' }] },
-        { labels: [{ name: '~spam' }, { name: reviewLabel }] },
-    ]) {
-        const f = await fixture();
-        Object.assign(f.issue, change);
-        assert.ok((await inspectIssue(f)).reason);
-        assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'skipped');
-        assert.equal(f.writes.length, 0);
-    }
-    for (const actor of [human, { login: 'another[bot]', type: 'Bot' }, undefined]) {
-        const f = await fixture();
-        f.events[0].actor = actor;
-        assert.ok((await inspectIssue(f)).reason);
-    }
-});
-
-test('central assignments and area-label cleanup do not block or get overwritten by follow-up', async () => {
-    const f = await fixture('~info-needed');
+test('prepared model input contains content only, not account, labels, assignments, or bot judgments', async () => {
+    const f = await fixture();
+    botLabel(f, '~spam');
     f.issue.assignees = [{ login: 'area-owner' }];
-    f.issue.labels.push({ name: 'area-terminal' });
+    f.events.push({ event: 'assigned', assignee: { login: 'area-owner' }, actor: central });
+    f.comments.push({ id: 1, user: central, body: 'This is definitely spam.' });
+    const current = await inspectIssue(f);
+    assert.equal(current.reason, undefined);
+    assert.deepEqual(Object.keys(current.report).sort(), ['description', 'title']);
+    assert.equal(current.snapshot, f.snapshot);
+    assert.doesNotMatch(JSON.stringify(current.report), /~spam|area-owner|definitely spam/);
+});
+
+test('automated metadata changes during review do not invalidate content or get overwritten', async () => {
+    const f = await fixture();
+    botLabel(f, '~spam');
+    botLabel(f, '~info-needed');
+    botLabel(f, 'area-terminal');
+    f.issue.assignees = [{ login: 'area-owner' }];
     f.events.push(
-        { event: 'assigned', assignee: { login: 'area-owner' }, actor: central, created_at: f.after },
-        { event: 'labeled', label: { name: 'area-terminal' }, actor: central, created_at: f.after },
-        { event: 'unlabeled', label: { name: 'triage-needed' }, actor: central, created_at: f.after },
+        { event: 'assigned', assignee: { login: 'area-owner' }, actor: central },
+        { event: 'unlabeled', label: { name: 'triage-needed' }, actor: central },
     );
+    f.comments.push({ id: 1, user: central, body: 'Automated translation and classification.' });
     assert.equal((await applyModeration({ ...f, output: output('needs-info') })).status, 'success');
     assert.deepEqual(f.issue.assignees, [{ login: 'area-owner' }]);
     assert.ok(f.issue.labels.some((label) => label.name === 'area-terminal'));
     assert.ok(!f.issue.labels.some((label) => label.name === 'triage-needed'));
 });
 
-test('human labels, assignments, and post-flag triage changes take precedence', async () => {
-    for (const kind of ['label', 'assignment', 'removal']) {
+test('initial template labels are neutral, but a later removal/reapplication is human triage', async () => {
+    const f = await fixture();
+    f.issue.labels = [{ name: 'bug' }];
+    f.context.payload.issue.labels = structuredClone(f.issue.labels);
+    f.events.push({ event: 'labeled', label: { name: 'bug' }, actor: human });
+    assert.equal((await inspectIssue(f)).reason, undefined);
+    f.events.push(
+        { event: 'unlabeled', label: { name: 'bug' }, actor: human },
+        { event: 'labeled', label: { name: 'bug' }, actor: human },
+    );
+    assert.ok((await inspectIssue(f)).reason);
+});
+
+test('human labels, assignments, and other manual state changes take precedence', async () => {
+    for (const kind of ['label', 'assignment', 'removal', 'milestone', 'reopen']) {
         const f = await fixture();
         if (kind === 'label') {
-            f.issue.labels.push({ name: 'bug' });
-            f.events.push({ event: 'labeled', label: { name: 'bug' }, actor: human, created_at: f.before });
+            f.issue.labels.push({ name: '~spam' });
+            f.events.push({ event: 'labeled', label: { name: '~spam' }, actor: human });
         } else if (kind === 'assignment') {
             f.issue.assignees.push({ login: 'area-owner' });
-            f.events.push({ event: 'assigned', assignee: { login: 'area-owner' }, actor: human, created_at: f.before });
+            f.events.push({ event: 'assigned', assignee: { login: 'area-owner' }, actor: human });
         } else {
-            f.events.push({ event: 'unlabeled', label: { name: 'triage-needed' }, actor: human, created_at: f.after });
+            f.events.push({ event: { removal: 'unlabeled', milestone: 'milestoned', reopen: 'reopened' }[kind], actor: human });
         }
         assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'skipped');
         assert.equal(f.writes.length, 0);
     }
 });
 
-test('human discussion is protected, including comments beyond page one and replies before review starts', async () => {
-    for (const comment of [
-        { user: human, author_association: 'MEMBER', created_at: '2000-01-01T00:00:00Z' },
-        { user: human, author_association: 'NONE', created_at: new Date().toISOString() },
-        { user: human, author_association: 'NONE', created_at: '2000-01-01T00:00:00Z', updated_at: new Date().toISOString() },
-    ]) {
+test('bot-only changes to a creation-time template label do not turn it into human triage', async () => {
+    const f = await fixture();
+    f.issue.labels = [{ name: 'bug' }];
+    f.context.payload.issue.labels = structuredClone(f.issue.labels);
+    f.events.push(
+        { event: 'labeled', label: { name: 'bug' }, actor: human },
+        { event: 'unlabeled', label: { name: 'bug' }, actor: central },
+        { event: 'labeled', label: { name: 'bug' }, actor: central },
+    );
+    assert.equal((await inspectIssue(f)).reason, undefined);
+    assert.equal((await applyModeration({ ...f, output: output('relevant') })).status, 'skipped');
+    assert.deepEqual(f.writes, []);
+});
+
+test('unverifiable current labels or assignments do not permit unchecked moderation', async () => {
+    for (const kind of ['label', 'assignment']) {
         const f = await fixture();
-        f.comments.push(...Array.from({ length: 100 }, (_, id) => ({ id, user: central, body: 'Bot context.' })), comment);
+        if (kind === 'label') f.issue.labels = [{ name: 'bug' }];
+        else f.issue.assignees = [{ login: 'area-owner' }];
+        assert.ok((await inspectIssue(f)).reason);
         assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'skipped');
         assert.equal(f.writes.length, 0);
     }
 });
 
-test('bot translations and reporter comments predating a flag can be reviewed', async () => {
-    const f = await fixture('~info-needed');
-    f.comments.push(
-        { id: 1, user: central, author_association: 'MEMBER', body: 'Translation', created_at: f.after },
-        { id: 2, user: human, author_association: 'NONE', body: 'Original context', created_at: f.before },
-    );
-    f.snapshot = (await inspectIssue(f)).snapshot;
-    assert.equal((await applyModeration({ ...f, output: output('needs-info') })).status, 'success');
-});
-
-test('prior bot responses prevent repeat replies and reclosure, but reporter-quoted markers do not spoof them', async () => {
-    const f = await fixture();
-    const body = '<!-- gh-aw-workflow-id: issue-moderation -->';
-    f.comments.push({ id: 1, user: automation, body });
-    assert.ok((await inspectIssue(f)).reason);
-    f.comments[0] = { id: 1, user: human, author_association: 'NONE', body, created_at: f.before };
-    f.snapshot = (await inspectIssue(f)).snapshot;
-    assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'success');
-});
-
-test('the seven-day eligibility window and five-minute clock tolerance have exact boundaries', async () => {
-    const f = await fixture();
-    for (const [offset, eligible] of [
-        [-7 * 86400000, true], [-7 * 86400000 - 1, false], [5 * 60000, true], [5 * 60000 + 1, false],
-    ]) {
-        f.events[0].created_at = new Date(f.now + offset).toISOString();
-        assert.equal(!(await inspectIssue({ ...f, now: f.now })).reason, eligible);
+test('human pins, projects, links and duplicate decisions block moderation while bot changes remain neutral', async () => {
+    for (const event of ['pinned', 'unpinned', 'added_to_project', 'removed_from_project', 'moved_columns_in_project',
+        'connected', 'disconnected', 'marked_as_duplicate', 'unmarked_as_duplicate']) {
+        for (const actor of [human, central]) {
+            const f = await fixture();
+            f.events.push({ event, actor });
+            const result = await applyModeration({ ...f, output: output('unrelated') });
+            if (actor === human) {
+                assert.equal(result.status, 'skipped');
+                assert.deepEqual(f.writes, []);
+                assert.equal(f.issue.state, 'open');
+            } else {
+                assert.equal(result.status, 'success');
+                assert.equal(f.issue.state, 'closed');
+            }
+        }
     }
 });
 
-test('removed or superseded flags cannot authorize an old review', async () => {
-    const f = await fixture();
-    f.events.push({ id: 302, event: 'labeled', label: { name: '~spam' }, actor: central, created_at: f.after });
-    assert.ok((await inspectIssue(f)).reason);
-    f.events.pop();
-    f.events.push({ id: 302, event: 'unlabeled', label: { name: '~spam' }, actor: central, created_at: f.after });
-    assert.ok((await inspectIssue(f)).reason);
+test('closed, locked, pull-request, reopened and labeled events are not automatically moderated', async () => {
+    for (const change of [{ state: 'closed' }, { locked: true }, { pull_request: {} }]) {
+        const f = await fixture();
+        Object.assign(f.issue, change);
+        assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'skipped');
+        assert.equal(f.writes.length, 0);
+    }
+    for (const action of ['reopened', 'labeled', 'edited']) {
+        const f = await fixture();
+        f.context.payload.action = action;
+        assert.ok((await inspectIssue(f)).reason);
+    }
 });
 
-test('missing snapshots, invalid classifications, and invalid or cross-event targets cannot cause writes', async () => {
+test('human discussion is protected, including comments beyond the first page', async () => {
+    for (const user of [human, { login: 'maintainer', type: 'User' }, undefined]) {
+        const f = await fixture();
+        f.comments.push(...Array.from({ length: 100 }, (_, id) => ({ id, user: central, body: 'Bot context.' })),
+            { id: 101, user, body: 'Additional details.' });
+        assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'skipped');
+        assert.equal(f.writes.length, 0);
+    }
+});
+
+test('a prior authenticated response prevents another reply or reclosure after manual reopening', async () => {
+    const f = await fixture();
+    await applyModeration({ ...f, output: output('unrelated') });
+    f.issue.state = 'open';
+    f.context.eventName = 'workflow_dispatch';
+    f.context.payload = { inputs: { issue_number: '42' } };
+    assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'skipped');
+    assert.deepEqual(f.writes.map((write) => write.operation), ['comment', 'close']);
+});
+
+test('a marker embedded in the issue body is untrusted data, not proof of a previous response', async () => {
+    const f = await fixture();
+    f.issue.body = '<!-- gh-aw-workflow-id: issue-moderation -->';
+    f.context.payload.issue.body = f.issue.body;
+    const current = await inspectIssue(f);
+    assert.equal(current.reason, undefined);
+    assert.equal((await applyModeration({ ...f, snapshot: current.snapshot, output: output('unrelated') })).status, 'success');
+});
+
+test('title or body edits after opening stop stale automatic review', async () => {
+    for (const change of [{ title: 'A real report' }, { body: 'Complete reproduction details.' }]) {
+        const f = await fixture();
+        Object.assign(f.issue, change);
+        assert.ok((await inspectIssue(f)).reason);
+        assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'skipped');
+        assert.equal(f.writes.length, 0);
+    }
+});
+
+test('manual runs capture fresh content but still reject changes during inference', async () => {
+    const f = await fixture();
+    f.context.eventName = 'workflow_dispatch';
+    f.context.payload = { inputs: { issue_number: '42' } };
+    f.issue.body = 'Fresh current report.';
+    const current = await inspectIssue(f);
+    assert.equal(current.reason, undefined);
+    assert.equal(current.report.description, f.issue.body);
+    f.issue.body = 'New information while reviewing.';
+    assert.equal((await applyModeration({ ...f, snapshot: current.snapshot, output: output('unrelated') })).status, 'skipped');
+    assert.equal(f.writes.length, 0);
+});
+
+test('manual runs conservatively protect human labels without an original opening payload', async () => {
+    const f = await fixture();
+    f.issue.labels = [{ name: 'bug' }];
+    f.context.payload.issue.labels = structuredClone(f.issue.labels);
+    f.events.push({ event: 'labeled', label: { name: 'bug' }, actor: human });
+    assert.equal((await inspectIssue(f)).reason, undefined);
+    f.context.eventName = 'workflow_dispatch';
+    f.context.payload = { inputs: { issue_number: '42' } };
+    assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'skipped');
+    assert.deepEqual(f.writes, []);
+});
+
+test('new human information during reply publication prevents remaining closure or labeling', async () => {
+    for (const classification of ['unrelated', 'needs-info']) {
+        const f = await fixture();
+        const post = f.github.rest.issues.createComment;
+        f.github.rest.issues.createComment = async (request) => {
+            const result = await post(request);
+            f.comments.push({ id: 2, user: human, body: 'Here are the reproduction steps.' });
+            return result;
+        };
+        assert.equal((await applyModeration({ ...f, output: output(classification) })).status, 'skipped');
+        assert.deepEqual(f.writes.map((write) => write.operation), ['comment']);
+        assert.equal(f.issue.state, 'open');
+    }
+});
+
+test('missing snapshots, malformed classifications and invalid/cross-event targets never write', async () => {
     const f = await fixture();
     for (const snapshot of [undefined, '', 'not-a-snapshot']) {
         await assert.rejects(applyModeration({ ...f, snapshot, output: output('unrelated') }), /trusted pre-inference/);
@@ -261,105 +334,34 @@ test('missing snapshots, invalid classifications, and invalid or cross-event tar
     }]) {
         await assert.rejects(applyModeration({ ...f, output: invalid }), /one valid moderation classification/);
     }
-    for (const issueNumber of [undefined, '', '0', '-1', '1.2', '1; injected', '9007199254740992']) {
+    for (const issueNumber of ['', '0', '-1', '1.2', '1; injected', '9007199254740992']) {
         await assert.rejects(inspectIssue({ ...f, issueNumber }), /positive issue number/);
     }
-    f.context.payload.issue = { number: 43 };
-    await assert.rejects(inspectIssue(f), /does not match/);
+    await assert.rejects(inspectIssue({ ...f, issueNumber: 43 }), /does not match/);
+    f.context.eventName = 'workflow_dispatch';
+    f.context.payload = { inputs: { issue_number: '' } };
+    await assert.rejects(inspectIssue({ ...f, issueNumber: undefined }), /positive issue number/);
     assert.equal(f.writes.length, 0);
 });
 
-test('manual review snapshots detect body and existing-comment edits with an unchanged comment count', async () => {
-    for (const kind of ['body', 'comment']) {
+test('staged mode previews actions without changing issues, and normal reports remain no-ops', async () => {
+    for (const classification of ['unrelated', 'needs-info', 'relevant']) {
         const f = await fixture();
-        f.comments.push({ id: 1, user: human, author_association: 'NONE', body: 'Original', created_at: f.before });
-        f.snapshot = (await inspectIssue(f)).snapshot;
-        if (kind === 'body') f.issue.body = 'A real extension report.';
-        else f.comments[0].body = 'Updated reproduction.';
-        assert.equal((await applyModeration({ ...f, output: output('unrelated') })).status, 'skipped');
+        const result = await applyModeration({ ...f, output: output(classification), staged: true });
+        assert.equal(result.status, 'skipped');
+        if (classification !== 'relevant') assert.match(result.reason, /Staged preview/);
         assert.equal(f.writes.length, 0);
     }
 });
 
-test('new information arriving during reply publication prevents closure or information labeling', async () => {
-    for (const classification of ['unrelated', 'needs-info']) {
-        const f = await fixture();
-        const post = f.github.rest.issues.createComment;
-        f.github.rest.issues.createComment = async (request) => {
-            const result = await post(request);
-            f.comments.push({ id: 2, user: human, body: 'Here are the reproduction steps.', created_at: f.after });
-            return result;
-        };
-        assert.equal((await applyModeration({ ...f, output: output(classification) })).status, 'skipped');
-        assert.deepEqual(f.writes.map((write) => write.operation), ['comment']);
-        assert.equal(f.issue.state, 'open');
-    }
-});
-
-test('read and write failures propagate instead of claiming moderation succeeded', async () => {
-    for (const operation of ['get', 'paginate', 'createComment', 'addLabels', 'update', 'getLabel']) {
+test('API failures propagate rather than claiming successful moderation', async () => {
+    for (const operation of ['get', 'paginate', 'createComment', 'addLabels', 'update']) {
         const f = await fixture();
         const fail = async () => { throw new Error('GitHub unavailable'); };
         if (operation === 'paginate') f.github.paginate = fail;
         else f.github.rest.issues[operation] = fail;
-        const classification = operation === 'addLabels' ? 'needs-info' : operation === 'getLabel' ? 'relevant' : 'unrelated';
+        const classification = operation === 'addLabels' ? 'needs-info' : 'unrelated';
         await assert.rejects(applyModeration({ ...f, output: output(classification) }), /GitHub unavailable/);
         assert.equal(f.issue.state, 'open');
     }
-});
-
-test('review-label creation handles a concurrent creator but does not hide permission errors', async () => {
-    const f = await fixture();
-    let lookups = 0;
-    f.github.rest.issues.getLabel = async () => {
-        if (lookups++ === 0) throw Object.assign(new Error('Missing'), { status: 404 });
-        return { data: { name: reviewLabel } };
-    };
-    f.github.rest.issues.createLabel = async () => { throw Object.assign(new Error('Already exists'), { status: 422 }); };
-    assert.equal((await applyModeration({ ...f, output: output('relevant') })).status, 'success');
-    const denied = await fixture();
-    denied.github.rest.issues.getLabel = async () => { throw Object.assign(new Error('Denied'), { status: 403 }); };
-    await assert.rejects(applyModeration({ ...denied, output: output('relevant') }), /Denied/);
-    assert.equal(denied.writes.length, 0);
-});
-
-test('the router accepts only expected bot flag events and ignores opening, human flags, and unrelated labels', async () => {
-    for (const [action, sender, name, accepted] of [
-        ['labeled', central, '~spam', true], ['labeled', central, '~info-needed', true],
-        ['opened', central, '~spam', false], ['labeled', human, '~spam', false],
-        ['labeled', automation, '~spam', false], ['labeled', central, 'bug', false],
-    ]) {
-        const f = await fixture(name === '~info-needed' ? name : '~spam');
-        f.context.eventName = 'issues';
-        f.context.payload = { action, sender, label: { name }, issue: { number: 42 } };
-        const result = await planFollowups(f);
-        assert.equal(result.candidates.length > 0, accepted);
-    }
-});
-
-test('manual and catch-up routing still require verified provenance and do not duplicate both source labels', async () => {
-    const f = await fixture();
-    f.context.payload.inputs = { issue_number: '42' };
-    assert.deepEqual((await planFollowups(f)).candidates, [{ issue_number: '42', flag_event_id: '301' }]);
-    f.events[0].actor = human;
-    assert.equal((await planFollowups(f)).candidates.length, 0);
-    f.events[0].actor = central;
-    f.context.eventName = 'schedule';
-    f.context.payload = {};
-    f.issue.labels.push({ name: '~info-needed' });
-    f.events.push({ id: 302, event: 'labeled', label: { name: '~info-needed' }, actor: central, created_at: f.after });
-    assert.equal((await planFollowups(f)).candidates.length, 1);
-});
-
-test('catch-up caps dispatch at 20 and reports its 100-per-label scan boundary', async () => {
-    const f = await fixture();
-    f.context.eventName = 'schedule';
-    f.github.rest.issues.listForRepo = async ({ labels, since, per_page }) => {
-        assert.equal(per_page, 100);
-        assert.equal(since, new Date(f.now - 7 * 86400000).toISOString());
-        return { data: labels === '~spam' ? Array.from({ length: 100 }, (_, index) => ({ number: index + 1 })) : [] };
-    };
-    const result = await planFollowups(f);
-    assert.equal(result.candidates.length, 20);
-    assert.equal(result.truncated, true);
 });
