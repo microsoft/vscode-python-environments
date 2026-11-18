@@ -92,6 +92,7 @@ extends:
     standardizedVersioning: true
     customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
     nodeVersion: $(NodeVersion)
+    pythonVersion: '3.x'
     publishExtension: ${{ parameters.publishExtension }}
     teamName: $(TeamName)
     ghCreateTag: true
