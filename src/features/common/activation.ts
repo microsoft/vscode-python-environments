@@ -9,7 +9,7 @@ import {
 import { identifyTerminalShell } from './shellDetector';
 
 export function isActivatableEnvironment(environment: PythonEnvironment): boolean {
-    return !!environment.execInfo?.activation || !!environment.execInfo?.shellActivation;
+    return !!environment.execInfo?.activation || (environment.execInfo?.shellActivation?.size ?? 0) > 0;
 }
 
 export function isActivatedRunAvailable(environment: PythonEnvironment): boolean {

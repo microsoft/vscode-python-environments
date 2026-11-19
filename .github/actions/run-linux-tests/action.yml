@@ -1,0 +1,39 @@
+name: 'Run Linux extension tests'
+description: 'Run tests under Xvfb and retain startup diagnostics on failure'
+
+inputs:
+  script:
+    description: 'npm test script to run'
+    required: true
+  artifact-name:
+    description: 'Unique diagnostic artifact name for this job'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Xvfb
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y xvfb x11-xserver-utils
+
+    - name: Run tests with diagnostics
+      id: tests
+      shell: bash
+      env:
+        TEST_SCRIPT: ${{ inputs.script }}
+        VSCODE_TEST_DIAGNOSTICS_DIR: ${{ runner.temp }}/vscode-test-diagnostics
+      run: |
+        mkdir -p "$VSCODE_TEST_DIAGNOSTICS_DIR"
+        xvfb-run --auto-servernum --error-file="$VSCODE_TEST_DIAGNOSTICS_DIR/xvfb.log" \
+          npm run "$TEST_SCRIPT" 2>&1 | tee "$VSCODE_TEST_DIAGNOSTICS_DIR/launcher.log"
+
+    - name: Upload failure diagnostics
+      if: ${{ failure() && steps.tests.outcome == 'failure' }}
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/vscode-test-diagnostics
+        if-no-files-found: error
+        retention-days: 7

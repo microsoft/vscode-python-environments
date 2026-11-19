@@ -3,11 +3,12 @@ import assert from 'assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironmentApi } from '../../../api';
+import { CONDA_MANAGER_ID } from '../../../common/constants';
 import * as logging from '../../../common/logging';
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
 import * as windowApis from '../../../common/window.apis';
-import { PythonProjectManager } from '../../../internal.api';
+import type { PythonProjectManager } from '../../../features/projectManager';
 import * as commonUtils from '../../../managers/common/utils';
 import { NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
@@ -191,7 +192,7 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
         assert.strictEqual(mgr.sourcingInformation, undefined);
         // missing-default notification was shown
         assert.strictEqual(notifyMissingStub.callCount, 1);
-        assert.strictEqual(notifyMissingStub.firstCall.args[0], 'ms-python.python:conda');
+        assert.strictEqual(notifyMissingStub.firstCall.args[0], CONDA_MANAGER_ID);
         assert.strictEqual(notifyMissingStub.firstCall.args[1], projectManager);
 
         const props = getLazyInitTelemetry();

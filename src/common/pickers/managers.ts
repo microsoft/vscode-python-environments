@@ -1,5 +1,4 @@
 import {
-    commands,
     QuickInputButtons,
     QuickPickItem,
     QuickPickItemKind,
@@ -8,7 +7,11 @@ import {
     WorkspaceFolder,
 } from 'vscode';
 import { PythonProjectCreator } from '../../api';
-import { InternalEnvironmentManager, InternalPackageManager } from '../../internal.api';
+import type {
+    InternalEnvironmentManager,
+    InternalPackageManager,
+} from '../../managers/common/registeredManagers';
+import { executeCommand } from '../command.api';
 import { Common, Interpreter, Pickers } from '../localize';
 import { showQuickPickWithButtons } from '../window.apis';
 
@@ -259,8 +262,10 @@ export async function newProjectSelection(creators: PythonProjectCreator[]): Pro
             return undefined;
         }
         // Handle back button
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((newSelected as any)?.kind === -1 || (newSelected as any)?.back === true) {
+        if (
+            !Array.isArray(newSelected) &&
+            (newSelected.kind === QuickPickItemKind.Separator || ('back' in newSelected && newSelected.back === true))
+        ) {
             // User pressed the back button, re-show the first menu
             return pickCreator(creators);
         }
@@ -270,7 +275,7 @@ export async function newProjectSelection(creators: PythonProjectCreator[]): Pro
         return selectedCreator?.c;
     } catch (ex) {
         if (ex === QuickInputButtons.Back) {
-            await commands.executeCommand('python-envs.addPythonProject');
+            await executeCommand('python-envs.addPythonProject');
         }
     }
 }

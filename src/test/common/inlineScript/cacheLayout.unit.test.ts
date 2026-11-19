@@ -36,6 +36,11 @@ import * as logging from '../../../common/logging';
 import { createDeferred } from '../../../common/utils/deferred';
 import * as platformUtils from '../../../common/utils/platformUtils';
 import { getVenvPythonPath } from '../../../common/utils/virtualEnvironment';
+import { INLINE_SCRIPT_MANAGER_ID, SYSTEM_MANAGER_ID } from '../../../common/constants';
+
+// `import * as` would copy the module, leaving the spy unable to observe the real rename that
+// cacheLayout calls.
+import nodeFsPromises = require('fs/promises');
 
 function makeMeta(overrides: Partial<InlineScriptEnvMeta> = {}): InlineScriptEnvMeta {
     return {
@@ -115,6 +120,63 @@ suite('inlineScriptCacheLayout', () => {
             const entries = await fs.readdir(envDir.fsPath);
             const tmpFiles = entries.filter((name) => name.includes('.tmp-'));
             assert.deepStrictEqual(tmpFiles, []);
+        });
+
+        // Optional bookkeeping fails fast rather than holding the shared cache-entry lock through
+        // graceful-fs's minute-long rename retry, which other windows read as a build or deletion.
+        test('a failFast write still produces a readable sidecar', async () => {
+            await writeMetaJson(envDir, makeMeta({ lastUsedAt: '2031-02-03T04:05:06.000Z' }), { failFast: true });
+
+            const read = await readMetaJson(envDir);
+            assert.strictEqual(read?.lastUsedAt, '2031-02-03T04:05:06.000Z');
+            const entries = await fs.readdir(envDir.fsPath);
+            assert.deepStrictEqual(
+                entries.filter((name) => name.includes('.tmp-') || name.includes('.backup-')),
+                [],
+            );
+        });
+
+        test('a failFast write replaces an existing sidecar', async () => {
+            await writeMetaJson(envDir, makeMeta({ lastUsedAt: '2020-01-01T00:00:00.000Z' }));
+
+            await writeMetaJson(envDir, makeMeta({ lastUsedAt: '2032-01-01T00:00:00.000Z' }), { failFast: true });
+
+            const read = await readMetaJson(envDir);
+            assert.strictEqual(read?.lastUsedAt, '2032-01-01T00:00:00.000Z');
+        });
+
+        test('failFast bypasses the retrying rename implementation', async () => {
+            const immediate = sinon.spy(nodeFsPromises, 'rename');
+
+            await writeMetaJson(envDir, makeMeta(), { failFast: true });
+
+            sinon.assert.called(immediate);
+        });
+
+        test('a required write keeps the retrying rename implementation', async () => {
+            const immediate = sinon.spy(nodeFsPromises, 'rename');
+
+            await writeMetaJson(envDir, makeMeta());
+
+            sinon.assert.notCalled(immediate);
+        });
+
+        test('a failed fast write leaves the existing sidecar untouched without backup or restore', async () => {
+            const existing = makeMeta();
+            await writeMetaJson(envDir, existing);
+            const error = Object.assign(new Error('sharing violation'), { code: 'EPERM' });
+            const immediate = sinon.stub(nodeFsPromises, 'rename').rejects(error);
+            const retrying = sinon.spy(fsExtra, 'rename');
+
+            await assert.rejects(
+                writeMetaJson(envDir, makeMeta({ lastUsedAt: '2030-01-01T00:00:00.000Z' }), { failFast: true }),
+                (actual) => actual === error,
+            );
+
+            sinon.assert.calledOnce(immediate);
+            sinon.assert.notCalled(retrying);
+            assert.deepStrictEqual(await readMetaJson(envDir), existing);
+            assert.deepStrictEqual(await fs.readdir(envDir.fsPath), [META_JSON_FILENAME]);
         });
 
         test('writeMetaJson overwrites an existing sidecar (last write wins)', async () => {
@@ -796,7 +858,7 @@ suite('inlineScriptCacheLayout', () => {
             const pythonPath = getVenvPythonPath(envDir.fsPath);
             await fs.outputFile(pythonPath, '');
             environment = {
-                envId: { id: 'inline-env', managerId: 'ms-python.python:inline-script' },
+                envId: { id: 'inline-env', managerId: INLINE_SCRIPT_MANAGER_ID },
                 name: 'Python 3.12.4',
                 displayName: 'Python 3.12.4',
                 displayPath: pythonPath,
@@ -818,7 +880,7 @@ suite('inlineScriptCacheLayout', () => {
         test('does not claim environments owned by another manager', async () => {
             const otherManager = {
                 ...environment,
-                envId: { ...environment.envId, managerId: 'ms-python.python:system' },
+                envId: { ...environment.envId, managerId: SYSTEM_MANAGER_ID },
             };
             assert.strictEqual(await inspectOwnedCacheEntry(otherManager, cacheRoot, envDir), 'uncertain');
         });

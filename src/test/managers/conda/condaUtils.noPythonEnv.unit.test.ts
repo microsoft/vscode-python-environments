@@ -4,7 +4,7 @@ import { LogOutputChannel, WorkspaceConfiguration } from 'vscode';
 import { EnvironmentManager, PythonEnvironmentApi, PythonEnvironmentInfo } from '../../../api';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
-import { PythonEnvironmentImpl } from '../../../internal.api';
+import { PythonEnvironmentImpl } from '../../../managers/common/models';
 import { NativePythonEnvironmentKind, NativePythonFinder } from '../../../managers/common/nativePythonFinder';
 import {
     checkForNoPythonCondaEnvironment,

@@ -1,12 +1,12 @@
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import {
+    Memento,
     ProgressLocation,
     QuickInputButtons,
     TaskExecution,
     TaskRevealKind,
     Terminal,
-    Memento,
     Uri,
     l10n,
     workspace,
@@ -21,23 +21,23 @@ import {
     PythonProjectCreatorOptions,
     isPackageVersionLookupNotSupportedError,
 } from '../api';
+import {
+    InlineScriptEnvironmentModifiedError,
+    InlineScriptPackagesNotManagedError,
+} from '../common/inlineScript/errors';
 import { traceError, traceInfo, traceVerbose } from '../common/logging';
 import * as persistentState from '../common/persistentState';
-import {
-    EnvironmentManagers,
-    InternalEnvironmentManager,
-    InternalPackageManager,
-    ProjectCreators,
-    PythonProjectManager,
-} from '../internal.api';
-import {
-    removePythonProjectSetting,
-    setEnvironmentManager,
-    setPackageManager,
-} from './settings/settingHelpers';
+import type { InternalEnvironmentManager, InternalPackageManager } from '../managers/common/registeredManagers';
+import { normalizePackageName } from '../managers/common/packageUtils';
+import type { ProjectCreators } from './creators/projectCreators';
+import type { EnvironmentManagers } from './envManagers';
+import { selectPackageManagementEnvironment } from './nonGlobalPackageInstallationEnvironment';
+import type { PythonProjectManager } from './projectManager';
+import { removePythonProjectSetting, setEnvironmentManager, setPackageManager } from './settings/settingHelpers';
 
 import { valid as pep440Valid } from '@renovatebot/pep440';
 import { executeCommand } from '../common/command.api';
+import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { clipboardWriteText } from '../common/env.apis';
 import { Pickers } from '../common/localize';
 import { pickEnvironment } from '../common/pickers/environments';
@@ -61,7 +61,6 @@ import {
     showWarningMessage,
     withProgress,
 } from '../common/window.apis';
-import { INLINE_SCRIPT_ENVS_KEY, INLINE_SCRIPT_MANAGER_ID } from '../common/constants';
 import { runAsTask } from './execution/runAsTask';
 import { runInTerminal } from './terminal/runInTerminal';
 import * as shellProviders from './terminal/shells/providers';
@@ -143,9 +142,7 @@ export async function refreshPackagesCommand(context: unknown, managers?: Enviro
         }
     } else if (context instanceof PythonEnvTreeItem) {
         const view = context as PythonEnvTreeItem;
-        const envManager =
-            view.parent.kind === EnvTreeItemKind.environmentGroup ? view.parent.parent.manager : view.parent.manager;
-        const pkgManager = managers?.getPackageManager(envManager.preferredPackageManagerId);
+        const pkgManager = managers?.getPackageManager(view.environment);
         if (pkgManager) {
             await pkgManager.refresh(view.environment);
         }
@@ -311,14 +308,20 @@ export async function removeEnvironmentCommand(context: unknown, managers: Envir
         }
     } else if (context instanceof ProjectEnvironment) {
         const view = context as ProjectEnvironment;
-        const manager = managers.getEnvironmentManager(view.parent.project.uri);
+        const inlineScript = view.environment.envId.managerId === INLINE_SCRIPT_MANAGER_ID;
+        const manager = managers.getEnvironmentManager(inlineScript ? view.environment : view.parent.project.uri);
+        if (inlineScript && !manager) {
+            throw new Error(
+                l10n.t('The inline-script environment manager is not available to delete this environment.'),
+            );
+        }
         await manager?.remove(view.environment);
     } else {
         traceError(`Invalid context for remove command: ${context}`);
     }
 }
 
-export async function handlePackageUninstall(context: unknown, em: EnvironmentManagers) {
+export async function handlePackageUninstall(context: unknown) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         if (context.pkg.isTransitive) {
             const confirm = await showInformationMessage(
@@ -336,8 +339,7 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
         }
         const moduleName = context.pkg.name;
         const environment = context.parent.environment;
-        const packageManager = em.getPackageManager(environment);
-        await packageManager?.manage(environment, { uninstall: [moduleName], install: [] });
+        await context.manager.manage(environment, { uninstall: [moduleName], install: [] });
         return;
     }
     traceError(`Invalid context for uninstall command: ${typeof context}`);
@@ -350,14 +352,32 @@ export async function handlePackageUninstall(context: unknown, em: EnvironmentMa
 export async function managePackageVersion(context: unknown, em: EnvironmentManagers) {
     if (context instanceof PackageTreeItem || context instanceof ProjectPackage) {
         const pkg = context.pkg;
-        const environment = context.parent.environment;
-        const packageManager = em.getPackageManager(environment);
-
-        if (!packageManager) {
+        const originalEnvironment = context.parent.environment;
+        const environment = await selectPackageManagementEnvironment(em, originalEnvironment, {
+            install: [pkg.name],
+        });
+        if (!environment) {
             return;
         }
+        const isOriginalEnvironment =
+            environment.envId.managerId === originalEnvironment.envId.managerId &&
+            environment.envId.id === originalEnvironment.envId.id;
+        const packageManager = isOriginalEnvironment ? context.manager : em.getPackageManager(environment);
+        if (!packageManager) {
+            throw new Error(l10n.t('No package manager found for the selected environment.'));
+        }
 
-        if (pkg.isTransitive) {
+        let selectedPackage = isOriginalEnvironment ? pkg : undefined;
+        if (!isOriginalEnvironment) {
+            await packageManager.refresh(environment);
+            const packages = await packageManager.getPackages(environment);
+            const normalizedPackageName = normalizePackageName(pkg.name);
+            selectedPackage = packages?.find(
+                (candidate) => normalizePackageName(candidate.name) === normalizedPackageName,
+            );
+        }
+
+        if (selectedPackage?.isTransitive) {
             const confirm = await showInformationMessage(
                 l10n.t(
                     'The package "{0}" is a transitive dependency. Changing its version may cause unexpected behavior in packages that depend on it.',
@@ -380,7 +400,10 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
         let availableVersions: Pep440Version[] | undefined;
         try {
             availableVersions = await withProgress(
-                { location: ProgressLocation.Window, title: l10n.t('Fetching available versions for {0}...', pkg.name) },
+                {
+                    location: ProgressLocation.Window,
+                    title: l10n.t('Fetching available versions for {0}...', pkg.name),
+                },
                 () => packageManager.getPackageAvailableVersions(environment, pkg.name, { errorMode: 'throw' }),
             );
         } catch (error) {
@@ -392,7 +415,8 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
         if (availableVersions && availableVersions.length > 0) {
             const items = availableVersions.map((v) => ({
                 label: v.public,
-                description: v.public === pkg.version ? `$(check) ${l10n.t('Installed')}` : undefined,
+                description:
+                    v.public === selectedPackage?.version ? `$(check) ${l10n.t('Installed')}` : undefined,
             }));
 
             const selected = await showQuickPick(items, {
@@ -405,7 +429,7 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
             const inputVersion = await showInputBox({
                 title: l10n.t('Manage Package Version'),
                 prompt: l10n.t('Enter the version for {0}', pkg.name),
-                value: pkg.version,
+                value: selectedPackage?.version,
                 placeHolder: l10n.t('e.g. 1.2.3'),
                 validateInput: (value) => {
                     const trimmedValue = value.trim();
@@ -421,7 +445,7 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
             version = inputVersion?.trim();
         }
 
-        if (version === undefined || version === pkg.version) {
+        if (version === undefined || version === selectedPackage?.version) {
             return;
         }
 
@@ -435,6 +459,22 @@ export async function managePackageVersion(context: unknown, em: EnvironmentMana
 }
 
 export async function setEnvironmentCommand(
+    context: unknown,
+    em: EnvironmentManagers,
+    wm: PythonProjectManager,
+): Promise<void> {
+    try {
+        await setEnvironmentCommandInternal(context, em, wm);
+    } catch (error) {
+        if (!(error instanceof InlineScriptEnvironmentModifiedError)) {
+            throw error;
+        }
+        traceError('Cannot select a modified inline-script environment:', error);
+        await showErrorMessage(error.message);
+    }
+}
+
+async function setEnvironmentCommandInternal(
     context: unknown,
     em: EnvironmentManagers,
     wm: PythonProjectManager,
@@ -701,13 +741,13 @@ export async function clearEnvironmentCachesCommand(
     await shellProviders.clearShellProfileCache(startupProviders);
 }
 
-export async function clearScriptEnvironmentCacheCommand(
-    em: EnvironmentManagers,
-): Promise<void> {
+export async function clearScriptEnvironmentCacheCommand(em: EnvironmentManagers): Promise<void> {
     const manager = em.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID);
     if (!manager || !manager.supportsClearCache()) {
         throw new Error(
-            l10n.t('Inline-script environment cache is unavailable because the inline-script manager is not registered.'),
+            l10n.t(
+                'Inline-script environment cache is unavailable because the inline-script manager is not registered.',
+            ),
         );
     }
 
@@ -734,10 +774,27 @@ export async function getPackageCommandOptions(
     packageManager: InternalPackageManager;
     environment: PythonEnvironment;
 }> {
+    const options = await resolvePackageCommandOptions(e, em, pm);
+    // The tree view hides package actions for inline-script environments, but the command palette
+    // can still resolve one from the active script. Refuse here so every entry point agrees.
+    if (options.environment.envId.managerId === INLINE_SCRIPT_MANAGER_ID) {
+        throw new InlineScriptPackagesNotManagedError();
+    }
+    return options;
+}
+
+async function resolvePackageCommandOptions(
+    e: unknown,
+    em: EnvironmentManagers,
+    pm: PythonProjectManager,
+): Promise<{
+    packageManager: InternalPackageManager;
+    environment: PythonEnvironment;
+}> {
     if (e === undefined) {
         const project = await pickProject(pm.getProjects());
         if (project) {
-            return getPackageCommandOptions(project.uri, em, pm);
+            return resolvePackageCommandOptions(project.uri, em, pm);
         }
     }
 
@@ -758,7 +815,7 @@ export async function getPackageCommandOptions(
     }
 
     if (e instanceof Uri) {
-        const environment = await em.getEnvironmentManager(e)?.get(e);
+        const environment = await em.getEnvironment(e);
         const packageManager = em.getPackageManager(e);
         if (environment && packageManager) {
             return { environment, packageManager };

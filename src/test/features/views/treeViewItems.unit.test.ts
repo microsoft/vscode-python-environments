@@ -6,12 +6,16 @@ import {
     EnvManagerTreeItem,
     getEnvironmentParentDirName,
     NoPythonEnvTreeItem,
+    PackageTreeItem,
     ProjectEnvironment,
     ProjectPackage,
     PythonEnvTreeItem,
     PythonGroupEnvTreeItem,
 } from '../../../features/views/treeViewItems';
-import { InternalEnvironmentManager, InternalPackageManager, PythonEnvironmentImpl } from '../../../internal.api';
+import { PythonEnvironmentImpl } from '../../../managers/common/models';
+import { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
+import type { InternalPackageManager } from '../../../managers/common/registeredManagers';
+import { VENV_MANAGER_ID, INLINE_SCRIPT_MANAGER_ID, CONDA_MANAGER_ID, DEFAULT_PACKAGE_MANAGER_ID } from '../../../common/constants';
 
 /**
  * Helper to create a mock PythonEnvironmentImpl with minimal required fields.
@@ -81,13 +85,13 @@ suite('Test TreeView Items', () => {
     suite('EnvManagerTreeItem', () => {
         test('Sets id to manager id for tree item identification', () => {
             // Arrange
-            const manager = createMockManager({ id: 'ms-python.python:venv' });
+            const manager = createMockManager({ id: VENV_MANAGER_ID });
 
             // Act
             const item = new EnvManagerTreeItem(manager);
 
             // Assert
-            assert.strictEqual(item.treeItem.id, 'ms-python.python:venv');
+            assert.strictEqual(item.treeItem.id, VENV_MANAGER_ID);
         });
 
         test('Context value excludes create when manager does not support it', () => {
@@ -169,7 +173,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithoutRemove);
 
             // Assert
-            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;');
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;managePackages;');
         });
 
         test('Context value includes activatable when environment has activation', () => {
@@ -183,7 +187,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithoutRemove);
 
             // Assert
-            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;activatable;');
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;activatable;managePackages;');
         });
 
         test('Context value includes remove when manager supports it', () => {
@@ -197,7 +201,51 @@ suite('Test TreeView Items', () => {
             const item = new PythonEnvTreeItem(env, managerWithRemove);
 
             // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;remove;activatable;managePackages;');
+        });
+
+        test('Inline-script environments do not advertise package management', () => {
+            // Arrange
+            const env = createMockEnvironment({
+                environmentPath: '/home/user/.cache/script-envs-v1/abc123/bin/python',
+                managerId: INLINE_SCRIPT_MANAGER_ID,
+                hasActivation: true,
+            });
+
+            // Act
+            const item = new PythonEnvTreeItem(env, managerWithRemove);
+
+            // Assert
             assert.strictEqual(item.treeItem.contextValue, 'pythonEnvironment;remove;activatable;');
+        });
+
+        test('Packages of an inline-script environment use the read-only context value', () => {
+            // Arrange
+            const env = createMockEnvironment({
+                environmentPath: '/home/user/.cache/script-envs-v1/abc123/bin/python',
+                managerId: INLINE_SCRIPT_MANAGER_ID,
+            });
+            const parent = new PythonEnvTreeItem(env, managerWithRemove);
+            const pkg = { name: 'requests', displayName: 'requests', version: '2.32.0' } as Package;
+
+            // Act
+            const item = new PackageTreeItem(pkg, parent, {} as InternalPackageManager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package-readonly');
+        });
+
+        test('Packages of an ordinary environment keep the manageable context value', () => {
+            // Arrange
+            const env = createMockEnvironment({ environmentPath: '/home/user/envs/.venv/bin/python' });
+            const parent = new PythonEnvTreeItem(env, managerWithRemove);
+            const pkg = { name: 'requests', displayName: 'requests', version: '2.32.0' } as Package;
+
+            // Act
+            const item = new PackageTreeItem(pkg, parent, {} as InternalPackageManager);
+
+            // Assert
+            assert.strictEqual(item.treeItem.contextValue, 'python-package');
         });
 
         test('Uses environment displayName as tree item label', () => {
@@ -277,7 +325,7 @@ suite('Test TreeView Items', () => {
         let parentManager: EnvManagerTreeItem;
 
         setup(() => {
-            parentManager = new EnvManagerTreeItem(createMockManager({ id: 'ms-python.python:conda' }));
+            parentManager = new EnvManagerTreeItem(createMockManager({ id: CONDA_MANAGER_ID }));
         });
 
         test('Sets id combining manager id and group name for tree item identification', () => {
@@ -285,7 +333,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonGroupEnvTreeItem(parentManager, 'base');
 
             // Assert
-            assert.strictEqual(item.treeItem.id, 'ms-python.python:conda:base');
+            assert.strictEqual(item.treeItem.id, `${CONDA_MANAGER_ID}:base`);
         });
 
         test('Sets id correctly when group is EnvironmentGroupInfo object', () => {
@@ -296,7 +344,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonGroupEnvTreeItem(parentManager, groupInfo);
 
             // Assert
-            assert.strictEqual(item.treeItem.id, 'ms-python.python:conda:dev-envs');
+            assert.strictEqual(item.treeItem.id, `${CONDA_MANAGER_ID}:dev-envs`);
         });
 
         test('Uses string group as label', () => {
@@ -323,7 +371,7 @@ suite('Test TreeView Items', () => {
             const item = new PythonGroupEnvTreeItem(parentManager, 'test-group');
 
             // Assert
-            assert.strictEqual(item.treeItem.contextValue, 'pythonEnvGroup;ms-python.python:conda:test-group;');
+            assert.strictEqual(item.treeItem.contextValue, `pythonEnvGroup;${CONDA_MANAGER_ID}:test-group;`);
         });
     });
 
@@ -506,7 +554,7 @@ suite('Test TreeView Items', () => {
                 tooltip: options.tooltip,
                 iconPath: options.iconPath,
                 isTransitive: options.isTransitive,
-                pkgId: { id: options.name ?? 'requests', managerId: 'ms-python.python:pip' },
+                pkgId: { id: options.name ?? 'requests', managerId: DEFAULT_PACKAGE_MANAGER_ID },
             } as Package;
         }
 

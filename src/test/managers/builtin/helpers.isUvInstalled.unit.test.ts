@@ -1,10 +1,18 @@
 import assert from 'assert';
+import * as path from 'path';
 import * as sinon from 'sinon';
-import { LogOutputChannel } from 'vscode';
+import { CancellationError, CancellationTokenSource, LogOutputChannel, Uri, WorkspaceFolder } from 'vscode';
 import * as childProcessApis from '../../../common/childProcess.apis';
+import * as workspaceApis from '../../../common/workspace.apis';
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
-import { isUvInstalled, resetUvInstallationCache } from '../../../managers/builtin/helpers';
+import {
+    getUvExecutable,
+    isUvInstalled,
+    resetUvInstallationCache,
+    runUV,
+    setUvExecutable,
+} from '../../../managers/builtin/helpers';
 import { createMockLogOutputChannel } from '../../mocks/helper';
 import { MockChildProcess } from '../../mocks/mockChildProcess';
 
@@ -15,7 +23,7 @@ suite('Helpers - isUvInstalled', () => {
 
     setup(() => {
         // Reset UV installation cache before each test to ensure clean state
-        resetUvInstallationCache();
+        setUvExecutable('uv');
 
         mockLog = createMockLogOutputChannel();
 
@@ -28,6 +36,59 @@ suite('Helpers - isUvInstalled', () => {
 
     teardown(() => {
         sinon.restore();
+        setUvExecutable('uv');
+    });
+
+    test('retains a verified installation path across cache resets and uv operations', async () => {
+        const executable = path.resolve('uv install', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        setUvExecutable(executable);
+        const probe = new MockChildProcess(executable, ['--version']);
+        spawnStub.withArgs(executable, ['--version']).returns(probe);
+        const first = getUvExecutable(mockLog);
+        probe.emit('exit', 0, null);
+        assert.strictEqual(await first, executable);
+
+        resetUvInstallationCache();
+        const second = getUvExecutable(mockLog);
+        probe.emit('exit', 0, null);
+        assert.strictEqual(await second, executable);
+
+        const operation = new MockChildProcess(executable, ['pip', 'list']);
+        spawnStub.withArgs(executable, ['pip', 'list']).returns(operation);
+        const result = runUV(['pip', 'list']);
+        operation.stdout?.emit('data', '[]');
+        operation.emit('exit', 0, null);
+        operation.emit('close', 0, null);
+        assert.strictEqual(await result, '[]');
+        assert(spawnStub.alwaysCalledWith(executable));
+    });
+
+    test('does not let an old PATH probe overwrite availability after installation', async () => {
+        const oldProcess = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(oldProcess);
+        const oldProbe = isUvInstalled();
+
+        const executable = path.resolve('installed', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        setUvExecutable(executable);
+        const installedProcess = new MockChildProcess(executable, ['--version']);
+        spawnStub.withArgs(executable, ['--version']).returns(installedProcess);
+        const installedProbe = isUvInstalled();
+        oldProcess.emit('error', new Error('ENOENT'));
+        installedProcess.emit('exit', 0, null);
+
+        assert.strictEqual(await oldProbe, false);
+        assert.strictEqual(await installedProbe, true);
+        assert.strictEqual(await getUvExecutable(), executable);
+    });
+
+    test('does not report a missing installed executable as available', async () => {
+        const executable = path.resolve('missing', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        setUvExecutable(executable);
+        const proc = new MockChildProcess(executable, ['--version']);
+        spawnStub.withArgs(executable, ['--version']).returns(proc);
+        const result = getUvExecutable();
+        proc.emit('error', new Error('ENOENT'));
+        assert.strictEqual(await result, undefined);
     });
 
     test('should return true when uv --version succeeds', async () => {
@@ -198,5 +259,134 @@ suite('Helpers - isUvInstalled', () => {
         assert.strictEqual(firstResult, true);
         assert.strictEqual(secondResult, false);
         assert(spawnStub.calledTwice, 'Should spawn process twice after cache reset');
+    });
+
+    test('falls back to the owning workspace pyprojectx executable when uv is not on PATH', async () => {
+        const root = path.join(process.cwd(), 'project');
+        const uvExecutable = path.join(Uri.file(root).fsPath, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').returns({
+            name: 'project',
+            uri: Uri.file(root),
+        } as WorkspaceFolder);
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        const localProc = new MockChildProcess(uvExecutable, ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+        spawnStub.withArgs(uvExecutable, ['--version']).returns(localProc);
+
+        const first = getUvExecutable(mockLog, path.join(root, '.venv'));
+        globalProc.emit('error', new Error('ENOENT'));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        localProc.emit('exit', 0, null);
+        assert.strictEqual(await first, uvExecutable);
+        assert(spawnStub.calledWith(uvExecutable, ['--version']));
+    });
+
+    test('does not execute workspace binaries in an untrusted workspace', async () => {
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(false);
+        const getWorkspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+
+        const result = getUvExecutable(mockLog, path.join(process.cwd(), 'project', '.venv'));
+        globalProc.emit('error', new Error('ENOENT'));
+        assert.strictEqual(await result, undefined);
+        sinon.assert.notCalled(getWorkspaceFolder);
+        sinon.assert.calledOnce(spawnStub);
+    });
+
+    test('does not probe uv for a pre-cancelled tool request', async () => {
+        const source = new CancellationTokenSource();
+        try {
+            source.cancel();
+            await assert.rejects(getUvExecutable(mockLog, process.cwd(), source.token), CancellationError);
+            sinon.assert.notCalled(spawnStub);
+        } finally {
+            source.dispose();
+        }
+    });
+
+    test('cancels a tool request while waiting for the workspace uv probe', async () => {
+        const root = Uri.file(path.join(process.cwd(), 'project'));
+        const executable = path.join(root.fsPath, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').returns({ name: 'project', uri: root, index: 0 });
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        const localProc = new MockChildProcess(executable, ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+        spawnStub.withArgs(executable, ['--version']).returns(localProc);
+        const source = new CancellationTokenSource();
+        try {
+            const result = getUvExecutable(mockLog, root.fsPath, source.token);
+            const rejected = assert.rejects(result, CancellationError);
+            globalProc.emit('error', new Error('ENOENT'));
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            sinon.assert.calledWith(spawnStub, executable, ['--version']);
+            source.cancel();
+            await rejected;
+            localProc.emit('exit', 0, null);
+        } finally {
+            source.dispose();
+        }
+    });
+
+    test('prefers uv on PATH without looking up a workspace executable', async () => {
+        const getWorkspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+
+        const result = getUvExecutable(mockLog, path.join(process.cwd(), 'project', '.venv'));
+        globalProc.emit('exit', 0, null);
+
+        assert.strictEqual(await result, 'uv');
+        sinon.assert.notCalled(getWorkspaceFolder);
+        sinon.assert.calledOnce(spawnStub);
+    });
+
+    test('does not use a missing or failing workspace executable', async () => {
+        const root = path.join(process.cwd(), 'project');
+        const executable = path.join(Uri.file(root).fsPath, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv');
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
+        const workspaceFolder = sinon.stub(workspaceApis, 'getWorkspaceFolder');
+        workspaceFolder.onFirstCall().returns(undefined);
+        workspaceFolder.onSecondCall().returns({ name: 'project', uri: Uri.file(root) } as WorkspaceFolder);
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        const localProc = new MockChildProcess(executable, ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+        spawnStub.withArgs(executable, ['--version']).returns(localProc);
+
+        const missing = getUvExecutable(mockLog, path.join(root, '.venv'));
+        globalProc.emit('error', new Error('ENOENT'));
+        assert.strictEqual(await missing, undefined);
+
+        const failing = getUvExecutable(mockLog, path.join(root, '.venv'));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        localProc.emit('exit', 1, null);
+        assert.strictEqual(await failing, undefined);
+    });
+
+    test('resolves separate workspace executables for different roots', async () => {
+        const roots = ['first', 'second'].map((name) => Uri.file(path.join(process.cwd(), name)).fsPath);
+        const executables = roots.map((root) =>
+            path.join(root, '.pyprojectx', 'main', process.platform === 'win32' ? 'uv.exe' : 'uv'),
+        );
+        sinon.stub(workspaceApis, 'isWorkspaceTrusted').returns(true);
+        sinon.stub(workspaceApis, 'getWorkspaceFolder').callsFake((uri) => {
+            const root = roots.find((candidate) => uri.fsPath.startsWith(`${candidate}${path.sep}`));
+            return root ? ({ name: path.basename(root), uri: Uri.file(root) } as WorkspaceFolder) : undefined;
+        });
+        const globalProc = new MockChildProcess('uv', ['--version']);
+        spawnStub.withArgs('uv', ['--version']).returns(globalProc);
+        for (const [index, root] of roots.entries()) {
+            const proc = new MockChildProcess(executables[index], ['--version']);
+            spawnStub.withArgs(executables[index], ['--version']).returns(proc);
+            const result = getUvExecutable(mockLog, path.join(root, '.venv'));
+            if (index === 0) {
+                globalProc.emit('error', new Error('ENOENT'));
+            }
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            proc.emit('exit', 0, null);
+            assert.strictEqual(await result, executables[index]);
+        }
     });
 });

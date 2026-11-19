@@ -1,0 +1,97 @@
+name: Publish Release
+trigger:
+  branches:
+    include:
+      - 'release/*'
+pr: none
+
+resources:
+  repositories:
+    - repository: templates
+      type: github
+      name: microsoft/pylance-eng
+      ref: refs/heads/main
+      endpoint: Github-Pylance
+    - repository: translations
+      type: github
+      name: microsoft/vscode-python-extensions-loc
+      # Temporarily use dev while the localization force-push issue is resolved.
+      ref: refs/heads/dev
+      endpoint: Github-Pylance
+    - repository: localizationTools
+      type: github
+      name: microsoft/vscode-python-ci
+      ref: f078b68e968b56e0a22d6cf803bb241a6b094994
+      endpoint: Github-Pylance
+
+variables:
+  - name: TeamName
+    value: VSCode-python-environments
+  - name: VsixName
+    value: python-environments.vsix
+  - name: NodeVersion
+    value: '22.21.1'
+  - name: AZURE_ARTIFACTS_FEED
+    value: 'https://devdiv.pkgs.visualstudio.com/DevDiv/_packaging/Pylance_PublicPackages/npm/registry/'
+
+parameters:
+  - name: publishExtension
+    displayName: 🚀 Publish Extension
+    type: boolean
+    default: true
+
+  - name: buildPlatforms
+    type: object
+    default:
+      - name: Linux
+        vsceTarget: web
+      - name: Linux
+        vsceTarget: linux-arm64
+      - name: Linux
+        vsceTarget: linux-armhf
+      - name: Linux
+        vsceTarget: linux-x64
+      - name: Linux
+        vsceTarget: alpine-arm64
+      - name: Linux
+        vsceTarget: alpine-x64
+      - name: MacOS
+        vsceTarget: darwin-arm64
+      - name: MacOS
+        vsceTarget: darwin-x64
+      - name: Windows
+        vsceTarget: win32-arm64
+      - name: Windows
+        vsceTarget: win32-x64
+
+  - name: buildSteps
+    type: stepList
+    default:
+      - script: npm ci
+        displayName: Install NPM dependencies
+
+      - script: python ./build/update_package_json.py
+        displayName: Update telemetry in package.json
+
+      - script: python ./build/update_ext_version.py --release --for-publishing
+        displayName: Update build number
+
+      - script: npm run package
+        displayName: Build extension
+
+extends:
+  template: azure-pipelines/extension/stable.yml@templates
+  parameters:
+    buildPlatforms: ${{ parameters.buildPlatforms }}
+    buildSteps: ${{ parameters.buildSteps }}
+    standardizedVersioning: true
+    customNPMRegistry: $(AZURE_ARTIFACTS_FEED)
+    nodeVersion: $(NodeVersion)
+    publishExtension: ${{ parameters.publishExtension }}
+    teamName: $(TeamName)
+    ghCreateTag: true
+    ghCreateRelease: true
+    ghReleaseAddChangeLog: true
+    validationNotifyUsers: plseng@microsoft.com
+    sourceAnalysisPool: VSEng-MicroBuildVSStable
+    pullLocalization: true

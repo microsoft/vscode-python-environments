@@ -1,6 +1,6 @@
 import * as fsapi from 'fs-extra';
 import * as path from 'path';
-import { Disposable, EventEmitter, ProgressLocation, Terminal, Uri } from 'vscode';
+import { Disposable, EventEmitter, l10n, ProgressLocation, Terminal, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject, PythonTerminalCreateOptions } from '../../api';
 import { ActivationStrings } from '../../common/localize';
 import { traceInfo, traceVerbose } from '../../common/logging';
@@ -17,7 +17,7 @@ import { getConfiguration, onDidChangeConfiguration } from '../../common/workspa
 import { normalizePath } from '../../common/utils/pathUtils';
 import { isActivatableEnvironment } from '../common/activation';
 import { identifyTerminalShell } from '../common/shellDetector';
-import { getPythonApi } from '../pythonApi';
+import { getPythonApi } from '../../extensionApi';
 import { getShellIntegrationEnabledCache, isWsl, shouldUseProfileActivation } from './shells/common/shellUtils';
 import { ShellEnvsProvider, ShellSetupState, ShellStartupScriptProvider } from './shells/startupProvider';
 import { handleSettingUpShellProfile } from './shellStartupSetupHandlers';
@@ -251,7 +251,7 @@ export class TerminalManagerImpl implements TerminalManager {
                     },
                     async () => {
                         await waitForShellIntegration(terminal);
-                        await this.activate(terminal, environment);
+                        await this.ta.activate(terminal, environment, 'terminalOpen');
                     },
                 );
             } else {
@@ -297,24 +297,39 @@ export class TerminalManagerImpl implements TerminalManager {
             env: envVars,
         });
 
-        if (autoActType === ACT_TYPE_COMMAND) {
-            if (options.disableActivation) {
+        let closedDuringInit = false;
+        const closeListener = onDidCloseTerminal((t) => {
+            if (t === newTerminal) {
+                closedDuringInit = true;
+            }
+        });
+
+        try {
+            if (autoActType === ACT_TYPE_COMMAND) {
+                if (options.disableActivation) {
+                    this.skipActivationOnOpen.add(newTerminal);
+                    return newTerminal;
+                }
+
+                // We add it to skip activation on open to prevent double activation.
+                // We can activate it ourselves since we are creating it.
                 this.skipActivationOnOpen.add(newTerminal);
-                return newTerminal;
+
+                // Show terminal before activation so users can see the activation happening, requested script running.
+                // Necessary for scenarios such as when terminal is awaiting user input, etc.
+                newTerminal.show();
+
+                await this.autoActivateOnTerminalOpen(newTerminal, environment);
             }
 
-            // We add it to skip activation on open to prevent double activation.
-            // We can activate it ourselves since we are creating it.
-            this.skipActivationOnOpen.add(newTerminal);
+            if (closedDuringInit || newTerminal.exitStatus !== undefined) {
+                throw new Error(l10n.t('Terminal has already been disposed'));
+            }
 
-            // Show terminal before activation so users can see the activation happening, requested script running.
-            // Necessary for scenarios such as when terminal is awaiting user input, etc.
-            newTerminal.show();
-
-            await this.autoActivateOnTerminalOpen(newTerminal, environment);
+            return newTerminal;
+        } finally {
+            closeListener.dispose();
         }
-
-        return newTerminal;
     }
 
     private dedicatedTerminals = new Map<string, Terminal>();
@@ -329,7 +344,10 @@ export class TerminalManagerImpl implements TerminalManager {
         if (!createNew) {
             const terminal = this.dedicatedTerminals.get(key);
             if (terminal) {
-                return terminal;
+                if (terminal.exitStatus === undefined) {
+                    return terminal;
+                }
+                this.dedicatedTerminals.delete(key);
             }
         }
 
@@ -355,11 +373,16 @@ export class TerminalManagerImpl implements TerminalManager {
         }
 
         const newTerminal = await this.create(environment, { cwd, name });
+        if (newTerminal.exitStatus !== undefined) {
+            throw new Error(l10n.t('Terminal has already been disposed'));
+        }
         this.dedicatedTerminals.set(key, newTerminal);
 
         const disable = onDidCloseTerminal((terminal) => {
             if (terminal === newTerminal) {
-                this.dedicatedTerminals.delete(key);
+                if (this.dedicatedTerminals.get(key) === newTerminal) {
+                    this.dedicatedTerminals.delete(key);
+                }
                 disable.dispose();
             }
         });
@@ -378,17 +401,25 @@ export class TerminalManagerImpl implements TerminalManager {
         if (!createNew) {
             const terminal = this.projectTerminals.get(key);
             if (terminal) {
-                return terminal;
+                if (terminal.exitStatus === undefined) {
+                    return terminal;
+                }
+                this.projectTerminals.delete(key);
             }
         }
         const stat = await fsapi.stat(uri.fsPath);
         const cwd = stat.isDirectory() ? uri.fsPath : path.dirname(uri.fsPath);
         const newTerminal = await this.create(environment, { cwd });
+        if (newTerminal.exitStatus !== undefined) {
+            throw new Error(l10n.t('Terminal has already been disposed'));
+        }
         this.projectTerminals.set(key, newTerminal);
 
         const disable = onDidCloseTerminal((terminal) => {
             if (terminal === newTerminal) {
-                this.projectTerminals.delete(key);
+                if (this.projectTerminals.get(key) === newTerminal) {
+                    this.projectTerminals.delete(key);
+                }
                 disable.dispose();
             }
         });
@@ -402,7 +433,7 @@ export class TerminalManagerImpl implements TerminalManager {
         const env = this.ta.getEnvironment(t) ?? (await getEnvironmentForTerminal(api, t));
 
         if (env && isActivatableEnvironment(env)) {
-            await this.activate(t, env);
+            await this.ta.activate(t, env, 'preExisting');
         }
     }
 
@@ -456,11 +487,11 @@ export class TerminalManagerImpl implements TerminalManager {
     }
 
     public activate(terminal: Terminal, environment: PythonEnvironment): Promise<void> {
-        return this.ta.activate(terminal, environment);
+        return this.ta.activate(terminal, environment, 'explicit');
     }
 
     public deactivate(terminal: Terminal): Promise<void> {
-        return this.ta.deactivate(terminal);
+        return this.ta.deactivate(terminal, 'explicit');
     }
 
     isActivated(terminal: Terminal, environment?: PythonEnvironment): boolean {

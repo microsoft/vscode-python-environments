@@ -4,20 +4,30 @@
 import assert from 'assert';
 import * as sinon from 'sinon';
 import * as typemoq from 'typemoq';
-import { Uri } from 'vscode';
+import { Disposable, Uri } from 'vscode';
 import { PythonEnvironment } from '../../../api';
 import { INLINE_SCRIPT_MANAGER_ID } from '../../../common/constants';
 import { InlineScriptMetadata } from '../../../common/inlineScript/metadata';
 import * as metadataApi from '../../../common/inlineScript/metadata';
-import { InlineScriptRoutingRegistry } from '../../../common/inlineScript/routingRegistry';
+import {
+    getInlineScriptMetadataRoutingIdentity,
+    InlineScriptRoutingRegistry,
+} from '../../../common/inlineScript/routingRegistry';
+import { InlineScriptStrings, PythonInstallStrings } from '../../../common/localize';
+import { createDeferred } from '../../../common/utils/deferred';
 import * as winapi from '../../../common/window.apis';
 import * as wapi from '../../../common/workspace.apis';
 import {
     notifyInlineScriptSetupOutcome,
     setUpInlineScriptEnvironment,
     setUpInlineScriptEnvironmentsInWorkspace,
+    setupInlineScriptEnvironmentHandler,
 } from '../../../features/inlineScript/setupEnvironment';
-import { EnvironmentManagers, InternalEnvironmentManager } from '../../../internal.api';
+import * as extensionVersionCheck from '../../../features/inlineScript/extensionVersionCheck';
+import { InlineScriptCodeLensProvider } from '../../../features/inlineScript/codeLens';
+import type { EnvironmentManagers } from '../../../features/envManagers';
+import { InternalEnvironmentManager } from '../../../managers/common/registeredManagers';
+import { MockDocument } from '../../mocks/mockDocument';
 
 function makeEnv(): PythonEnvironment {
     return {
@@ -207,6 +217,19 @@ suite('setUpInlineScriptEnvironmentsInWorkspace', () => {
         manager.verify((m) => m.create(typemoq.It.isAny(), typemoq.It.isAny()), typemoq.Times.never());
     });
 
+    test('searches for Python file extensions case-insensitively', async () => {
+        findFilesStub.resolves([]);
+
+        await setUpInlineScriptEnvironmentsInWorkspace(em.object, routing);
+
+        sinon.assert.calledOnceWithExactly(
+            findFilesStub,
+            '**/*.{py,Py,pY,PY}',
+            '{**/.venv/**,**/node_modules/**}',
+            1000,
+        );
+    });
+
     test('only sets up the selected files that declare inline metadata', async () => {
         findFilesStub.resolves([withMeta, withoutMeta]);
         readMetadataStub.callsFake(async (uri: Uri) =>
@@ -311,5 +334,304 @@ suite('notifyInlineScriptSetupOutcome', () => {
 
         sinon.assert.calledTwice(infoStub);
         sinon.assert.notCalled(errorStub);
+    });
+
+    test('preserves installer cancellation guidance about unfinished background work', () => {
+        const infoStub = sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, { kind: 'cancelled', message: PythonInstallStrings.cancelled });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        sinon.assert.calledOnce(infoStub);
+        assert.deepStrictEqual(infoStub.firstCall.args, [PythonInstallStrings.cancelled]);
+        sinon.assert.notCalled(errorStub);
+    });
+
+    test('shows the provider-specific failure instead of replacing it with a generic setup error', () => {
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, {
+            kind: 'failed',
+            category: 'install-failure',
+            message: PythonInstallStrings.managerUnusable,
+        });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        sinon.assert.calledOnce(errorStub);
+        assert.deepStrictEqual(errorStub.firstCall.args, [PythonInstallStrings.managerUnusable]);
+    });
+
+    test('does not report an installer failure a second time', () => {
+        const errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        const warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
+        routing.noteSetupOutcome(scriptUri, {
+            kind: 'failed',
+            category: 'install-failure',
+            message: PythonInstallStrings.installFailed,
+            alreadyReported: true,
+        });
+
+        notifyInlineScriptSetupOutcome(scriptUri, routing);
+
+        sinon.assert.notCalled(errorStub);
+        sinon.assert.notCalled(warningStub);
+    });
+});
+
+suite('setupInlineScriptEnvironmentHandler', () => {
+    const scriptUri = Uri.file('/workspace/app.py');
+    let em: typemoq.IMock<EnvironmentManagers>;
+    let manager: typemoq.IMock<InternalEnvironmentManager>;
+    let routing: InlineScriptRoutingRegistry;
+    let readMetadataStub: sinon.SinonStub;
+    let openDocumentsStub: sinon.SinonStub;
+    let errorStub: sinon.SinonStub;
+    let saveStub: sinon.SinonStub;
+    let promptStub: sinon.SinonStub;
+    let warningStub: sinon.SinonStub;
+    let readHeaderStub: sinon.SinonStub;
+    let currentText: string;
+
+    setup(() => {
+        em = typemoq.Mock.ofType<EnvironmentManagers>();
+        manager = typemoq.Mock.ofType<InternalEnvironmentManager>();
+        routing = new InlineScriptRoutingRegistry();
+        em.setup((m) => m.getEnvironmentManager(INLINE_SCRIPT_MANAGER_ID)).returns(() => manager.object);
+        readMetadataStub = sinon.stub(metadataApi, 'readInlineScriptMetadataFromFile').resolves(undefined);
+        openDocumentsStub = sinon.stub(wapi, 'getOpenTextDocuments').returns([]);
+        errorStub = sinon.stub(winapi, 'showErrorMessage').resolves(undefined);
+        sinon.stub(winapi, 'showInformationMessage').resolves(undefined);
+        warningStub = sinon.stub(winapi, 'showWarningMessage').resolves(undefined);
+        currentText = '# /// script\n# dependencies = ["requests"]\n# ///\nprint("hello")';
+        readHeaderStub = sinon.stub(metadataApi, 'readInlineScriptHeaderFromFile').callsFake(async () => currentText);
+        promptStub = sinon.stub(extensionVersionCheck, 'promptUpdateExtensionsForInlineScripts').resolves();
+        saveStub = sinon.stub().resolves(true);
+    });
+
+    teardown(() => {
+        routing.dispose();
+        sinon.restore();
+    });
+
+    function openDirtyDocument(isDirty = true) {
+        const document = {
+            uri: scriptUri,
+            isDirty,
+            version: 1,
+            getText: () => currentText,
+            save: async (): Promise<boolean> => {
+                const saved = await saveStub();
+                if (saved) {
+                    document.isDirty = false;
+                }
+                return saved;
+            },
+        };
+        openDocumentsStub.returns([document]);
+        return document;
+    }
+
+    function expectEnvironmentCreated(): PythonEnvironment {
+        const env = makeEnv();
+        manager.setup((m) => m.create(scriptUri, undefined)).returns(() => Promise.resolve(env));
+        em.setup((m) => m.setEnvironment(scriptUri, env)).returns(() => Promise.resolve());
+        return env;
+    }
+
+    test('saves a dirty document before setup, because setup reads the block from disk', async () => {        openDirtyDocument();
+        expectEnvironmentCreated();
+
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+
+        sinon.assert.calledOnce(saveStub);
+        em.verify((m) => m.setEnvironment(scriptUri, typemoq.It.isAny()), typemoq.Times.once());
+    });
+
+    test('seeds routing metadata from the saved file so setup does not misread it as a mid-setup edit', async () => {
+        openDirtyDocument();
+        const metadata = makeMetadata(['requests']);
+        readMetadataStub.resolves(metadata);
+        const env = makeEnv();
+        manager
+            .setup((m) => m.create(scriptUri, undefined))
+            .returns(async () => {
+                routing.setMetadata(scriptUri, makeMetadata(['requests']));
+                return env;
+            });
+        em.setup((m) => m.setEnvironment(scriptUri, env)).returns(() => Promise.resolve());
+
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+
+        assert.deepStrictEqual(routing.getMetadata(scriptUri), metadata);
+        em.verify((m) => m.setEnvironment(scriptUri, env), typemoq.Times.once());
+    });
+
+    test('does not save a document that has no unsaved changes', async () => {
+        openDirtyDocument(false);
+        expectEnvironmentCreated();
+
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+
+        sinon.assert.notCalled(saveStub);
+    });
+
+    test('does not run setup when the document could not be saved', async () => {
+        openDirtyDocument();
+        saveStub.resolves(false);
+        const env = expectEnvironmentCreated();
+
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+
+        manager.verify((m) => m.create(scriptUri, undefined), typemoq.Times.never());
+        em.verify((m) => m.setEnvironment(scriptUri, env), typemoq.Times.never());
+        sinon.assert.calledOnce(errorStub);
+        assert.strictEqual(errorStub.firstCall.args[0], InlineScriptStrings.saveFailedBeforeSetup);
+    });
+
+    test('reports an error when setup throws', async () => {
+        manager.setup((m) => m.create(scriptUri, undefined)).returns(() => Promise.reject(new Error('boom')));
+
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+
+        sinon.assert.calledOnce(errorStub);
+    });
+
+    test('does not report a failing companion-extension prompt as a setup failure', async () => {        expectEnvironmentCreated();
+        promptStub.rejects(new Error('boom'));
+
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+
+        sinon.assert.notCalled(errorStub);
+    });
+
+    for (const malformed of [
+        '# /// script',
+        '# /// script\n# dependencies = [\n# ///',
+        '# /// script\n# dependencies = "requests"\n# ///',
+        '# /// script\n# dependencies = [""]\n# ///',
+        '# /// script\n# ///\n# /// script\n# ///',
+        '# /// script\n# ///\n\n# /// script\n#bad',
+    ]) {
+        test(`warns on explicit setup without saving or creating malformed metadata: ${JSON.stringify(malformed)}`, async () => {
+            currentText = malformed;
+            openDirtyDocument();
+            await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+            sinon.assert.calledOnce(warningStub);
+            sinon.assert.notCalled(errorStub);
+            sinon.assert.notCalled(saveStub);
+            manager.verify((m) => m.create(typemoq.It.isAny(), typemoq.It.isAny()), typemoq.Times.never());
+        });
+    }
+
+    test('warns about an invalid Python requirement before installing anything', async () => {
+        currentText = '# /// script\n# requires-python = "not a version specifier"\n# ///';
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+        sinon.assert.calledOnceWithExactly(warningStub, InlineScriptStrings.invalidPythonRequirement);
+        manager.verify((m) => m.create(typemoq.It.isAny(), typemoq.It.isAny()), typemoq.Times.never());
+    });
+
+    test('rechecks metadata after saving instead of creating from a changed invalid block', async () => {
+        openDirtyDocument();
+        saveStub.callsFake(async () => {
+            currentText = '# /// script\n# dependencies = [\n# ///';
+            return true;
+        });
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+        sinon.assert.calledOnce(saveStub);
+        sinon.assert.calledOnce(warningStub);
+        manager.verify((m) => m.create(typemoq.It.isAny(), typemoq.It.isAny()), typemoq.Times.never());
+    });
+
+    test('does not restore routing when an older post-save read finishes after a newer header edit', async () => {
+        const metadata = metadataApi.readInlineScriptMetadata(currentText)!;
+        routing.setMetadata(scriptUri, metadata);
+        routing.setValidatedAssociation(scriptUri, true, '3.12.0');
+        const subscription = routing.onDidChangeMetadata((event) => {
+            if (event.metadata) {
+                routing.setValidatedAssociation(scriptUri, true, '3.12.0');
+            }
+        });
+        const document = openDirtyDocument();
+        const readStarted = createDeferred<void>();
+        const read = createDeferred<InlineScriptMetadata | undefined>();
+        readMetadataStub.callsFake(() => {
+            readStarted.resolve();
+            return read.promise;
+        });
+        const pending = setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+        await readStarted.promise;
+        currentText = '# /// script\n# dependencies = [\n# ///';
+        document.version += 1;
+        document.isDirty = true;
+        routing.clearMetadata(scriptUri);
+        routing.setValidatedAssociation(scriptUri, false);
+        read.resolve(metadata);
+        await pending;
+        assert.strictEqual(routing.shouldRoute(scriptUri), false);
+        assert.strictEqual(routing.getMetadata(scriptUri), undefined);
+        sinon.assert.calledOnce(warningStub);
+        manager.verify((m) => m.create(typemoq.It.isAny(), typemoq.It.isAny()), typemoq.Times.never());
+        subscription.dispose();
+    });
+
+    test('explicit setup restores metadata, routing, and ready after a clean Undo or Revert', async () => {
+        const metadata = metadataApi.readInlineScriptMetadata(currentText)!;
+        routing.setMetadata(scriptUri, metadata);
+        routing.setValidatedAssociation(scriptUri, true, '3.12.0');
+        routing.clearMetadata(scriptUri);
+        routing.setValidatedAssociation(scriptUri, false);
+        openDirtyDocument(false);
+        readMetadataStub.resolves(metadata);
+        const environment = makeEnv();
+        manager.setup((m) => m.create(scriptUri, undefined)).returns(() => Promise.resolve(environment));
+        em.setup((m) => m.setEnvironment(scriptUri, environment)).returns(async () => {
+            routing.setValidatedAssociation(
+                scriptUri,
+                routing.getMetadataIdentity(scriptUri) === getInlineScriptMetadataRoutingIdentity(metadata),
+                environment.version,
+            );
+        });
+
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+
+        sinon.assert.notCalled(saveStub);
+        assert.deepStrictEqual(routing.getMetadata(scriptUri), metadata);
+        assert.strictEqual(routing.shouldRoute(scriptUri), true);
+        sinon.stub(wapi, 'onDidChangeTextDocument').returns(new Disposable(() => undefined));
+        const provider = new InlineScriptCodeLensProvider(routing, 'setup');
+        try {
+            const document = new MockDocument(currentText, scriptUri.fsPath, async () => true);
+            const lenses = provider.provideCodeLenses(document, {} as never);
+            assert.strictEqual(lenses.length, 1);
+            assert.strictEqual(lenses[0].command?.command, '');
+            assert.strictEqual(lenses[0].command?.title, 'Script environment ready (Python 3.12.0)');
+        } finally {
+            provider.dispose();
+        }
+    });
+
+    test('reports save exceptions instead of letting the command reject', async () => {
+        openDirtyDocument();
+        saveStub.rejects(new Error('Cannot save'));
+        await assert.doesNotReject(setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri));
+        sinon.assert.calledOnce(errorStub);
+        manager.verify((m) => m.create(typemoq.It.isAny(), typemoq.It.isAny()), typemoq.Times.never());
+    });
+
+    test('reports an unreadable closed script without trying setup', async () => {
+        readHeaderStub.resolves(undefined);
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+        sinon.assert.calledOnceWithExactly(errorStub, InlineScriptStrings.scriptReadFailedBeforeSetup);
+        sinon.assert.notCalled(warningStub);
+        manager.verify((m) => m.create(typemoq.It.isAny(), typemoq.It.isAny()), typemoq.Times.never());
+    });
+
+    test('accepts an empty block and creates its environment', async () => {
+        currentText = '# /// script\n# ///';
+        expectEnvironmentCreated();
+        await setupInlineScriptEnvironmentHandler(em.object, routing)(scriptUri);
+        manager.verify((m) => m.create(scriptUri, undefined), typemoq.Times.once());
+        sinon.assert.notCalled(warningStub);
     });
 });

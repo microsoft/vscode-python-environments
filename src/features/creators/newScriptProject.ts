@@ -7,7 +7,7 @@ import { traceError } from '../../common/logging';
 import { isSameOrParentPath, isWindowsReservedDeviceName } from '../../common/utils/pathUtils';
 import { showErrorMessage, showInputBoxWithButtons, showTextDocument } from '../../common/window.apis';
 import { getWorkspaceFolder, getWorkspaceFolders } from '../../common/workspace.apis';
-import { PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../projectManager';
 import { isCopilotInstalled, manageCopilotInstructionsFile, replaceInFilesAndNames } from './creationHelpers';
 
 function validateScriptFileName(value: string): string | null {

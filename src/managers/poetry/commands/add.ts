@@ -22,6 +22,12 @@ export class PoetryAddCommand extends InstallCommand {
     }
 
     async execute(executeArgs: InstallExecuteArgs): Promise<void> {
-        await runPoetry(this.buildCommand(executeArgs), this.cwd, this.log, executeArgs.cancellationToken);
+        await runPoetry(
+            this.buildCommand(executeArgs),
+            this.cwd,
+            this.log,
+            executeArgs.cancellationToken,
+            executeArgs.toolExecution,
+        );
     }
 }

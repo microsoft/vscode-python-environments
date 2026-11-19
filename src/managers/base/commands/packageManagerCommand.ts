@@ -7,6 +7,8 @@ import { getConfiguration } from '../../../common/workspace.apis';
  */
 export interface BaseExecuteArgs {
     cancellationToken?: CancellationToken;
+    strict?: boolean;
+    toolExecution?: boolean;
 }
 
 /**
@@ -14,8 +16,11 @@ export interface BaseExecuteArgs {
  */
 export interface CommandConstructorOptions {
     pythonExecutable: string;
+    uvExecutable?: string;
     cwd?: string;
     log?: LogOutputChannel;
+    cancellationToken?: CancellationToken;
+    toolExecution?: boolean;
 }
 
 /**
@@ -26,6 +31,7 @@ export abstract class PackageManagerCommand {
     protected static readonly configSection?: string;
 
     protected pythonExecutable: string;
+    protected uvExecutable: string;
     protected cwd?: string;
     protected log?: LogOutputChannel;
     protected timeout: number | undefined;
@@ -33,6 +39,7 @@ export abstract class PackageManagerCommand {
 
     constructor(options: CommandConstructorOptions) {
         this.pythonExecutable = options.pythonExecutable;
+        this.uvExecutable = options.uvExecutable ?? 'uv';
         this.cwd = options.cwd;
         this.log = options.log;
         const configSection = (this.constructor as typeof PackageManagerCommand).configSection;

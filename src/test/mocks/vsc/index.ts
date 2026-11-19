@@ -153,7 +153,7 @@ export class EventEmitter<T> implements vscode.EventEmitter<T> {
 }
 
 export class CancellationToken<T> extends EventEmitter<T> implements vscode.CancellationToken {
-    public isCancellationRequested!: boolean;
+    public isCancellationRequested = false;
 
     public onCancellationRequested: vscode.Event<T>;
 

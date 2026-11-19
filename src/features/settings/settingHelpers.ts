@@ -13,12 +13,12 @@ import { normalizePath } from '../../common/utils/pathUtils';
 import { EventNames } from '../../common/telemetry/constants';
 import { sendTelemetryEvent } from '../../common/telemetry/sender';
 import * as workspaceApis from '../../common/workspace.apis';
-import {
+import type {
     InlineScriptProjectRegistrationKind,
     InlineScriptProjectRegistrationMarker,
     PythonProjectManager,
     PythonProjectSettings,
-} from '../../internal.api';
+} from '../projectManager';
 
 let inlineScriptProjectSettingsQueue: Promise<void> = Promise.resolve();
 
@@ -99,7 +99,7 @@ export function isDefaultEnvManagerBroken(): boolean {
 export function getDefaultEnvManagerSetting(wm: PythonProjectManager, scope?: Uri): string {
     const config = workspaceApis.getConfiguration('python-envs', scope);
     const settings = getSettings(wm, config, scope);
-    if (settings && settings.envManager.length > 0) {
+    if (settings?.envManager) {
         return settings.envManager;
     }
     // Only show the warning once per session
@@ -127,7 +127,7 @@ export function getDefaultPkgManagerSetting(
     const config = workspaceApis.getConfiguration('python-envs', scope);
 
     const settings = getSettings(wm, config, scope);
-    if (settings && settings.packageManager.length > 0) {
+    if (settings?.packageManager) {
         return settings.packageManager;
     }
 
@@ -162,7 +162,10 @@ interface EditAllManagerSettingsInternal {
     envManager: string;
     packageManager: string;
 }
-export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Promise<void> {
+export async function setAllManagerSettings(
+    edits: EditAllManagerSettings[],
+    persistNewProjects = false,
+): Promise<void> {
     const noWorkspace: EditAllManagerSettingsInternal[] = [];
     const workspaces = new Map<WorkspaceFolder, EditAllManagerSettingsInternal[]>();
     const projectEdits = edits.filter((e): e is EditAllManagerSettingsInternal => !!e.project);
@@ -227,7 +230,10 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
                 if (index >= 0) {
                     overrides.splice(index, 1);
                 }
-                if (config.get('defaultEnvManager') !== e.envManager) {
+                const currentManager = persistNewProjects
+                    ? config.inspect<string>('defaultEnvManager')?.workspaceValue
+                    : config.get('defaultEnvManager');
+                if (currentManager !== e.envManager) {
                     promises.push(config.update('defaultEnvManager', e.envManager, ConfigurationTarget.Workspace));
                 }
                 if (config.get('defaultPackageManager') !== e.packageManager) {
@@ -245,9 +251,10 @@ export async function setAllManagerSettings(edits: EditAllManagerSettings[]): Pr
                 if (overrides[index].path === '') {
                     overrides[index].path = '.';
                 }
-            } else if (workspaceFile) {
+            } else if (workspaceFile || persistNewProjects) {
                 // Use "." for workspace root instead of empty string
-                const relativePath = path.relative(w.uri.fsPath, pwPath).replace(/\\/g, '/');
+                const projectPath = persistNewProjects ? e.project.uri.fsPath : pwPath;
+                const relativePath = path.relative(w.uri.fsPath, projectPath).replace(/\\/g, '/');
                 overrides.push({
                     path: relativePath || '.',
                     envManager: e.envManager,
@@ -987,6 +994,22 @@ export function getSettingWorkspaceScope<T>(section: string, key: string, scope?
         return inspect.globalValue;
     }
     return undefined;
+}
+
+/**
+ * Determines whether the Python Environments extension should activate.
+ *
+ * Explicit values are resolved independently for each workspace folder using VS Code's
+ * workspace-folder > workspace > user precedence. The extension activates when at least
+ * one folder enables integration, or when no explicit value applies.
+ */
+export function isEnvironmentsExtensionEnabled(): boolean {
+    const workspaceFolders = workspaceApis.getWorkspaceFolders();
+    const scopes = workspaceFolders?.length ? workspaceFolders.map((folder) => folder.uri) : [undefined];
+
+    return scopes.some(
+        (scope) => getSettingWorkspaceScope<boolean>('python', 'useEnvironmentsExtension', scope) !== false,
+    );
 }
 
 /**

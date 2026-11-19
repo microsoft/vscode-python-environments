@@ -22,7 +22,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../../../api';
 import { ENVS_EXTENSION_ID } from '../../constants';
-import { waitForCondition } from '../../testUtils';
+import { runWithBlockedDialogsAsCancellation, waitForCondition } from '../../testUtils';
 
 suite('Integration: Multi-Root Workspace', function () {
     this.timeout(120_000);
@@ -175,7 +175,9 @@ suite('Integration: Multi-Root Workspace', function () {
 
         try {
             // This may prompt for manager selection - quickCreate should handle it
-            createdEnv = await api.createEnvironment(uris, { quickCreate: true });
+            createdEnv = await runWithBlockedDialogsAsCancellation(() =>
+                api.createEnvironment(uris, { quickCreate: true }),
+            );
 
             if (createdEnv) {
                 // Verify created environment has valid structure

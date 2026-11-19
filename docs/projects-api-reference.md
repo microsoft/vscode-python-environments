@@ -4,8 +4,8 @@
 This is how the projects API is designed with the different parts of the project flow. Here `getPythonProjects` is used as an example function but behavior will mirror other getter and setter functions exposed in the API.
 
 1. **API Call:** Extensions can calls `getPythonProjects` on [`PythonEnvironmentApi`](../src/api.ts).
-2. **API Implementation:** [`PythonEnvironmentApiImpl`](../src/features/pythonApi.ts) delegates to its internal project manager.
-3. **Internal API:** The project manager is typed as [`PythonProjectManager`](../src/internal.api.ts).
+2. **API Implementation:** [`PythonEnvironmentApiImpl`](../src/extensionApi.ts) delegates to its internal project manager.
+3. **Internal API:** The project manager is typed as [`PythonProjectManager`](../src/features/projectManager.ts).
 4. **Concrete Implementation:** [`PythonProjectManagerImpl`](../src/features/projectManager.ts) implements the actual logic.
 5. **Data Model:** Returns an array of [`PythonProject`](../src/api.ts) objects.
 

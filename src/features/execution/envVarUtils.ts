@@ -17,7 +17,7 @@ export function mergeEnvVariables(
             Object.keys(base).forEach((baseKey) => {
                 const baseValue = base[baseKey];
                 if (baseValue) {
-                    value = value?.replace(`\${${baseKey}}`, baseValue);
+                    value = value?.split(`\${${baseKey}}`).join(baseValue);
                 }
             });
             env[otherKey] = value;

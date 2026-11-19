@@ -6,7 +6,8 @@ import { sendProjectStructureTelemetry } from '../../../common/telemetry/helpers
 import { EventNames } from '../../../common/telemetry/constants';
 import * as sender from '../../../common/telemetry/sender';
 import * as workspaceApis from '../../../common/workspace.apis';
-import { EnvironmentManagers, PythonProjectManager } from '../../../internal.api';
+import type { EnvironmentManagers } from '../../../features/envManagers';
+import type { PythonProjectManager } from '../../../features/projectManager';
 
 suite('Telemetry Helpers', () => {
     suite('sendProjectStructureTelemetry', () => {

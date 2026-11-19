@@ -3,7 +3,7 @@ import * as path from 'path';
 import * as sinon from 'sinon';
 import { ExtensionTerminalOptions, Terminal, TerminalOptions, Uri } from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
-import { VENV_MANAGER_ID } from '../../../common/constants';
+import { VENV_MANAGER_ID, CONDA_MANAGER_ID } from '../../../common/constants';
 import * as windowApis from '../../../common/window.apis';
 import * as workspaceApis from '../../../common/workspace.apis';
 import * as shellDetector from '../../../features/common/shellDetector';
@@ -52,7 +52,7 @@ suite('Terminal Utils - getEnvironmentForTerminal', () => {
         return createMockPythonEnvironment({
             name: id,
             id,
-            managerId: 'ms-python.python:conda',
+            managerId: CONDA_MANAGER_ID,
             envPath: path.resolve('external-environments', id, 'python'),
         });
     }
@@ -484,7 +484,7 @@ suite('Terminal Utils - getAutoActivationType', () => {
     });
 
     suite('Legacy Python Setting Fallback', () => {
-        test('should return ACT_TYPE_OFF and update config when python.terminal.activateEnvironment is false', () => {
+        test('should return ACT_TYPE_OFF without writing config when python.terminal.activateEnvironment is false', () => {
             // Mock - no python-envs settings, python.terminal.activateEnvironment is false
             pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns(undefined);
             pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).returns(false);
@@ -494,10 +494,26 @@ suite('Terminal Utils - getAutoActivationType', () => {
 
             // Assert
             assert.strictEqual(result, ACT_TYPE_OFF, 'Should return ACT_TYPE_OFF when legacy setting is false');
-            assert.ok(
-                pyEnvsConfig.update.calledWithExactly('terminal.autoActivationType', ACT_TYPE_OFF),
-                'Should update python-envs config to ACT_TYPE_OFF',
-            );
+            sinon.assert.notCalled(pyEnvsConfig.update);
+        });
+
+        test('should follow changes to the legacy setting without persisting an override', () => {
+            pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns(undefined);
+            pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).onFirstCall().returns(false);
+            pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).onSecondCall().returns(true);
+
+            assert.strictEqual(getAutoActivationType(), ACT_TYPE_OFF);
+            assert.strictEqual(getAutoActivationType(), ACT_TYPE_COMMAND);
+            sinon.assert.notCalled(pyEnvsConfig.update);
+        });
+
+        test('should keep an explicit activation mode when the legacy setting is false', () => {
+            pyEnvsConfig.inspect.withArgs('terminal.autoActivationType').returns({ globalValue: ACT_TYPE_SHELL });
+            pythonConfig.get.withArgs('terminal.activateEnvironment', undefined).returns(false);
+
+            assert.strictEqual(getAutoActivationType(), ACT_TYPE_SHELL);
+            sinon.assert.notCalled(pythonConfig.get);
+            sinon.assert.notCalled(pyEnvsConfig.update);
         });
 
         test('should return ACT_TYPE_COMMAND when python.terminal.activateEnvironment is true', () => {
@@ -1024,5 +1040,20 @@ suite('Terminal Utils - waitForShellIntegration', () => {
 
         const result = await racePromise;
         assert.strictEqual(result, true, 'should not regress when detection throws');
+    });
+
+    test('detects shell integration that becomes available while listeners are registered', async () => {
+        const shellIntegration = {};
+        const terminal = {} as Terminal;
+        identifyTerminalShellStub.returns('bash');
+        onDidChangeTerminalShellIntegrationStub.callsFake(() => {
+            (terminal as { shellIntegration?: unknown }).shellIntegration = shellIntegration;
+            return { dispose: () => undefined };
+        });
+
+        const result = await waitForShellIntegration(terminal, 60_000);
+
+        assert.strictEqual(result, true);
+        assert.strictEqual(terminal.shellIntegration, shellIntegration);
     });
 });

@@ -39,7 +39,7 @@ export class UvVersionCommand extends VersionCommand {
     }
 
     async execute(): Promise<Pep440Version | undefined> {
-        const output = await runUV(this.buildCommand(), undefined, this.log, undefined, this.timeout);
+        const output = await runUV(this.buildCommand(), undefined, this.log, undefined, this.timeout, this.uvExecutable);
 
         const match = output.match(/(\d+\.\d+(?:\.\d+)*)/);
         return match ? (parsePep440Version(match[1]) ?? undefined) : undefined;

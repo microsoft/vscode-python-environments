@@ -5,7 +5,8 @@ import * as commandApi from '../../common/command.api';
 import * as windowApis from '../../common/window.apis';
 import { reportIssue } from '../../features/reportIssue';
 import * as helpers from '../../helpers';
-import { EnvironmentManagers, PythonProjectManager } from '../../internal.api';
+import type { EnvironmentManagers } from '../../features/envManagers';
+import type { PythonProjectManager } from '../../features/projectManager';
 
 suite('Report Issue Command Tests', () => {
     const context = {} as ExtensionContext;

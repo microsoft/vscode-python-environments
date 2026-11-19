@@ -7,7 +7,7 @@ import { PythonVersion } from '../../common/pythonVersion';
 import { isWindows } from '../../common/utils/platformUtils';
 import { ShellConstants } from '../../features/common/shellConstants';
 import { getDefaultEnvManagerSetting, setDefaultEnvManagerBroken } from '../../features/settings/settingHelpers';
-import { PythonProjectManager } from '../../internal.api';
+import type { PythonProjectManager } from '../../features/projectManager';
 import { Installable } from './types';
 
 export function noop() {
@@ -115,30 +115,34 @@ export async function getShellActivationCommands(binDir: string): Promise<{
     const shellActivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
     const shellDeactivation: Map<string, PythonCommandRunConfiguration[]> = new Map();
 
-    if (isWindows()) {
-        shellActivation.set('unknown', [{ executable: path.join(binDir, `activate`) }]);
-        shellDeactivation.set('unknown', [{ executable: path.join(binDir, `deactivate`) }]);
-    } else {
-        shellActivation.set('unknown', [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-        shellDeactivation.set('unknown', [{ executable: 'deactivate' }]);
+    // Base interpreters (for example `uv python install` toolchains) share this layout but have no
+    // activation scripts, so only offer activation for scripts that exist, like the shells below.
+    if (await fs.pathExists(path.join(binDir, 'activate'))) {
+        if (isWindows()) {
+            shellActivation.set('unknown', [{ executable: path.join(binDir, `activate`) }]);
+            shellDeactivation.set('unknown', [{ executable: path.join(binDir, `deactivate`) }]);
+        } else {
+            shellActivation.set('unknown', [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+            shellDeactivation.set('unknown', [{ executable: 'deactivate' }]);
+        }
+
+        shellActivation.set(ShellConstants.SH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.SH, [{ executable: 'deactivate' }]);
+
+        shellActivation.set(ShellConstants.BASH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.BASH, [{ executable: 'deactivate' }]);
+
+        shellActivation.set(ShellConstants.GITBASH, [
+            { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
+        ]);
+        shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'deactivate' }]);
+
+        shellActivation.set(ShellConstants.ZSH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'deactivate' }]);
+
+        shellActivation.set(ShellConstants.KSH, [{ executable: '.', args: [path.join(binDir, `activate`)] }]);
+        shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
     }
-
-    shellActivation.set(ShellConstants.SH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-    shellDeactivation.set(ShellConstants.SH, [{ executable: 'deactivate' }]);
-
-    shellActivation.set(ShellConstants.BASH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-    shellDeactivation.set(ShellConstants.BASH, [{ executable: 'deactivate' }]);
-
-    shellActivation.set(ShellConstants.GITBASH, [
-        { executable: 'source', args: [pathForGitBash(path.join(binDir, `activate`))] },
-    ]);
-    shellDeactivation.set(ShellConstants.GITBASH, [{ executable: 'deactivate' }]);
-
-    shellActivation.set(ShellConstants.ZSH, [{ executable: 'source', args: [path.join(binDir, `activate`)] }]);
-    shellDeactivation.set(ShellConstants.ZSH, [{ executable: 'deactivate' }]);
-
-    shellActivation.set(ShellConstants.KSH, [{ executable: '.', args: [path.join(binDir, `activate`)] }]);
-    shellDeactivation.set(ShellConstants.KSH, [{ executable: 'deactivate' }]);
 
     if (await fs.pathExists(path.join(binDir, 'Activate.ps1'))) {
         shellActivation.set(ShellConstants.PWSH, buildPwshActivationCommands(path.join(binDir, 'Activate.ps1')));
@@ -156,6 +160,9 @@ export async function getShellActivationCommands(binDir: string): Promise<{
     if (await fs.pathExists(path.join(binDir, 'activate.csh'))) {
         shellActivation.set(ShellConstants.CSH, [{ executable: 'source', args: [path.join(binDir, `activate.csh`)] }]);
         shellDeactivation.set(ShellConstants.CSH, [{ executable: 'deactivate' }]);
+
+        shellActivation.set(ShellConstants.TCSH, [{ executable: 'source', args: [path.join(binDir, `activate.csh`)] }]);
+        shellDeactivation.set(ShellConstants.TCSH, [{ executable: 'deactivate' }]);
     }
 
     if (await fs.pathExists(path.join(binDir, 'activate.fish'))) {

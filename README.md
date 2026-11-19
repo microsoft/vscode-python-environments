@@ -17,6 +17,8 @@ The "Python Projects" fold shows you all of the projects that are currently in y
 
 The "Environment Managers" fold shows you all of the environment managers that are available on your machine with all related environments nested below. From this view, you can create new environments, delete old environments, and manage packages.
 
+The PEP 723 inline-script preview can create and select cached environments from dependency metadata embedded in standalone Python files. The preview is controlled by `python-envs.inlineScripts.enabled`, defaults to `false`, and requires a window reload after the effective value changes.
+
 <img src="https://raw.githubusercontent.com/microsoft/vscode-python-environments/main/images/python-envs-overview.gif" width=734 height=413>
 
 ### Environment Management
@@ -52,7 +54,7 @@ The following environment managers are supported out of the box:
 | conda               | ✅                | ✅     | ✅           |
 | pyenv               | ✅                |        |              |
 | poetry              | ✅                |        |              |
-| system              | ✅                |        |              |
+| system              | ✅                | ✅     |              |
 | pipenv              | ✅                |        |              |
 
 **Legend:**
@@ -63,6 +65,8 @@ The following environment managers are supported out of the box:
 
 Environment managers are responsible for specifying which package manager will be used by default to install and manage Python packages within the environment (`venv` uses `pip` by default). This ensures that packages are managed consistently according to the preferred tools and settings of the chosen environment manager.
 
+The built-in `venv` environment manager (`BuiltInEnvironmentManager`) composes separate `VenvEnvironmentManager` and `UvEnvironmentManager` backends. Creation automatically routes to uv when the existing uv policy allows it and uv is available to the creation scope; otherwise it uses `python -m venv`. Each backend owns its own environment classification, presentation, and persistent state, while both kinds of virtual environment retain the `ms-python.python:venv` manager identity, discovery, selection, and removal behavior.
+
 ### Package Management
 
 The extension also provides an interface to install and uninstall Python packages, and provides APIs for extension developers to contribute package managers of their choice.
@@ -72,7 +76,20 @@ The extension uses `pip` as the default package manager, but you can use the pac
 | Id                     | Name    | Description                                                                                                                                                                                               |
 | ---------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ms-python.python:pip   | `pip`   | Pip acts as the default package manager and it's typically built-in to Python.                                                                                                                            |
+| ms-python.python:uv    | `uv`    | Uses [uv](https://docs.astral.sh/uv/) to manage packages in the selected environment, without requiring pip in that environment. |
 | ms-python.python:conda | `conda` | The [conda](https://conda.org) package manager, as provided by conda distributions like [Anaconda Distribution](https://docs.anaconda.com/anaconda/) or [conda-forge](https://conda-forge.org/download/). |
+
+Set `"python-envs.defaultPackageManager": "ms-python.python:uv"` to select uv for package operations.
+Environment-only API calls still use the environment manager's preferred package manager
+(for example, pip for venv); project-scoped UI operations use the selected package manager.
+Tool operations use the selected project manager only when its ID matches the environment manager's
+preferred package manager ID; otherwise, they use the environment's preferred manager.
+Automatic routing preserves the existing uv selection rules: when the configured or preferred
+manager is pip, `python-envs.alwaysUseUv` and whether the environment was created by uv determine
+whether the router selects pip or uv. Each manager executes only its own commands. Selecting the uv
+manager explicitly always uses uv, independently of that setting. The uv package manager resolves
+uv from PATH, a current-session installation, or the owning trusted workspace's `.pyprojectx/main/uv`
+(`uv.exe` on Windows). If uv is unavailable, it reports an error rather than falling back to pip.
 
 #### Default Package Manager by Environment Manager
 
@@ -118,6 +135,8 @@ All commands can be accessed via the Command Palette (`ctrl/cmd + Shift + P`):
 | Deactivate Environment in Current Terminal | Deactivates environment in currently opened terminal.                                                                                  |
 | Run as Task                                | Runs Python module as a task.                                                                                                          |
 | Create New Project from Template           | Creates scaffolded project with virtual environments based on a template.                                                              |
+| Set Up Environments for Inline Script Files | Selects PEP 723 scripts and creates or reuses their declared environments when the inline-script preview is enabled.                   |
+| Clear Inline Script Environment Cache      | Deletes cached PEP 723 script environments and clears their known associations after confirmation.                                    |
 
 ## Settings Reference
 
@@ -128,9 +147,10 @@ All commands can be accessed via the Command Palette (`ctrl/cmd + Shift + P`):
 | defaultEnvManager            | `"ms-python.python:venv"` | The default environment manager used for creating and managing environments.                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | defaultPackageManager        | `"ms-python.python:pip"`  | The default package manager to use for installing and managing packages. This is often dictated by the default environment manager but can be customized.                                                                                                                                                                                                                                                                                                                                        |
 | pythonProjects               | `[]`                      | A list of Python workspaces, specified by the path, in which you can set particular environment and package managers. You can set information for a workspace as `[{"path":  "/path/to/workspace", "envManager": "ms-python.python:venv", "packageManager": "ms-python.python:pip"]}`.                                                                                                                                                                                                           |
+| inlineScripts.enabled        | `false`                   | (preview) Enables creating and selecting environments from PEP 723 inline script metadata. The effective default may be enabled through gradual rollout; an explicit user or workspace value takes precedence. Reload the window after changing this setting.                                                                                                                                                                                                                                   |
 | terminal.showActivateButton  | `false`                   | (experimental) Show a button in the terminal to activate/deactivate the current environment for the terminal. This button is only shown if the active terminal is associated with a project that has an activatable environment.                                                                                                                                                                                                                                                                 |
 | terminal.autoActivationType  | `"command"`               | Specifies how the extension can activate an environment in a terminal. Accepted values: `command` (execute activation command in terminal), `shellStartup` (`terminal.integrated.shellIntegration.enabled` successfully enabled or we may modify shell startup scripts ), `off` (no auto-activation). Shell startup is only supported for: zsh, fish, pwsh, bash, cmd. **Takes precedence over** `python.terminal.activateEnvironment`. Restart terminals after changing this setting. To revert shell startup changes, run `Python Envs: Revert Shell Startup Script Changes`. |                                                                                        
-| alwaysUseUv                  | `true`                    | When `true`, [uv](https://github.com/astral-sh/uv) will be used to manage all virtual environments if available. When `false`, uv will only manage virtual environments explicitly created by uv.                                                                                                                                                                                                                                                                                                |
+| alwaysUseUv                  | `true`                    | When `true`, [uv](https://github.com/astral-sh/uv) will be used to manage all virtual environments if available. When `false`, uv will only manage virtual environments explicitly created by uv. The extension uses `uv` on its PATH, or the executable it installed during the current session. If unavailable in a trusted workspace, it also checks that workspace's `.pyprojectx/main/uv` (`uv.exe` on Windows) for environments inside that workspace. External environments require uv on PATH or a current-session installation. This does not alter the integrated terminal's PATH. |
 | globalSearchPaths            | `[]`                      | Global search paths for Python environments. Array of absolute directory paths to search for environments at the user level. This setting is merged with the legacy `python.venvPath` and `python.venvFolders` settings.                                                                                                                                                                                                                                                                        |
 | workspaceSearchPaths         | `[]`                      | Workspace search paths for Python environments. Can be absolute paths or relative directory paths searched within the workspace.                                                                                                                                                                                                                                                                                                                                                                 |
 
@@ -155,9 +175,7 @@ The Python Environments extension was built to provide a cohesive and user frien
 
 ### API Reference (proposed)
 
-See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the full list of Extension APIs.
-
-To consume these APIs you can look at the example here: [API Consumption Examples](https://github.com/microsoft/vscode-python-environments/blob/main/examples/README.md)
+See [api.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/api.ts) for the runtime API facade and [types.ts](https://github.com/microsoft/vscode-python-environments/blob/main/src/types.ts) for the public API contracts. Extension authors can consume these contracts from the `@vscode/python-environments` npm package.
 
 ### Callable Commands
 
@@ -364,3 +382,15 @@ This project may contain trademarks or logos for projects, products, or services
 [Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
 Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
 Any use of third-party trademarks or logos are subject to those third-party's policies.
+
+### Localization
+
+The **Localization** GitHub workflow submits English strings using the [shared composite action and Python tooling](https://github.com/microsoft/vscode-common-python-lsp#shared-localization-automation). Stable and pre-release DevDiv pipelines independently retrieve translations through Pylance-Eng's `pullLocalization: true`; releases never submit English or create translation-update PRs.
+
+Both paths use `microsoft/vscode-python-extensions-loc`, branch **`dev`**, with canonical extension ID **`ms-python.vscode-python-envs`**. English XLF is stored in `src/en/ms-python.vscode-python-envs` and handbacks in `out/ms-python.vscode-python-envs`. The action and Azure tooling checkout are pinned to the same reviewed revision.
+
+Configure the `PYTHON_LOCALIZATION_APP_ID` Actions variable and `PYTHON_LOCALIZATION_PRIVATE_KEY` secret here, or grant access to organization-level credentials. The app needs Contents write access only to the localization drop; the caller's repository token stays read-only. The shared action uses the Microsoft npm proxy and pinned localization CLI. Authorize the literal `Github-Pylance` service connection for the [pipeline templates](https://github.com/microsoft/pylance-eng), translation, and shared-tooling repository resources in both release pipelines.
+
+Keep English `package.nls.json` tracked. Root `package.nls.<locale>.json` and `l10n/` runtime files are generated, git-ignored release outputs. VSCE must include generated locale files despite Git ignores. Local builds are English-only unless translations are imported explicitly.
+
+Translation is asynchronous. Nonempty manifest and runtime tables must be present for all 14 supported locales. Untranslated strings, including wholly untranslated tables, are allowed; users see English until translations arrive. Missing, empty, malformed, or incomplete handbacks still fail before packaging, without falling back to stale translations.
