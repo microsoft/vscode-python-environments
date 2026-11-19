@@ -513,6 +513,40 @@ test('description cleanup ignores blank-line formatting while preserving code in
     }
 });
 
+test('list continuation prose ignores blank lines without flattening code inside or after a list', async () => {
+    const cases = [
+        ['numbered list', '1. Steps\n\n    Select conda.\n\n    Open terminal.', false],
+        ['bullet list', '- Steps\n\n    Select conda.\n\n    Open terminal.', false],
+        ['wide marker', '10. Steps\n\n    Select conda.\n\n    Open terminal.', false],
+        ['nested list', '1. Steps\n\n    - Reproduce\n\n        Select conda.\n\n        Open terminal.', false],
+        ['tab padding', '1.\tSteps\n\n\tSelect conda.\n\n\tOpen terminal.', false],
+        ['sibling lists', '1. Steps\n\n    Select conda.\n\n2. More\n\n    Select conda.\n\n    Open terminal.', false],
+        ['list code', '1. Steps\n\n       value = """one\n\n       two"""', true],
+        ['list code with tabs', '1.\tSteps\n\n\t\tvalue = """one\n\n\t\ttwo"""', true],
+        ['code on marker line', '1.     value = """one\n\n       two"""', true],
+        ['list fence', '1. Steps\n\n    ```python\n    value = """one\n\n    two"""\n    ```', true],
+        ['list fence then prose', '1. Steps\n\n    ```python\n    print("ok")\n    ```\n\n    Select conda.\n\n    Open terminal.', false],
+        ['code after list', '1. Steps\n\n    Select conda.\n\nOutside list.\n\n    value = """one\n\n    two"""', true],
+        ['code after empty item', '1.\n\n    value = """one\n\n    two"""', true],
+        ['code after empty nested item', '1. Steps\n\n    -\n\n        value = """one\n\n        two"""', true],
+    ];
+    for (const [name, before, meaningful] of cases) {
+        const after = before.includes('"""one\n\n')
+            ? before.replace('"""one\n\n', '"""one\n\n\n')
+            : before.replace(/\n\n(?=[^\n]*$)/, '\n\n\n');
+        assert.notEqual(before, after, name);
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        f.issue.body = after;
+        f.context.payload.issue.body = after;
+        f.context.payload.changes.body.from = before;
+        f.descriptionEdit.before = before;
+        assert.equal((await clearInfoNeededOnEdit(f)).status, meaningful ? 'success' : 'skipped', name);
+        assert.equal(f.issue.labels.some((label) => label.name === 'info-needed'), !meaningful, name);
+    }
+});
+
 test('description cleanup defers when body-edit metadata is missing or no longer matches', async () => {
     for (const change of ['missing-issue', 'missing-history', 'missing-before', 'body-mismatch',
         'different-before', 'different-editor', 'future-edit', 'invalid-time',

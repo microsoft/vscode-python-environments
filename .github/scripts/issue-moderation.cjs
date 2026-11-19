@@ -165,6 +165,8 @@ function indentationWidth(prefix) {
 function comparableDescription(body) {
     // Ignore prose blank lines without erasing indentation or blank lines within code.
     const lines = [];
+    const listIndents = [];
+    let emptyListItem = false;
     let fence;
     let indented = false;
     let blankLines = [];
@@ -178,16 +180,35 @@ function comparableDescription(body) {
             continue;
         }
         if (!line.trim()) {
+            if (emptyListItem) listIndents.pop();
+            emptyListItem = false;
             if (indented) blankLines.push(line);
             continue;
         }
-        const codeLine = /^(?: {4}| {0,3}\t)/.test(line);
-        if (codeLine && indented) lines.push(...blankLines);
+        const prefix = /^([ \t]*)(?:([-+*]|\d{1,9}[.)])([ \t]+|$))?/.exec(line);
+        const indent = indentationWidth(prefix[1]);
+        while (listIndents.length && indent < listIndents.at(-1)) listIndents.pop();
+        let containerIndent = listIndents.at(-1) ?? 0;
+        const listItem = Boolean(prefix[2]) && indent - containerIndent < 4;
+        let contentIndent = indent;
+        let content = line.slice(prefix[1].length);
+        if (listItem) {
+            contentIndent = indentationWidth(prefix[0]);
+            const markerEnd = indent + prefix[2].length;
+            const padding = contentIndent - markerEnd;
+            containerIndent = markerEnd + (padding >= 1 && padding <= 4 ? padding : 1);
+            listIndents.push(containerIndent);
+            content = line.slice(prefix[0].length);
+        }
+        emptyListItem = listItem && content.length === 0;
+        // The list container's indentation is prose, not the four extra columns required for code.
+        const codeLine = contentIndent - containerIndent >= 4;
+        if (codeLine && indented && !listItem) lines.push(...blankLines);
         blankLines = [];
         indented = codeLine;
-        const opening = !indented && /^( {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+)? {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-        if (opening && (opening[2][0] === '~' || !opening[3].includes('`'))) {
-            fence = { marker: opening[2], indent: indentationWidth(opening[1] ?? '') };
+        const opening = !indented && /^(`{3,}|~{3,})(.*)$/.exec(content);
+        if (opening && (opening[1][0] === '~' || !opening[2].includes('`'))) {
+            fence = { marker: opening[1], indent: containerIndent };
         }
         hasCode ||= indented || Boolean(fence);
         lines.push(line);

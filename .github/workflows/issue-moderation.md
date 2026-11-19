@@ -223,9 +223,10 @@ body.
 The actual body-edit timestamp, which can precede webhook `updated_at`, must
 follow the information request. Missing or deleted edit history defers cleanup.
 Title-only, empty-body, line-ending, and prose blank-line changes do not count as
-responses. Whitespace inside fenced or indented code is preserved so code corrections
-still count. Queued edits defer to newer information requests or human activity
-rather than clearing a renewed request.
+responses. List-container indentation is excluded before identifying code.
+Whitespace inside fenced or indented code is preserved so code corrections still
+count. Queued edits defer to newer information requests or human activity rather
+than clearing a renewed request.
 
 Clear junk gets a fixed polite reply and closure as `not_planned`, without
 adding/removing `~spam`. A prior workflow reply prevents duplicate publication
