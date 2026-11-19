@@ -17,12 +17,26 @@ async function fixture() {
     const events = [];
     const comments = [];
     const writes = [];
+    const descriptionEdit = { lastEditedAt: null, before: '', editor: human };
+    const warnings = [];
+    const waits = [];
     const context = {
         repo: { owner: 'example', repo: 'python-environments' },
         payload: { action: 'opened', issue: structuredClone(issue) },
         eventName: 'issues', serverUrl: 'https://github.com', runId: 123,
     };
     const github = {
+        graphql: async (_query, variables) => {
+            assert.deepEqual(variables, { owner: 'example', name: 'python-environments', number: 42 });
+            return { repository: { issue: {
+                body: issue.body,
+                userContentEdits: { nodes: [
+                    { diff: issue.body, editedAt: descriptionEdit.lastEditedAt, deletedAt: null,
+                        editor: { databaseId: descriptionEdit.editor?.id } },
+                    { diff: descriptionEdit.before === '' ? null : descriptionEdit.before, deletedAt: null },
+                ] },
+            } } };
+        },
         rest: { issues: {
             get: async () => ({ data: structuredClone(issue) }),
             listComments: Symbol('listComments'),
@@ -62,7 +76,11 @@ async function fixture() {
             return structuredClone(events);
         },
     };
-    const f = { github, context, issue, events, comments, writes, issueNumber: 42 };
+    const f = {
+        github, context, issue, events, comments, writes, descriptionEdit, warnings, waits, issueNumber: 42,
+        core: { warning: (message) => warnings.push(message) },
+        wait: async (milliseconds) => { waits.push(milliseconds); },
+    };
     f.snapshot = (await inspectIssue(f)).snapshot;
     return f;
 }
@@ -80,6 +98,8 @@ function reporterEdit(f) {
     const from = f.issue.body;
     f.issue.body = 'Selecting conda works, but a new PowerShell terminal still uses system Python.';
     f.issue.updated_at = '2026-11-18T12:05:00Z';
+    f.descriptionEdit.lastEditedAt = f.issue.updated_at;
+    f.descriptionEdit.before = from;
     f.context.payload = {
         action: 'edited', issue: structuredClone(f.issue), sender: human, changes: { body: { from } },
     };
@@ -420,6 +440,142 @@ test('description cleanup requires a real nonempty body update by the human issu
     }
 });
 
+test('real title-only webhook payloads cannot acknowledge a description response', async () => {
+    for (const change of ['never-edited', 'before-request', 'earlier-formatting-edit', 'same-second-formatting-edit']) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        if (change === 'never-edited') f.descriptionEdit.lastEditedAt = null;
+        if (change === 'before-request') f.descriptionEdit.lastEditedAt = '2026-11-18T11:59:00Z';
+        if (['earlier-formatting-edit', 'same-second-formatting-edit'].includes(change)) {
+            if (change === 'earlier-formatting-edit') f.descriptionEdit.lastEditedAt = '2026-11-18T12:04:00Z';
+            f.descriptionEdit.before = `\n\n${f.issue.body}\n`;
+        }
+        f.issue.title = 'Corrected issue title';
+        f.context.payload.issue.title = f.issue.title;
+        f.context.payload.changes = { body: { from: '' }, title: { from: 'qwerty' } };
+        f.events.push({
+            event: 'renamed', actor: human, created_at: f.issue.updated_at,
+            rename: { from: 'qwerty', to: f.issue.title },
+        });
+        assert.equal((await clearInfoNeededOnEdit(f)).status, 'skipped', change);
+        assert.equal(f.writes.length, 2, change);
+        assert.ok(f.issue.labels.some((label) => label.name === 'info-needed'), change);
+    }
+});
+
+test('body history can precede webhook updated_at without hiding intervening human handling', async () => {
+    for (const interveningHuman of [false, true]) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        f.descriptionEdit.lastEditedAt = '2026-11-18T12:04:58Z';
+        if (interveningHuman) {
+            f.events.push({ event: 'commented', user: human, created_at: '2026-11-18T12:04:59Z' });
+        }
+        const result = await clearInfoNeededOnEdit(f);
+        assert.equal(result.status, interveningHuman ? 'skipped' : 'success');
+        assert.equal(f.writes.length, interveningHuman ? 2 : 3);
+    }
+});
+
+test('description cleanup ignores blank-line formatting while preserving code indentation and contents', async () => {
+    const cases = [
+        ['## Steps\n\nSelect conda.\n\n## Result\n\nWrong interpreter.',
+            '## Steps\n\n\nSelect conda.\n \t\n## Result\n\nWrong interpreter.', false],
+        ['## Steps\r\n\r\nSelect conda.', '## Steps\n\nSelect conda.', false],
+        ['Details\n\n```python\nif True:\n    print("ok")\n```\n\nResult',
+            'Details\n\n\n```python\nif True:\n    print("ok")\n```\n\n\nResult', false],
+        ['```python\nif True:\n    print("ok")\n```', '```python\nif True:\nprint("ok")\n```', true],
+        ['```python\nvalue = """one\n\ntwo"""\n```', '```python\nvalue = """one\n\n\ntwo"""\n```', true],
+        ['~~~~python\nvalue = """one\n\ntwo"""\n~~~~', '~~~~python\nvalue = """one\n\n\ntwo"""\n~~~~', true],
+        ['    if True:\n        print("ok")', 'if True:\n        print("ok")', true],
+        ['Code:\n\n    value = """one\n\n    two"""\n\nDone',
+            'Code:\n\n    value = """one\n\n\n    two"""\n\nDone', true],
+        ['- ```python\n  value = """one\n\n  two"""\n  ```',
+            '- ```python\n  value = """one\n\n\n  two"""\n  ```', true],
+        ['10. ```python\n    print("ok")\n    ```\n\nDone',
+            '10. ```python\n    print("ok")\n    ```\n\n\nDone', false],
+        ['-\t~~~python\n\tprint("ok")\n\t~~~\n\nDone',
+            '-\t~~~python\n\tprint("ok")\n\t~~~\n\n\nDone', false],
+        [' \tvalue = """one\n\n \ttwo"""', ' \tvalue = """one\n\n\n \ttwo"""', true],
+    ];
+    for (const [before, after, meaningful] of cases) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        f.issue.body = after;
+        f.context.payload.issue.body = after;
+        f.context.payload.changes.body.from = before;
+        f.descriptionEdit.before = before;
+        assert.equal((await clearInfoNeededOnEdit(f)).status, meaningful ? 'success' : 'skipped');
+        assert.equal(f.issue.labels.some((label) => label.name === 'info-needed'), !meaningful);
+    }
+});
+
+test('list continuation prose ignores blank lines without flattening code inside or after a list', async () => {
+    const cases = [
+        ['numbered list', '1. Steps\n\n    Select conda.\n\n    Open terminal.', false],
+        ['bullet list', '- Steps\n\n    Select conda.\n\n    Open terminal.', false],
+        ['wide marker', '10. Steps\n\n    Select conda.\n\n    Open terminal.', false],
+        ['nested list', '1. Steps\n\n    - Reproduce\n\n        Select conda.\n\n        Open terminal.', false],
+        ['tab padding', '1.\tSteps\n\n\tSelect conda.\n\n\tOpen terminal.', false],
+        ['sibling lists', '1. Steps\n\n    Select conda.\n\n2. More\n\n    Select conda.\n\n    Open terminal.', false],
+        ['list code', '1. Steps\n\n       value = """one\n\n       two"""', true],
+        ['list code with tabs', '1.\tSteps\n\n\t\tvalue = """one\n\n\t\ttwo"""', true],
+        ['code on marker line', '1.     value = """one\n\n       two"""', true],
+        ['list fence', '1. Steps\n\n    ```python\n    value = """one\n\n    two"""\n    ```', true],
+        ['list fence then prose', '1. Steps\n\n    ```python\n    print("ok")\n    ```\n\n    Select conda.\n\n    Open terminal.', false],
+        ['code after list', '1. Steps\n\n    Select conda.\n\nOutside list.\n\n    value = """one\n\n    two"""', true],
+        ['code after empty item', '1.\n\n    value = """one\n\n    two"""', true],
+        ['code after empty nested item', '1. Steps\n\n    -\n\n        value = """one\n\n        two"""', true],
+    ];
+    for (const [name, before, meaningful] of cases) {
+        const after = before.includes('"""one\n\n')
+            ? before.replace('"""one\n\n', '"""one\n\n\n')
+            : before.replace(/\n\n(?=[^\n]*$)/, '\n\n\n');
+        assert.notEqual(before, after, name);
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        f.issue.body = after;
+        f.context.payload.issue.body = after;
+        f.context.payload.changes.body.from = before;
+        f.descriptionEdit.before = before;
+        assert.equal((await clearInfoNeededOnEdit(f)).status, meaningful ? 'success' : 'skipped', name);
+        assert.equal(f.issue.labels.some((label) => label.name === 'info-needed'), !meaningful, name);
+    }
+});
+
+test('description cleanup defers when body-edit metadata is missing or no longer matches', async () => {
+    for (const change of ['missing-issue', 'missing-history', 'missing-before', 'body-mismatch',
+        'different-before', 'different-editor', 'future-edit', 'invalid-time',
+        'deleted-before', 'deleted-latest', 'missing-deletion-status']) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        const graphql = f.github.graphql;
+        f.github.graphql = async (...args) => {
+            const result = await graphql(...args);
+            const description = result.repository.issue;
+            if (change === 'missing-issue') result.repository.issue = null;
+            if (change === 'missing-history') description.userContentEdits = null;
+            if (change === 'missing-before') description.userContentEdits.nodes.pop();
+            if (change === 'body-mismatch') description.body = 'A newer description.';
+            if (change === 'different-before') description.userContentEdits.nodes[1].diff = 'A different previous body.';
+            if (change === 'different-editor') description.userContentEdits.nodes[0].editor = { databaseId: 8 };
+            if (change === 'future-edit') description.userContentEdits.nodes[0].editedAt = '2026-11-18T12:06:00Z';
+            if (change === 'invalid-time') description.userContentEdits.nodes[0].editedAt = 'invalid';
+            if (change === 'deleted-before') description.userContentEdits.nodes[1].deletedAt = '2026-11-18T12:04:59Z';
+            if (change === 'deleted-latest') description.userContentEdits.nodes[0].deletedAt = '2026-11-18T12:06:00Z';
+            if (change === 'missing-deletion-status') delete description.userContentEdits.nodes[1].deletedAt;
+            return result;
+        };
+        assert.equal((await clearInfoNeededOnEdit(f)).status, 'skipped', change);
+        assert.equal(f.writes.length, 2, change);
+    }
+});
+
 test('description cleanup preserves closed, locked, pull-request and superseded responses', async () => {
     for (const change of ['closed', 'locked', 'pull-request', 'stale-body', 'changed-author', 'no-label']) {
         const f = await fixture();
@@ -506,12 +662,13 @@ test('passive subscriptions and mentions after an edit are not mistaken for rene
 });
 
 test('description cleanup rechecks intervening changes and propagates API failures', async () => {
-    for (const operation of ['get', 'paginate', 'removeLabel', 'intervening-change']) {
+    for (const operation of ['get', 'graphql', 'paginate', 'removeLabel', 'intervening-change']) {
         const f = await fixture();
         await applyModeration({ ...f, output: output('needs-info') });
         reporterEdit(f);
         const fail = async () => { throw new Error('GitHub unavailable'); };
         if (operation === 'get') f.github.rest.issues.get = fail;
+        if (operation === 'graphql') f.github.graphql = fail;
         if (operation === 'paginate') f.github.paginate = fail;
         if (operation === 'removeLabel') f.github.rest.issues.removeLabel = fail;
         if (operation === 'intervening-change') {
@@ -526,5 +683,87 @@ test('description cleanup rechecks intervening changes and propagates API failur
             await assert.rejects(clearInfoNeededOnEdit(f), /GitHub unavailable/);
         }
         assert.equal(f.writes.length, 2);
+    }
+});
+
+test('transient description cleanup failures retry the whole guarded operation with bounded backoff', async () => {
+    for (const operation of ['get', 'graphql', 'paginate', 'removeLabel']) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        const owner = ['graphql', 'paginate'].includes(operation) ? f.github : f.github.rest.issues;
+        const original = owner[operation];
+        let calls = 0;
+        owner[operation] = async (...args) => {
+            if (++calls < 3) throw Object.assign(new Error('GitHub unavailable'), { status: 500 });
+            return original(...args);
+        };
+        assert.equal((await clearInfoNeededOnEdit(f)).status, 'success', operation);
+        assert.deepEqual(f.waits, [1000, 2000], operation);
+        assert.equal(f.warnings.length, 2, operation);
+        assert.equal(f.writes.filter((write) => write.operation === 'unlabel').length, 1, operation);
+    }
+});
+
+test('retrying label removal preserves renewed requests, human handling, and changed descriptions', async () => {
+    for (const change of ['renewed-request', 'human-comment', 'body-edit', 'closed', 'locked', 'already-removed']) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        let deletions = 0;
+        f.github.rest.issues.removeLabel = async () => {
+            deletions++;
+            throw Object.assign(new Error('GitHub unavailable'), { status: 502 });
+        };
+        f.wait = async () => {
+            if (change === 'renewed-request') {
+                f.events.push({
+                    event: 'labeled', label: { name: 'info-needed' }, actor: human, created_at: '2026-11-18T12:06:00Z',
+                });
+            }
+            if (change === 'human-comment') {
+                f.events.push({ event: 'commented', user: human, created_at: '2026-11-18T12:06:00Z' });
+            }
+            if (change === 'body-edit') f.issue.body = 'A newer description.';
+            if (change === 'closed') f.issue.state = 'closed';
+            if (change === 'locked') f.issue.locked = true;
+            if (change === 'already-removed') f.issue.labels = [];
+        };
+        assert.equal((await clearInfoNeededOnEdit(f)).status, 'skipped', change);
+        assert.equal(deletions, 1, change);
+        assert.equal(f.writes.length, 2, change);
+    }
+});
+
+test('a DELETE that completed despite an HTTP 500 is not issued again', async () => {
+    const f = await fixture();
+    await applyModeration({ ...f, output: output('needs-info') });
+    reporterEdit(f);
+    const remove = f.github.rest.issues.removeLabel;
+    let deletions = 0;
+    f.github.rest.issues.removeLabel = async (...args) => {
+        deletions++;
+        await remove(...args);
+        throw Object.assign(new Error('Response lost after deletion'), { status: 500 });
+    };
+    assert.equal((await clearInfoNeededOnEdit(f)).status, 'skipped');
+    assert.equal(deletions, 1);
+    assert.equal(f.warnings.length, 1);
+    assert.equal(f.issue.labels.some((label) => label.name === 'info-needed'), false);
+});
+
+test('cleanup retries only transient server failures and surfaces exhausted errors', async () => {
+    for (const status of [400, 401, 403, 404, 422, 429, 500, 502, 503, 504]) {
+        const f = await fixture();
+        await applyModeration({ ...f, output: output('needs-info') });
+        reporterEdit(f);
+        let calls = 0;
+        const error = Object.assign(new Error('GitHub unavailable'), { status });
+        f.github.rest.issues.removeLabel = async () => { calls++; throw error; };
+        await assert.rejects(clearInfoNeededOnEdit(f), (actual) => actual === error);
+        const transient = [500, 502, 503, 504].includes(status);
+        assert.equal(calls, transient ? 3 : 1, String(status));
+        assert.equal(f.warnings.length, transient ? 2 : 0, String(status));
+        assert.equal(f.writes.length, 2, String(status));
     }
 });
