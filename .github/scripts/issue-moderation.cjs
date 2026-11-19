@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 const { createHash } = require('node:crypto');
+const { setTimeout: delay } = require('node:timers/promises');
 
 const marker = '<!-- gh-aw-workflow-id: issue-moderation -->';
 const triageEvents = new Set([
@@ -155,24 +156,49 @@ async function applyModeration({ github, context, issueNumber, output, snapshot,
     return { status: 'success', reason: action, url: comment.html_url };
 }
 
-/**
- * Treat a nonempty description update by the issue author as an information
- * response, like an author comment. Remove only local info-needed without AI,
- * reopening, or comments. Stale edits and newer human requests take precedence.
- */
-async function clearInfoNeededOnEdit({ github, context }) {
+function indentationWidth(prefix) {
+    let width = 0;
+    for (const character of prefix) width += character === '\t' ? 4 - width % 4 : 1;
+    return width;
+}
+
+function comparableDescription(body) {
+    // Ignore prose blank lines without erasing indentation or blank lines within code.
+    const lines = [];
+    let fence;
+    let indented = false;
+    let blankLines = [];
+    let hasCode = false;
+    for (const line of body.replace(/\r\n?/g, '\n').split('\n')) {
+        if (fence) {
+            lines.push(line);
+            const closing = /^([ \t]*)(`{3,}|~{3,})[ \t]*$/.exec(line);
+            if (closing && indentationWidth(closing[1]) <= fence.indent + 3 &&
+                closing[2][0] === fence.marker[0] && closing[2].length >= fence.marker.length) fence = undefined;
+            continue;
+        }
+        if (!line.trim()) {
+            if (indented) blankLines.push(line);
+            continue;
+        }
+        const codeLine = /^(?: {4}| {0,3}\t)/.test(line);
+        if (codeLine && indented) lines.push(...blankLines);
+        blankLines = [];
+        indented = codeLine;
+        const opening = !indented && /^( {0,3}(?:[-+*]|\d{1,9}[.)])[ \t]+)? {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+        if (opening && (opening[2][0] === '~' || !opening[3].includes('`'))) {
+            fence = { marker: opening[2], indent: indentationWidth(opening[1] ?? '') };
+        }
+        hasCode ||= indented || Boolean(fence);
+        lines.push(line);
+    }
+    const text = lines.join('\n');
+    return hasCode ? text : text.trim();
+}
+
+async function acknowledgeDescriptionEdit({ github, context, body }) {
     const { issue: edited, sender, changes } = context.payload;
     const skip = (reason) => ({ status: 'skipped', reason });
-    if (context.eventName !== 'issues' || context.payload.action !== 'edited' || !changes?.body) {
-        return skip('Only issue-description edits can acknowledge an information response.');
-    }
-    if (!Number.isSafeInteger(sender?.id) || sender.id !== edited?.user?.id || sender.type !== 'User') {
-        return skip('Only the issue author can acknowledge an information response by editing.');
-    }
-    const body = edited.body ?? '';
-    if (!body.trim() || body.trim() === (changes.body.from ?? '').trim()) {
-        return skip('The description has no nonempty content change.');
-    }
     const target = getTarget(context);
     const { data: issue } = await github.rest.issues.get(target);
     if (issue.pull_request || issue.state !== 'open' || issue.locked || issue.user?.id !== sender.id ||
@@ -180,12 +206,37 @@ async function clearInfoNeededOnEdit({ github, context }) {
         return skip('The response is stale or the issue is not awaiting information.');
     }
     const editedAt = Date.parse(edited.updated_at);
+    // Title-only webhooks can include changes.body.from = ""; bind both bodies to real edit history.
+    const { repository } = await github.graphql(`
+        query($owner: String!, $name: String!, $number: Int!) {
+            repository(owner: $owner, name: $name) {
+                issue(number: $number) {
+                    body
+                    userContentEdits(first: 2) {
+                        nodes { diff editedAt deletedAt editor { ... on User { databaseId } } }
+                    }
+                }
+            }
+        }
+    `, { owner: target.owner, name: target.repo, number: target.issue_number });
+    const description = repository?.issue;
+    const [latest, previous] = description?.userContentEdits?.nodes ?? [];
+    // An undeleted empty body has a null diff; deleted revisions must still defer cleanup.
+    const previousBody = previous?.deletedAt === null && previous.diff === null ? '' : previous?.diff;
+    const responseAt = Date.parse(latest?.editedAt);
+    if (!Number.isFinite(editedAt) || !Number.isFinite(responseAt) || responseAt > editedAt ||
+        description?.body !== body || latest?.diff !== body || latest?.editor?.databaseId !== sender.id ||
+        latest?.deletedAt !== null || previous?.deletedAt !== null ||
+        typeof previousBody !== 'string' || previousBody !== (changes.body.from ?? '') ||
+        comparableDescription(body) === comparableDescription(previousBody)) {
+        return skip('A matching description edit could not be verified.');
+    }
     const events = await github.paginate(github.rest.issues.listEventsForTimeline, { ...target, per_page: 100 });
     const label = events.findLast((event) =>
         ['labeled', 'unlabeled'].includes(event.event) && event.label?.name === 'info-needed');
     const labeledAt = Date.parse(label?.created_at);
     if (!Number.isFinite(editedAt) || !Number.isFinite(labeledAt) ||
-        label.event !== 'labeled' || labeledAt >= editedAt) {
+        label.event !== 'labeled' || labeledAt >= responseAt) {
         return skip('The information request does not verifiably precede this response.');
     }
     if (events.some((event) => {
@@ -195,7 +246,7 @@ async function clearInfoNeededOnEdit({ github, context }) {
             time === editedAt && event.rename?.to === edited.title &&
             (!changes.title || event.rename?.from === changes.title.from);
         return (triageEvents.has(event.event) || event.event === 'commented') && !sameEditRename &&
-            isHuman(event.actor ?? event.user) && (!Number.isFinite(time) || time >= editedAt);
+            isHuman(event.actor ?? event.user) && (!Number.isFinite(time) || time >= responseAt);
     })) {
         return skip('Newer human activity takes precedence over this queued response.');
     }
@@ -206,6 +257,36 @@ async function clearInfoNeededOnEdit({ github, context }) {
     }
     await github.rest.issues.removeLabel({ ...target, name: 'info-needed' });
     return { status: 'success', reason: 'The issue author updated the description; local info-needed was removed.' };
+}
+
+/**
+ * Acknowledge a meaningful description response by the issue author, without AI,
+ * reopening, or comments. Preserve code whitespace and stale/newer human decisions.
+ * Log and retry transient GitHub failures at most twice, rechecking all live guards.
+ * core supplies workflow warnings; wait allows the bounded backoff to be tested.
+ */
+async function clearInfoNeededOnEdit({ github, context, core, wait = delay }) {
+    const { issue: edited, sender, changes } = context.payload;
+    const skip = (reason) => ({ status: 'skipped', reason });
+    if (context.eventName !== 'issues' || context.payload.action !== 'edited' || !changes?.body) {
+        return skip('Only issue-description edits can acknowledge an information response.');
+    }
+    if (!Number.isSafeInteger(sender?.id) || sender.id !== edited?.user?.id || sender.type !== 'User') {
+        return skip('Only the issue author can acknowledge an information response by editing.');
+    }
+    const body = edited.body ?? '';
+    if (!body.trim() || comparableDescription(body) === comparableDescription(changes.body.from ?? '')) {
+        return skip('The description has no nonempty content change.');
+    }
+    for (let attempt = 0; ; attempt++) {
+        try {
+            return await acknowledgeDescriptionEdit({ github, context, body });
+        } catch (error) {
+            if (attempt === 2 || ![500, 502, 503, 504].includes(error.status)) throw error;
+            core.warning(`GitHub HTTP ${error.status}; rechecking description cleanup before attempt ${attempt + 2} of 3.`);
+            await wait(1000 * (2 ** attempt));
+        }
+    }
 }
 
 module.exports = { inspectIssue, applyModeration, clearInfoNeededOnEdit };

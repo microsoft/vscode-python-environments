@@ -215,10 +215,17 @@ reports get a friendly template request plus local `info-needed`, without
 re-adding `triage-needed`. The existing seven-day closer and issue-author-reply
 cleanup retain ownership of follow-up. Reporter cleanup works even if central
 triage removes `triage-needed`; pull-request cleanup keeps its previous guard.
-A nonempty description update by the issue author also clears local
-`info-needed`, without AI, a new comment, or reopening. Title-only, whitespace,
-and empty-body changes do not count as responses. Queued edits defer to newer
-information requests or human activity rather than clearing a renewed request.
+A meaningful description update by the issue author also clears local
+`info-needed`, without AI, a new comment, or reopening. GitHub's body history must
+match the response's before/after descriptions and editor; `changes.body` alone
+is not proof of an edit because title-only webhooks can include an empty previous
+body.
+The actual body-edit timestamp, which can precede webhook `updated_at`, must
+follow the information request. Missing or deleted edit history defers cleanup.
+Title-only, empty-body, line-ending, and prose blank-line changes do not count as
+responses. Whitespace inside fenced or indented code is preserved so code corrections
+still count. Queued edits defer to newer information requests or human activity
+rather than clearing a renewed request.
 
 Clear junk gets a fixed polite reply and closure as `not_planned`, without
 adding/removing `~spam`. A prior workflow reply prevents duplicate publication
@@ -239,7 +246,10 @@ possible template labels, rather than guessing their provenance from timestamps.
 A trusted pre-inference fingerprint is independently downloaded by the
 write-enabled job and checked against live content. The agent's copy is not
 trusted for publication. Threat detection must pass before writes. API errors
-are explicit; a partial failure after a reply requires maintainer inspection
+are explicit. Description-response cleanup retries HTTP 500/502/503/504 at most
+twice, with one- and two-second backoff and all live safeguards rechecked before
+each attempt; exhausted failures still fail the job. A partial failure after a
+reply requires maintainer inspection
 rather than a blind duplicate attempt. GitHub API reads and writes are not
 atomic, so a small read/write race remains. Staged mode previews every action
 without changing issues when configured; this committed workflow exposes no

@@ -87,6 +87,6 @@ jobs:
           script: |
             const path = require('node:path');
             const { clearInfoNeededOnEdit } = require(path.resolve('.github', 'scripts', 'issue-moderation.cjs'));
-            const result = await clearInfoNeededOnEdit({ github, context });
+            const result = await clearInfoNeededOnEdit({ github, context, core });
             core.info(result.reason);
             await core.summary.addRaw(result.reason).write();
