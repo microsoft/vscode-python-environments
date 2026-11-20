@@ -67,6 +67,7 @@ function getIconPath(i: IconPath | undefined): QuickPickIcon {
 interface EnvironmentPickOptions {
     recommended?: PythonEnvironment;
     showBackButton?: boolean;
+    showCreateEnvironment?: boolean;
     projects: PythonProject[];
 }
 
@@ -106,7 +107,7 @@ async function buildEnvironmentPickItems(
         },
     ];
 
-    if (getWorkspaceFolders()?.length) {
+    if (options.showCreateEnvironment !== false && getWorkspaceFolders()?.length) {
         items.push(
             {
                 label: '',
@@ -348,7 +349,9 @@ async function pickEnvironmentImpl(
     });
 
     if (selected && !Array.isArray(selected)) {
-        if (selected.label === Interpreter.browsePath) {
+        if ('result' in selected) {
+            return selected.result;
+        } else if (selected.label === Interpreter.browsePath) {
             return browseForPython(managers, projectEnvManagers);
         } else if (selected.label === Interpreter.enterInterpreterPath) {
             return enterPythonPath(managers, projectEnvManagers);
@@ -359,7 +362,6 @@ async function pickEnvironmentImpl(
             });
             return createEnvironment(managers, projectEnvManagers, options);
         }
-        return (selected as { result: PythonEnvironment })?.result;
     }
     return undefined;
 }
