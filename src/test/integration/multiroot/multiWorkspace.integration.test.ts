@@ -19,6 +19,7 @@
  */
 
 import * as assert from 'assert';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { PythonEnvironment, PythonEnvironmentApi } from '../../../api';
 import { ENVS_EXTENSION_ID } from '../../constants';
@@ -160,6 +161,58 @@ suite('Integration: Multi-Root Workspace', function () {
         assert.ok('key' in inspect2, 'Inspection should have key property');
         assert.strictEqual(inspect1.key, 'python-envs.pythonProjects', 'Key should be python-envs.pythonProjects');
         assert.strictEqual(inspect2.key, 'python-envs.pythonProjects', 'Key should be python-envs.pythonProjects');
+    });
+
+    test('getAllExtraSearchPaths resolves folder settings against their owning roots', async function () {
+        const workspaceFolders = vscode.workspace.workspaceFolders!;
+        const firstFolder = workspaceFolders[0];
+        const secondFolder = workspaceFolders[1];
+        const firstConfig = vscode.workspace.getConfiguration('python-envs', firstFolder.uri);
+        const secondConfig = vscode.workspace.getConfiguration('python-envs', secondFolder.uri);
+
+        const originalFirstFolderValue =
+            firstConfig.inspect<string[]>('workspaceSearchPaths')?.workspaceFolderValue;
+        const originalSecondFolderValue =
+            secondConfig.inspect<string[]>('workspaceSearchPaths')?.workspaceFolderValue;
+
+        const firstRelativePath = '.api-first-root-envs';
+        const secondRelativePath = '.api-second-root-envs';
+        const normalize = (value: string) => value.replace(/\\/g, '/');
+
+        try {
+            await firstConfig.update(
+                'workspaceSearchPaths',
+                [firstRelativePath],
+                vscode.ConfigurationTarget.WorkspaceFolder,
+            );
+            await secondConfig.update(
+                'workspaceSearchPaths',
+                [secondRelativePath],
+                vscode.ConfigurationTarget.WorkspaceFolder,
+            );
+
+            const result = await api.getAllExtraSearchPaths();
+            const expectedFirst = normalize(path.resolve(firstFolder.uri.fsPath, firstRelativePath));
+            const expectedSecond = normalize(path.resolve(secondFolder.uri.fsPath, secondRelativePath));
+            const wrongFirstRoot = normalize(path.resolve(secondFolder.uri.fsPath, firstRelativePath));
+            const wrongSecondRoot = normalize(path.resolve(firstFolder.uri.fsPath, secondRelativePath));
+
+            assert.ok(result.includes(expectedFirst), 'First folder path should resolve against the first root');
+            assert.ok(result.includes(expectedSecond), 'Second folder path should resolve against the second root');
+            assert.ok(!result.includes(wrongFirstRoot), 'First folder path should not resolve against the second root');
+            assert.ok(!result.includes(wrongSecondRoot), 'Second folder path should not resolve against the first root');
+        } finally {
+            await secondConfig.update(
+                'workspaceSearchPaths',
+                originalSecondFolderValue,
+                vscode.ConfigurationTarget.WorkspaceFolder,
+            );
+            await firstConfig.update(
+                'workspaceSearchPaths',
+                originalFirstFolderValue,
+                vscode.ConfigurationTarget.WorkspaceFolder,
+            );
+        }
     });
 
     /**
