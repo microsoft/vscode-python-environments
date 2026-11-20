@@ -3,6 +3,7 @@ import assert from 'assert';
 import * as sinon from 'sinon';
 import { Uri } from 'vscode';
 import { PythonEnvironmentApi } from '../../../api';
+import { CONDA_MANAGER_ID } from '../../../common/constants';
 import * as logging from '../../../common/logging';
 import { EventNames } from '../../../common/telemetry/constants';
 import * as telemetrySender from '../../../common/telemetry/sender';
@@ -13,8 +14,10 @@ import { NativePythonFinder } from '../../../managers/common/nativePythonFinder'
 import { CondaEnvManager } from '../../../managers/conda/condaEnvManager';
 import * as condaSourcingUtils from '../../../managers/conda/condaSourcingUtils';
 import * as condaUtils from '../../../managers/conda/condaUtils';
-import { makeMockCondaEnvironment as makeEnv } from '../../mocks/pythonEnvironment';
-import { CONDA_MANAGER_ID } from '../../../common/constants';
+import {
+    makeMockCondaEnvironment as makeEnv,
+    makeMockCondaEnvironmentWithoutPython as makeNoPythonEnv,
+} from '../../mocks/pythonEnvironment';
 
 /**
  * Tests for the lazy-registration flow on CondaEnvManager.initialize().
@@ -107,7 +110,7 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
     test('does not use a no-Python base as the implicit global fallback', async () => {
         getCondaStub.resolves('/usr/bin/conda');
         constructSourcingStub.resolves({ toString: () => '' } as any);
-        const base = makeEnv('base', Uri.file('/opt/miniconda3').fsPath, 'no-python');
+        const base = makeNoPythonEnv('base', Uri.file('/opt/miniconda3').fsPath);
         refreshCondaEnvsStub.resolves([base]);
 
         const mgr = createManager();
@@ -132,7 +135,7 @@ suite('CondaEnvManager.initialize - lazy registration flow', () => {
         getCondaStub.resolves('/usr/bin/conda');
         constructSourcingStub.resolves({ toString: () => '' } as any);
         const basePath = Uri.file('/opt/miniconda3').fsPath;
-        const base = makeEnv('base', basePath, 'no-python');
+        const base = makeNoPythonEnv('base', basePath);
         refreshCondaEnvsStub.resolves([base]);
         getCondaForGlobalStub.resolves(basePath);
 
