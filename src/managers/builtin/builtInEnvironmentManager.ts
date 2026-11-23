@@ -822,6 +822,7 @@ export class BuiltInEnvironmentManager implements EnvironmentManager {
             : this.baseManager.getEnvironments('global'));
         await this.loadGlobalEnv(globals);
 
+        const previousEnvs = new Map(this.fsPathToEnv);
         this.fsPathToEnv.forEach((_env, key) => {
             if (isCurrent(key)) {
                 this.fsPathToEnv.delete(key);
@@ -890,6 +891,16 @@ export class BuiltInEnvironmentManager implements EnvironmentManager {
                     ) ?? projectEnvs[0];
                 if (found) {
                     this.fsPathToEnv.set(normalizedPath, found);
+                    // A venv created in the project after the last refresh replaces the global fallback
+                    // that get() returned so far, so consumers have to be told.
+                    const previousEnv = previousEnvs.get(normalizedPath) ?? this.globalEnv;
+                    if (previousEnv?.envId.id !== found.envId.id) {
+                        events.push(() => {
+                            if (isCurrent(normalizedPath)) {
+                                this._onDidChangeEnvironment.fire({ uri: project.uri, old: previousEnv, new: found });
+                            }
+                        });
+                    }
                 }
             }
         }

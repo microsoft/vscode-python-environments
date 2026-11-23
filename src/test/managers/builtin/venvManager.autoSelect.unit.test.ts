@@ -5,7 +5,13 @@ import assert from 'assert';
 import * as path from 'path';
 import * as sinon from 'sinon';
 import { LogOutputChannel, Uri } from 'vscode';
-import { EnvironmentManager, PythonEnvironment, PythonEnvironmentApi, PythonProject } from '../../../api';
+import {
+    DidChangeEnvironmentEventArgs,
+    EnvironmentManager,
+    PythonEnvironment,
+    PythonEnvironmentApi,
+    PythonProject,
+} from '../../../api';
 import { VENV_MANAGER_ID } from '../../../common/constants';
 import { normalizePath } from '../../../common/utils/pathUtils';
 import * as windowApis from '../../../common/window.apis';
@@ -101,5 +107,33 @@ suite('VenvManager auto-selection for a project', () => {
         const manager = await createManager();
 
         assert.strictEqual((await manager.get(projectUri))?.envId.id, brokenRoot.envId.id);
+    });
+
+    test('fires onDidChangeEnvironment when a refresh finds a venv created in the project', async () => {
+        const rootVenv = makeVenv(venvIn(), '3.12.14');
+        const find = sinon.stub(venvUtils, 'findVirtualEnvironments').resolves([]);
+        const manager = await createManager();
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        manager.onDidChangeEnvironment((e) => events.push(e));
+
+        find.resolves([rootVenv]);
+        await manager.refresh(undefined);
+
+        assert.strictEqual(events.length, 1);
+        assert.strictEqual(events[0].uri?.fsPath, projectUri.fsPath);
+        assert.strictEqual(events[0].new?.envId.id, rootVenv.envId.id);
+        assert.strictEqual((await manager.get(projectUri))?.envId.id, rootVenv.envId.id);
+    });
+
+    test('does not fire onDidChangeEnvironment when a refresh finds the same venv again', async () => {
+        const rootVenv = makeVenv(venvIn(), '3.12.14');
+        sinon.stub(venvUtils, 'findVirtualEnvironments').resolves([rootVenv]);
+        const manager = await createManager();
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        manager.onDidChangeEnvironment((e) => events.push(e));
+
+        await manager.refresh(undefined);
+
+        assert.strictEqual(events.length, 0);
     });
 });
