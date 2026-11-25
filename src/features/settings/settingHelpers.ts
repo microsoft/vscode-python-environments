@@ -1,10 +1,12 @@
 import * as path from 'path';
 import { ConfigurationScope, ConfigurationTarget, Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
 import { PythonProject } from '../../api';
+import { executeCommand } from '../../common/command.api';
 import {
     DEFAULT_ENV_MANAGER_ID,
     DEFAULT_PACKAGE_MANAGER_ID,
     INLINE_SCRIPT_MANAGER_ID,
+    PYTHON_ENVIRONMENTS_ENABLED_CONTEXT_KEY,
     SYSTEM_MANAGER_ID,
 } from '../../common/constants';
 import { traceError, traceInfo, traceVerbose, traceWarn } from '../../common/logging';
@@ -1010,6 +1012,19 @@ export function isEnvironmentsExtensionEnabled(): boolean {
     return scopes.some(
         (scope) => getSettingWorkspaceScope<boolean>('python', 'useEnvironmentsExtension', scope) !== false,
     );
+}
+
+/**
+ * Publishes whether the Python Environments extension is enabled for contribution visibility.
+ *
+ * @param enabled - The activation decision to expose through the VS Code context key.
+ */
+export async function setEnvironmentsExtensionEnabledContext(enabled: boolean): Promise<void> {
+    try {
+        await executeCommand('setContext', PYTHON_ENVIRONMENTS_ENABLED_CONTEXT_KEY, enabled);
+    } catch (err) {
+        traceError(`Failed to set the Python Environments enabled context to ${enabled}`, err);
+    }
 }
 
 /**

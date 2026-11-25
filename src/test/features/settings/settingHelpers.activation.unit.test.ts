@@ -4,8 +4,14 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import { Uri, WorkspaceConfiguration, WorkspaceFolder } from 'vscode';
+import * as commandApis from '../../../common/command.api';
+import { PYTHON_ENVIRONMENTS_ENABLED_CONTEXT_KEY } from '../../../common/constants';
+import * as logging from '../../../common/logging';
 import * as workspaceApis from '../../../common/workspace.apis';
-import { isEnvironmentsExtensionEnabled } from '../../../features/settings/settingHelpers';
+import {
+    isEnvironmentsExtensionEnabled,
+    setEnvironmentsExtensionEnabledContext,
+} from '../../../features/settings/settingHelpers';
 
 type SettingInspection = {
     defaultValue?: boolean;
@@ -31,6 +37,16 @@ function createWorkspaceFolder(name: string, index: number): WorkspaceFolder {
 suite('isEnvironmentsExtensionEnabled', () => {
     teardown(() => {
         sinon.restore();
+    });
+
+    test('enables when the setting is not registered', () => {
+        sinon.stub(workspaceApis, 'getWorkspaceFolders').returns(undefined);
+        sinon
+            .stub(workspaceApis, 'getConfiguration')
+            .withArgs('python', undefined)
+            .returns(createConfiguration(undefined));
+
+        assert.strictEqual(isEnvironmentsExtensionEnabled(), true);
     });
 
     test('ignores a contributed default when no value is explicitly configured', () => {
@@ -99,5 +115,36 @@ suite('isEnvironmentsExtensionEnabled', () => {
             .returns(createConfiguration({ workspaceValue: false, workspaceFolderValue: true }));
 
         assert.strictEqual(isEnvironmentsExtensionEnabled(), true);
+    });
+
+    test('publishes enabled and disabled decisions to the contribution context', async () => {
+        const executeCommand = sinon.stub(commandApis, 'executeCommand').resolves(undefined);
+
+        await setEnvironmentsExtensionEnabledContext(true);
+        await setEnvironmentsExtensionEnabledContext(false);
+
+        assert.deepStrictEqual(executeCommand.firstCall.args, [
+            'setContext',
+            PYTHON_ENVIRONMENTS_ENABLED_CONTEXT_KEY,
+            true,
+        ]);
+        assert.deepStrictEqual(executeCommand.secondCall.args, [
+            'setContext',
+            PYTHON_ENVIRONMENTS_ENABLED_CONTEXT_KEY,
+            false,
+        ]);
+    });
+
+    test('logs context publication failures without rejecting activation', async () => {
+        const error = new Error('setContext failed');
+        sinon.stub(commandApis, 'executeCommand').rejects(error);
+        const traceError = sinon.stub(logging, 'traceError');
+
+        await setEnvironmentsExtensionEnabledContext(true);
+
+        assert.deepStrictEqual(traceError.firstCall.args, [
+            'Failed to set the Python Environments enabled context to true',
+            error,
+        ]);
     });
 });

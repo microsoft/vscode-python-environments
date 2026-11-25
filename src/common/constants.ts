@@ -1,6 +1,7 @@
 import * as path from 'path';
 
 export const ENVS_EXTENSION_ID = 'ms-python.vscode-python-envs';
+export const PYTHON_ENVIRONMENTS_ENABLED_CONTEXT_KEY = 'pythonEnvs.enabled';
 export const PYTHON_EXTENSION_ID = 'ms-python.python';
 export const PYLANCE_EXTENSION_ID = 'ms-python.vscode-pylance';
 
