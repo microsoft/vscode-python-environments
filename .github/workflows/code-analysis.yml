@@ -28,7 +28,7 @@ jobs:
       - name: Install analysis dependencies
         working-directory: analysis
         run: |
-          uv pip install --system .
+          uv pip install --system radon pathspec
 
       - name: Generate snapshot
         run: |
