@@ -38,7 +38,7 @@ parameters:
   - name: publishExtension
     displayName: 🚀 Publish Extension
     type: boolean
-    default: true
+    default: false
 
   - name: buildPlatforms
     type: object
