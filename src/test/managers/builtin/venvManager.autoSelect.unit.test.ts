@@ -12,7 +12,7 @@ import {
     PythonEnvironmentApi,
     PythonProject,
 } from '../../../api';
-import { VENV_MANAGER_ID } from '../../../common/constants';
+import { SYSTEM_MANAGER_ID, VENV_MANAGER_ID } from '../../../common/constants';
 import { normalizePath } from '../../../common/utils/pathUtils';
 import * as windowApis from '../../../common/window.apis';
 import { BuiltInEnvironmentManager } from '../../../managers/builtin/builtInEnvironmentManager';
@@ -30,9 +30,9 @@ suite('VenvManager auto-selection for a project', () => {
         return Uri.file(path.join(projectUri.fsPath, ...segments, '.venv')).fsPath;
     }
 
-    function makeVenv(prefix: string, version: string): PythonEnvironment {
+    function makeVenv(prefix: string, version: string, id = prefix): PythonEnvironment {
         return createMockPythonEnvironment({
-            id: prefix,
+            id,
             name: '.venv',
             envPath: path.join(prefix, bin, 'python'),
             sysPrefix: prefix,
@@ -41,7 +41,20 @@ suite('VenvManager auto-selection for a project', () => {
         });
     }
 
-    async function createManager(): Promise<BuiltInEnvironmentManager> {
+    function makeGlobal(prefix: string, version: string): PythonEnvironment {
+        return createMockPythonEnvironment({
+            id: prefix,
+            name: 'python',
+            envPath: path.join(prefix, 'python'),
+            sysPrefix: prefix,
+            version,
+            managerId: SYSTEM_MANAGER_ID,
+        });
+    }
+
+    async function createManager(
+        getGlobals: sinon.SinonStub = sinon.stub().resolves([]),
+    ): Promise<BuiltInEnvironmentManager> {
         const project = { name: 'project', uri: projectUri } as PythonProject;
         const projectRoot = normalizePath(projectUri.fsPath);
         const api = {
@@ -51,7 +64,7 @@ suite('VenvManager auto-selection for a project', () => {
             },
             getPythonProjects: () => [project],
         } as unknown as PythonEnvironmentApi;
-        const baseManager = { getEnvironments: sinon.stub().resolves([]) } as unknown as EnvironmentManager;
+        const baseManager = { getEnvironments: getGlobals } as unknown as EnvironmentManager;
         const log = { info: sinon.stub(), warn: sinon.stub(), error: sinon.stub() } as unknown as LogOutputChannel;
         const manager = new BuiltInEnvironmentManager(
             {} as NativePythonFinder,
@@ -125,13 +138,35 @@ suite('VenvManager auto-selection for a project', () => {
         assert.strictEqual((await manager.get(projectUri))?.envId.id, rootVenv.envId.id);
     });
 
-    test('does not fire onDidChangeEnvironment when a refresh finds the same venv again', async () => {
+    test('reports the global fallback from before the refresh as the old environment', async () => {
+        const oldGlobal = makeGlobal(path.resolve('python312'), '3.12.14');
+        const newGlobal = makeGlobal(path.resolve('python313'), '3.13.15');
         const rootVenv = makeVenv(venvIn(), '3.12.14');
-        sinon.stub(venvUtils, 'findVirtualEnvironments').resolves([rootVenv]);
+        const getGlobals = sinon.stub().resolves([oldGlobal]);
+        const find = sinon.stub(venvUtils, 'findVirtualEnvironments').resolves([]);
+        const manager = await createManager(getGlobals);
+        const events: DidChangeEnvironmentEventArgs[] = [];
+        manager.onDidChangeEnvironment((e) => events.push(e));
+
+        getGlobals.resolves([oldGlobal, newGlobal]);
+        find.resolves([rootVenv]);
+        await manager.refresh(undefined);
+
+        assert.strictEqual(events.length, 1);
+        assert.strictEqual(events[0].old?.envId.id, oldGlobal.envId.id);
+        assert.strictEqual(events[0].new?.envId.id, rootVenv.envId.id);
+    });
+
+    test('does not fire onDidChangeEnvironment when a refresh finds the same venv again', async () => {
+        const find = sinon
+            .stub(venvUtils, 'findVirtualEnvironments')
+            .resolves([makeVenv(venvIn(), '3.12.14', 'first')]);
         const manager = await createManager();
         const events: DidChangeEnvironmentEventArgs[] = [];
         manager.onDidChangeEnvironment((e) => events.push(e));
 
+        // Discovery creates a new item with a new id for the same interpreter.
+        find.resolves([makeVenv(venvIn(), '3.12.14', 'second')]);
         await manager.refresh(undefined);
 
         assert.strictEqual(events.length, 0);

@@ -75,6 +75,18 @@ import {
     setVenvForWorkspaces,
 } from './venvUtils';
 
+/**
+ * Discovery creates new environment items with random ids on every refresh, so compare what
+ * identifies the interpreter instead.
+ */
+function isSameInterpreter(a: PythonEnvironment | undefined, b: PythonEnvironment): boolean {
+    return (
+        a?.envId.managerId === b.envId.managerId &&
+        normalizePath(a.environmentPath.fsPath) === normalizePath(b.environmentPath.fsPath) &&
+        a.version === b.version
+    );
+}
+
 export class BuiltInEnvironmentManager implements EnvironmentManager {
     readonly capabilities: Capabilities<EnvironmentManagerCapability> = {
         [EnvironmentCapability.List]: supportedCapability,
@@ -820,9 +832,10 @@ export class BuiltInEnvironmentManager implements EnvironmentManager {
         const globals = await (toolExecution && tools?.getEnvironments
             ? tools.getEnvironments('global')
             : this.baseManager.getEnvironments('global'));
+        const previousGlobalEnv = this.globalEnv;
         await this.loadGlobalEnv(globals);
 
-        const previousEnvs = new Map(this.fsPathToEnv);
+        const previousProjectEnvs = new Map(this.fsPathToEnv);
         this.fsPathToEnv.forEach((_env, key) => {
             if (isCurrent(key)) {
                 this.fsPathToEnv.delete(key);
@@ -892,9 +905,9 @@ export class BuiltInEnvironmentManager implements EnvironmentManager {
                 if (found) {
                     this.fsPathToEnv.set(normalizedPath, found);
                     // A venv created in the project after the last refresh replaces the global fallback
-                    // that get() returned so far, so consumers have to be told.
-                    const previousEnv = previousEnvs.get(normalizedPath) ?? this.globalEnv;
-                    if (previousEnv?.envId.id !== found.envId.id) {
+                    // that get() returned so far, so consumers have to be notified.
+                    const previousEnv = previousProjectEnvs.get(normalizedPath) ?? previousGlobalEnv;
+                    if (!isSameInterpreter(previousEnv, found)) {
                         events.push(() => {
                             if (isCurrent(normalizedPath)) {
                                 this._onDidChangeEnvironment.fire({ uri: project.uri, old: previousEnv, new: found });
