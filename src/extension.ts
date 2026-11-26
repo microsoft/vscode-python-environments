@@ -141,6 +141,14 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
     }
     const start = new StopWatch();
 
+    // Publish the enabled state as a context key for the `when` clauses in package.json.
+    // The clauses cannot rely on the setting alone: `config.python.useEnvironmentsExtension`
+    // is unregistered (undefined) without the Python extension, and a `!= false` comparison
+    // is evaluated as a truthiness check, so an unset setting would hide the UI of an
+    // extension that did activate. The clauses OR this key with the raw setting value so
+    // commands stay visible before activation when the setting is explicitly `true`.
+    await commands.executeCommand('setContext', 'pythonEnvs.enabled', true);
+
     // Logging should be set up before anything else.
     const outputChannel: LogOutputChannel = createLogOutputChannel('Python Environments');
     context.subscriptions.push(outputChannel, registerLogger(outputChannel));
