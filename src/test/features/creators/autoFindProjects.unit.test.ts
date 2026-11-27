@@ -38,6 +38,81 @@ suite('Auto Find Project tests', () => {
         sinon.restore();
     });
 
+    test('findNewProjects returns nothing and does not notify when no markers exist', async () => {
+        findFilesStub.resolves([]);
+
+        const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+        assert.deepStrictEqual(await autoFindProjects.findNewProjects(), []);
+        assert.ok(showErrorMessageStub.notCalled);
+        assert.ok(showWarningMessageStub.notCalled);
+        assert.ok(showQuickPickWithButtonsStub.notCalled);
+    });
+
+    test('findNewProjects lists unregistered directories without prompting', async () => {
+        findFilesStub.resolves([
+            Uri.file('/usr/home/root/a/pyproject.toml'),
+            Uri.file('/usr/home/root/a/setup.py'),
+            Uri.file('/usr/home/root/b/pyproject.toml'),
+        ]);
+        projectManager
+            .setup((pm) => pm.get(typmoq.It.isAny()))
+            .returns((uri) => {
+                if (path.basename(path.dirname(uri.fsPath)) === 'b') {
+                    return { name: 'b', uri: Uri.file('/usr/home/root/b') };
+                }
+                return undefined;
+            });
+
+        const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+        const found = await autoFindProjects.findNewProjects();
+
+        assert.deepStrictEqual(
+            found.map((project) => project.label),
+            ['a'],
+        );
+        assert.strictEqual(found[0].uri.fsPath, Uri.file('/usr/home/root/a').fsPath);
+        assert.ok(showErrorMessageStub.notCalled);
+        assert.ok(showQuickPickWithButtonsStub.notCalled);
+    });
+
+    test('findNewProjects excludes markers inside a selected environment', async () => {
+        const root = Uri.file(path.join(path.parse(process.cwd()).root, 'usr', 'home', 'root')).fsPath;
+        const envPrefix = path.join(root, 'custom-env');
+        getWorkspaceFoldersStub.returns([{ uri: Uri.file(root), name: 'root', index: 0 }]);
+        envManagers
+            .setup((em) => em.getEnvironment(typmoq.It.isAny()))
+            .returns(
+                async () =>
+                    ({ sysPrefix: envPrefix, envId: { id: envPrefix, managerId: VENV_MANAGER_ID } }) as never,
+            );
+        findFilesStub.resolves([
+            Uri.file(path.join(root, 'app', 'pyproject.toml')),
+            Uri.file(path.join(envPrefix, 'lib', 'pkg', 'setup.py')),
+        ]);
+        projectManager.setup((pm) => pm.get(typmoq.It.isAny())).returns(() => undefined);
+
+        const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+        assert.deepStrictEqual(
+            (await autoFindProjects.findNewProjects()).map((project) => project.label),
+            ['app'],
+        );
+        assert.ok(showQuickPickWithButtonsStub.notCalled);
+    });
+
+    test('addDiscoveredProjects registers the selected directories', async () => {
+        const uri = Uri.file('/usr/home/root/app');
+        projectManager.setup((pm) => pm.add(typmoq.It.isAny())).returns(() => Promise.resolve());
+
+        const autoFindProjects = new AutoFindProjects(projectManager.object, envManagers.object);
+        const added = autoFindProjects.addDiscoveredProjects([uri]);
+
+        assert.deepStrictEqual(
+            added.map((project) => ({ name: project.name, fsPath: project.uri.fsPath })),
+            [{ name: 'app', fsPath: uri.fsPath }],
+        );
+        projectManager.verify((pm) => pm.add(typmoq.It.isAny()), typmoq.Times.once());
+    });
+
     test('No projects found', async () => {
         findFilesStub.resolves([]);
 

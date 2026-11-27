@@ -12,11 +12,13 @@ import {
 } from '../projectManager';
 import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
 
-function getUniqueUri(uris: Uri[]): {
-    label: string;
-    description: string;
-    uri: Uri;
-}[] {
+export interface DiscoveredProject {
+    readonly label: string;
+    readonly description: string;
+    readonly uri: Uri;
+}
+
+function getUniqueUri(uris: Uri[]): DiscoveredProject[] {
     const files = uris.map((uri) => uri.fsPath).sort();
     const dirs: Map<string, string> = new Map();
     files.forEach((file) => {
@@ -33,6 +35,21 @@ function getUniqueUri(uris: Uri[]): {
             uri: Uri.file(dir),
         }))
         .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * A marker is already registered when its path, or the directory that contains it,
+ * is the project the manager resolves for that file.
+ */
+function isAlreadyRegistered(pm: PythonProjectManager, uri: Uri): boolean {
+    const project = pm.get(uri);
+    if (!project) {
+        return false;
+    }
+    const registeredPath = normalizePath(project.uri.fsPath);
+    const markerPath = normalizePath(uri.fsPath);
+    const markerDirectory = path.dirname(markerPath);
+    return registeredPath === markerPath || registeredPath === markerDirectory;
 }
 
 async function pickProjects(uris: Uri[]): Promise<Uri[] | undefined> {
@@ -90,43 +107,59 @@ export class AutoFindProjects implements PythonProjectCreator {
         return prefixes.filter((prefix): prefix is string => !!prefix);
     }
 
-    async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
+    /**
+     * Marker files Auto Find would consider, excluding those inside a selected environment.
+     * Does not prompt or notify.
+     */
+    private async discoverMarkerFiles(): Promise<Uri[]> {
         const found = await findFiles('**/{pyproject.toml,setup.py}', '**/.venv/**');
         // Exclude markers inside selected environments (e.g. installed packages in a custom-named venv).
         const folders = found && found.length > 0 ? getWorkspaceFolders() ?? [] : [];
         const prefixes = await this.getSelectedEnvironmentPrefixes(folders);
-        const files = found?.filter(
-            (uri) =>
-                !prefixes.some(
-                    (prefix) =>
-                        isSameOrParentPath(prefix, uri.fsPath) &&
-                        !folders.some(
-                            (folder) =>
-                                isSameOrParentPath(prefix, folder.uri.fsPath) &&
-                                isSameOrParentPath(folder.uri.fsPath, uri.fsPath),
-                        ),
-                ),
+        return (
+            found?.filter(
+                (uri) =>
+                    !prefixes.some(
+                        (prefix) =>
+                            isSameOrParentPath(prefix, uri.fsPath) &&
+                            !folders.some(
+                                (folder) =>
+                                    isSameOrParentPath(prefix, folder.uri.fsPath) &&
+                                    isSameOrParentPath(folder.uri.fsPath, uri.fsPath),
+                            ),
+                    ),
+            ) ?? []
         );
-        if (!files || files.length === 0) {
+    }
+
+    /**
+     * Project directories that are not already registered.
+     * Does not prompt or notify, including when nothing is found.
+     */
+    async findNewProjects(): Promise<DiscoveredProject[]> {
+        const files = await this.discoverMarkerFiles();
+        return getUniqueUri(files.filter((uri) => !isAlreadyRegistered(this.pm, uri)));
+    }
+
+    /**
+     * Registers project directories previously returned by {@link findNewProjects}.
+     */
+    addDiscoveredProjects(uris: readonly Uri[]): PythonProject[] {
+        const projects = uris.map((uri) => new PythonProjectsImpl(path.basename(uri.fsPath), uri)) as PythonProject[];
+        this.pm.add(projects);
+        return projects;
+    }
+
+    async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
+        const files = await this.discoverMarkerFiles();
+        if (files.length === 0) {
             setImmediate(() => {
-                showErrorMessage('No projects found');
+                showErrorMessage(ProjectCreatorString.noProjectsFound);
             });
             return;
         }
 
-        const filtered = files.filter((uri) => {
-            const p = this.pm.get(uri);
-            if (p) {
-                // Skip this project if:
-                // 1. There's already a project registered with exactly the same path
-                // 2. There's already a project registered with this project's parent directory path
-                const np = normalizePath(p.uri.fsPath);
-                const nf = normalizePath(uri.fsPath);
-                const nfp = path.dirname(nf);
-                return np !== nf && np !== nfp;
-            }
-            return true;
-        });
+        const filtered = files.filter((uri) => !isAlreadyRegistered(this.pm, uri));
 
         if (filtered.length === 0) {
             // No new projects found that are not already in the project manager
@@ -153,11 +186,6 @@ export class AutoFindProjects implements PythonProjectCreator {
             traceInfo('User cancelled project selection.');
             return;
         }
-        const projects = projectUris.map(
-            (uri) => new PythonProjectsImpl(path.basename(uri.fsPath), uri),
-        ) as PythonProject[];
-        // Add the projects to the project manager
-        this.pm.add(projects);
-        return projects;
+        return this.addDiscoveredProjects(projectUris);
     }
 }

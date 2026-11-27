@@ -113,7 +113,7 @@ There are a few ways to add a Python Project from the Python Environments panel:
 | Name         | Description                                                            |
 | ------------ | ---------------------------------------------------------------------- |
 | Add Existing | Allows you to add an existing folder from the file explorer.           |
-| Auto find    | Searches for folders that contain `pyproject.toml` or `setup.py` files |
+| Discovered projects | Folders with `pyproject.toml` or `setup.py` are listed in the add-project picker when any are found. |
 | Create New   | Creates a new project from a template.                                 |
 
 #### Create New Project from Template
