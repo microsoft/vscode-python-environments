@@ -75,11 +75,12 @@ Use this to scaffold a brand new Python project with the correct structure and f
 2. Run **Python Envs: Create New Project from Template**.
 3. Choose a template type:
    - **Package**: A structured Python package with `pyproject.toml`, tests folder, and package directory
+   - **FastAPI**: A FastAPI web API with `pyproject.toml`, an application module, and tests
    - **Script**: A simple standalone Python file using PEP 723 inline metadata
 4. Enter a name for your project.
-5. If you're creating a package, choose whether to create a virtual environment.
+5. If you're creating a package or a FastAPI project, choose whether to create a virtual environment.
 
-The extension creates the project structure and adds it to your workspace. For packages, it can also create a virtual environment.
+The extension creates the project structure and adds it to your workspace. For packages and FastAPI projects, it can also create a virtual environment.
 
 #### Package template structure
 
@@ -94,6 +95,24 @@ my_package_project/
 └── tests/                  # Test directory
     └── __init__.py
 ```
+
+#### FastAPI template structure
+
+When you create a FastAPI project named `my_api`, the extension generates:
+
+```
+my_api_project/
+├── pyproject.toml          # Project metadata, FastAPI, and Uvicorn
+├── dev-requirements.txt    # Development dependencies, including pytest and httpx
+├── my_api/                 # Application package
+│   ├── __init__.py
+│   ├── main.py             # FastAPI app
+│   └── __main__.py         # `python -m my_api` runs Uvicorn
+└── tests/
+    └── test_my_api.py
+```
+
+The workspace `launch.json` gains a **Python: FastAPI (my_api)** configuration that debugs `uvicorn my_api.main:app`.
 
 #### Script template
 

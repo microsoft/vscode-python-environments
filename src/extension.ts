@@ -10,7 +10,7 @@ import {
     Uri,
     window,
 } from 'vscode';
-import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi, PythonProjectCreator } from './api';
+import { PackageManagementOptions, PythonEnvironment, PythonEnvironmentApi } from './api';
 import { ENVS_EXTENSION_ID } from './common/constants';
 import { ensureCorrectVersion } from './common/extVersion';
 import { InlineScriptPackagesNotManagedError } from './common/inlineScript/errors';
@@ -42,10 +42,11 @@ import { getPythonApi, setPythonApi } from './extensionApi';
 import { createManagerReady } from './features/common/managerReady';
 import { AutoFindProjects } from './features/creators/autoFindProjects';
 import { ExistingProjects } from './features/creators/existingProjects';
+import { NewFastApiProject } from './features/creators/newFastApiProject';
 import { NewPackageProject } from './features/creators/newPackageProject';
 import { NewScriptProject } from './features/creators/newScriptProject';
 import type { ProjectCreators } from './features/creators/projectCreators';
-import { ProjectCreatorsImpl } from './features/creators/projectCreators';
+import { creatorNameForQuickCreateProjectType, ProjectCreatorsImpl } from './features/creators/projectCreators';
 import {
     addPythonProjectCommand,
     clearEnvironmentCachesCommand,
@@ -206,6 +207,7 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
         projectCreators.registerPythonProjectCreator(new ExistingProjects(projectManager)),
         projectCreators.registerPythonProjectCreator(new AutoFindProjects(projectManager, envManagers)),
         projectCreators.registerPythonProjectCreator(new NewPackageProject(envManagers, projectManager)),
+        projectCreators.registerPythonProjectCreator(new NewFastApiProject(envManagers, projectManager)),
         projectCreators.registerPythonProjectCreator(new NewScriptProject(projectManager)),
     );
 
@@ -587,13 +589,8 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
                         throw new Error('Project type, name, and path are required for quick create.');
                     }
                     const creators = projectCreators.getProjectCreators();
-                    let selected: PythonProjectCreator | undefined;
-                    if (projectType === 'python-package') {
-                        selected = creators.find((c) => c.name === 'newPackage');
-                    }
-                    if (projectType === 'python-script') {
-                        selected = creators.find((c) => c.name === 'newScript');
-                    }
+                    const creatorName = creatorNameForQuickCreateProjectType(projectType);
+                    const selected = creatorName ? creators.find((creator) => creator.name === creatorName) : undefined;
                     if (!selected) {
                         throw new Error(`Project creator for type "${projectType}" not found.`);
                     }
