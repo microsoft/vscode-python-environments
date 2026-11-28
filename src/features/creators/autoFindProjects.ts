@@ -4,13 +4,17 @@ import { PythonProject, PythonProjectCreator, PythonProjectCreatorOptions } from
 import { ProjectCreatorString } from '../../common/localize';
 import { traceInfo, traceWarn } from '../../common/logging';
 import { showErrorMessage, showQuickPickWithButtons, showWarningMessage } from '../../common/window.apis';
-import { findFiles, getWorkspaceFolders } from '../../common/workspace.apis';
+import { getWorkspaceFolders } from '../../common/workspace.apis';
+import { findFilesInWorkspace, getHomeWorkspaceFolders } from '../../common/workspaceSearch';
 import type { EnvironmentManagers } from '../envManagers';
-import {
-    PythonProjectManager,
-    PythonProjectsImpl,
-} from '../projectManager';
+import { PythonProjectManager, PythonProjectsImpl } from '../projectManager';
 import { isSameOrParentPath, normalizePath } from '../../common/utils/pathUtils';
+
+/**
+ * The most project marker files the search returns. Each folder with a marker becomes one item in
+ * a multi-select picker, and a picker with a thousand items is already too long to use.
+ */
+const MAX_PROJECT_MARKERS = 1_000;
 
 function getUniqueUri(uris: Uri[]): {
     label: string;
@@ -33,6 +37,18 @@ function getUniqueUri(uris: Uri[]): {
             uri: Uri.file(dir),
         }))
         .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/**
+ * Returns the message for a search that found no project. When the search skipped a workspace
+ * folder because it is the home folder, the message names the folder and says to open the project
+ * folder, because no project there was looked for.
+ */
+function noProjectsFoundMessage(): string {
+    const skipped = getHomeWorkspaceFolders().map((folder) => folder.uri.fsPath);
+    return skipped.length > 0
+        ? ProjectCreatorString.noProjectsFoundInHomeFolder(skipped.join(', '))
+        : ProjectCreatorString.noProjectsFound;
 }
 
 async function pickProjects(uris: Uri[]): Promise<Uri[] | undefined> {
@@ -91,9 +107,14 @@ export class AutoFindProjects implements PythonProjectCreator {
     }
 
     async create(_options?: PythonProjectCreatorOptions): Promise<PythonProject | PythonProject[] | undefined> {
-        const found = await findFiles('**/{pyproject.toml,setup.py}', '**/.venv/**');
+        const found = await findFilesInWorkspace({
+            label: 'Auto Find',
+            include: '**/{pyproject.toml,setup.py}',
+            exclude: '**/.venv/**',
+            maxResults: MAX_PROJECT_MARKERS,
+        });
         // Exclude markers inside selected environments (e.g. installed packages in a custom-named venv).
-        const folders = found && found.length > 0 ? getWorkspaceFolders() ?? [] : [];
+        const folders = found && found.length > 0 ? (getWorkspaceFolders() ?? []) : [];
         const prefixes = await this.getSelectedEnvironmentPrefixes(folders);
         const files = found?.filter(
             (uri) =>
@@ -108,8 +129,9 @@ export class AutoFindProjects implements PythonProjectCreator {
                 ),
         );
         if (!files || files.length === 0) {
+            const message = noProjectsFoundMessage();
             setImmediate(() => {
-                showErrorMessage('No projects found');
+                showErrorMessage(message);
             });
             return;
         }
