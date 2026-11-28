@@ -33,4 +33,13 @@ suite('getLatest', () => {
 
         assert.strictEqual(getLatest([older, errored]), older);
     });
+
+    test('returns the newest environment even when the first candidate has no version', () => {
+        const versions = ['', '3.13.13', '3.14.7'];
+        const environments = versions.map((version, index) =>
+            createMockPythonEnvironment({ envPath: path.join('python', String(index)), version }),
+        );
+
+        assert.strictEqual(getLatest(environments), environments[2]);
+    });
 });
