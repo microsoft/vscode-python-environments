@@ -78,6 +78,7 @@ import { registerInlineScriptUx } from './features/inlineScript/setupEnvironment
 import {
     applyInitialEnvironmentSelection,
     registerInterpreterSettingsChangeListener,
+    registerLateManagerRegistrationListener,
 } from './features/interpreterSelection';
 import type { PythonProjectManager } from './features/projectManager';
 import { PythonProjectManagerImpl } from './features/projectManager';
@@ -776,6 +777,10 @@ export async function activate(context: ExtensionContext): Promise<PythonEnviron
 
             failureStage = 'envSelection';
             stageWatch.reset();
+            // Before startup selection, so managers that register while it runs are still picked up.
+            context.subscriptions.push(
+                registerLateManagerRegistrationListener(envManagers, projectManager, nativeFinder, api),
+            );
             await applyInitialEnvironmentSelection(
                 envManagers,
                 projectManager,
